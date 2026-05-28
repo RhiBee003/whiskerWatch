@@ -15,7 +15,7 @@
         <a href="/">HOME</a>
         <a href="/#features">FEATURES</a>
         <a href="/login">LOG IN</a>
-        <a href="/#contact">CONTACT</a>
+        <a href="/contact">CONTACT</a>
       </nav>
     </header>
 
@@ -23,17 +23,27 @@
       <section class="login-card" aria-labelledby="login-title">
         <h1 id="login-title">Log In to WhiskerWatch</h1>
         <p>Track your cat's needs, earn paw points, and manage your virtual pet.</p>
+        {{SIGNUP_SUCCESS_BLOCK}}
+        {{LOGIN_ERROR_BLOCK}}
 
-        <form class="login-form" action="#" method="post">
+        <form class="login-form" action="/login" method="post">
           <label for="email">Email</label>
-          <input id="email" name="email" type="email" placeholder="you@example.com" required />
+          <input id="email" name="email" type="email" placeholder="demo@whiskerwatch.app" required />
 
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" placeholder="Enter your password" required />
+          <input id="password" name="password" type="password" placeholder="meow123" required />
 
           <button type="submit" class="download-btn login-submit">Log In</button>
         </form>
+
+        <p class="auth-footer">New here?</p>
+        <a href="/signup" class="download-btn auth-link-btn">Sign Up</a>
       </section>
     </main>
+    <script>
+      if (window.location.search) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    </script>
   </body>
 </html>

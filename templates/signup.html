@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhiskerWatch Sign Up</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+      </div>
+      <nav>
+        <a href="/">HOME</a>
+        <a href="/#features">FEATURES</a>
+        <a href="/login">LOG IN</a>
+        <a href="/contact">CONTACT</a>
+      </nav>
+    </header>
+
+    <main class="section login-page">
+      <section class="login-card" aria-labelledby="signup-title">
+        <h1 id="signup-title">Sign Up for WhiskerWatch</h1>
+        <p>Create an account to track your cat's needs and earn paw points.</p>
+        {{SIGNUP_INFO_BLOCK}}
+        {{SIGNUP_ERROR_BLOCK}}
+
+        <form class="login-form" action="/signup" method="post">
+          <label for="signup-name">Name</label>
+          <input id="signup-name" name="name" type="text" placeholder="Your name" required />
+
+          <label for="signup-email">Email</label>
+          <input
+            id="signup-email"
+            name="email"
+            type="email"
+            placeholder="you@example.com"
+            value="{{SIGNUP_EMAIL}}"
+            required
+          />
+
+          <label for="signup-password">Password</label>
+          <input id="signup-password" name="password" type="password" placeholder="Choose a password" required />
+
+          <button type="submit" class="download-btn login-submit">Sign Up</button>
+        </form>
+
+        <p class="auth-footer">Already have an account?</p>
+        <a href="/login" class="download-btn auth-link-btn">Log In</a>
+      </section>
+    </main>
+    <script>
+      if (window.location.search) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    </script>
+  </body>
+</html>

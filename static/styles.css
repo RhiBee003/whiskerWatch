@@ -190,6 +190,25 @@ img {
   color: var(--muted);
 }
 
+.auth-hint {
+  margin: 0.2rem 0 0.3rem;
+  font-size: 0.95rem;
+}
+
+.auth-error {
+  min-height: 1.2rem;
+  margin: 0 0 0.6rem;
+  color: #8a244f;
+  font-weight: 700;
+}
+
+.auth-success {
+  min-height: 1.2rem;
+  margin: 0 0 0.6rem;
+  color: #2f6b3f;
+  font-weight: 700;
+}
+
 .login-form {
   display: grid;
   gap: 0.55rem;
@@ -214,9 +233,51 @@ img {
   border-color: #d69ac0;
 }
 
+.contact-form textarea {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border-radius: 11px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: #fff7fb;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.contact-form textarea:focus {
+  outline: 2px solid #d69ac0;
+  border-color: #d69ac0;
+}
+
 .login-submit {
   margin-top: 0.8rem;
   cursor: pointer;
+}
+
+.auth-divider {
+  margin: 1.6rem 0 1rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.14);
+  font-weight: 800;
+  text-align: center;
+}
+
+.auth-footer {
+  margin: 1.4rem 0 0.6rem;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.auth-link-btn {
+  display: block;
+  text-align: center;
+  margin: 0;
+}
+
+.signup-heading {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
 }
 
 footer {
