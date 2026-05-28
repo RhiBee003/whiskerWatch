@@ -30,9 +30,35 @@ body {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.brand-logo {
+  width: auto;
+  height: 2.1rem;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.logo-mark {
+  width: 1.95rem;
+  height: 1.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.55rem;
+  font-size: 1.2rem;
+  border: 2px solid #211a23;
+  background: #f3d3e3;
+}
+
+.logo-text {
   font-size: 2rem;
   font-weight: 900;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
 }
 
 nav {
@@ -52,10 +78,7 @@ nav a {
 }
 
 .hero {
-  display: grid;
-  gap: 1.8rem;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
+  display: block;
   padding-top: 2.2rem;
 }
 
@@ -83,6 +106,13 @@ nav a {
   text-decoration: none;
   font-weight: 800;
   box-shadow: 0 5px 12px rgba(0, 0, 0, 0.14);
+  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.download-btn:hover {
+  background: #e8c5da;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 14px rgba(0, 0, 0, 0.16);
 }
 
 img {
@@ -114,10 +144,7 @@ img {
 }
 
 .cta {
-  display: grid;
-  gap: 1.5rem;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
+  display: block;
   margin: 2.5rem auto 3.2rem;
 }
 
@@ -137,10 +164,70 @@ img {
   color: var(--muted);
 }
 
+.login-page {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 90px);
+  padding: 2.5rem 0 3.5rem;
+}
+
+.login-card {
+  width: min(560px, 95vw);
+  background: var(--pink-card);
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 20px;
+  padding: 1.5rem 1.4rem;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.login-card h1 {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.7rem, 4vw, 2.35rem);
+}
+
+.login-card p {
+  margin-top: 0;
+  color: var(--muted);
+}
+
+.login-form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.login-form label {
+  margin-top: 0.35rem;
+  font-weight: 700;
+}
+
+.login-form input {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border-radius: 11px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: #fff7fb;
+  font-size: 1rem;
+}
+
+.login-form input:focus {
+  outline: 2px solid #d69ac0;
+  border-color: #d69ac0;
+}
+
+.login-submit {
+  margin-top: 0.8rem;
+  cursor: pointer;
+}
+
 footer {
   padding: 2.5rem 3rem 3.2rem;
   background: var(--footer);
   color: #fff;
+}
+
+footer .logo-mark {
+  border-color: #fff;
+  background: #f0bfd8;
 }
 
 footer p {
@@ -150,11 +237,6 @@ footer p {
 }
 
 @media (max-width: 900px) {
-  .hero,
-  .cta {
-    grid-template-columns: 1fr;
-  }
-
   .topbar {
     flex-direction: column;
     gap: 0.8rem;
@@ -162,7 +244,21 @@ footer p {
   }
 
   .brand {
+    gap: 0.4rem;
+  }
+
+  .brand-logo {
+    height: 1.8rem;
+  }
+
+  .logo-text {
     font-size: 1.6rem;
+  }
+
+  .logo-mark {
+    width: 1.65rem;
+    height: 1.65rem;
+    font-size: 1rem;
   }
 
   nav {
