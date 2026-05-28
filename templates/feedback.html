@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhiskerWatch Feedback</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+      </div>
+      <nav>
+        <a href="/">HOME</a>
+        <a href="/#features">FEATURES</a>
+        <a href="/login">LOG IN</a>
+        <a href="/feedback">FEEDBACK</a>
+        <a href="/contact">CONTACT</a>
+      </nav>
+    </header>
+
+    <main class="section login-page">
+      <section class="login-card" aria-labelledby="feedback-title">
+        <h1 id="feedback-title">Share Feedback</h1>
+        <p>Tell us what to fix, what to improve, or share a new idea for WhiskerWatch.</p>
+        {{FEEDBACK_SUCCESS_BLOCK}}
+        {{FEEDBACK_ERROR_BLOCK}}
+
+        <form class="login-form contact-form" action="/feedback" method="post">
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" placeholder="Your name" required />
+
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="you@example.com" required />
+
+          <label for="category">Type</label>
+          <select id="category" name="category" required>
+            <option value="">Choose one...</option>
+            <option value="fix">Something to fix</option>
+            <option value="idea">New idea</option>
+            <option value="bug">Bug report</option>
+          </select>
+
+          <label for="message">Details</label>
+          <textarea
+            id="message"
+            name="message"
+            rows="5"
+            placeholder="What should we change or add?"
+            required
+          ></textarea>
+
+          <button type="submit" class="download-btn login-submit">Send Feedback</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

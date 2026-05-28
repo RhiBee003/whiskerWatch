@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: whiskerwatch
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: ADMIN_EMAIL
+        value: rhibee003@gmail.com
+      - key: ADMIN_PASSWORD
+        generateValue: true

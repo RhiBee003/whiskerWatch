@@ -15,6 +15,7 @@
         <a href="/">HOME</a>
         <a href="/#features">FEATURES</a>
         <a href="/login">LOG IN</a>
+        <a href="/feedback">FEEDBACK</a>
         <a href="/contact">CONTACT</a>
       </nav>
     </header>
@@ -23,8 +24,8 @@
       <section class="login-card" aria-labelledby="contact-title">
         <h1 id="contact-title">Contact WhiskerWatch</h1>
         <p>Questions about alerts, paw points, or your virtual pet? Send us a message.</p>
-        <p class="auth-success" role="status">{{CONTACT_SUCCESS}}</p>
-        <p class="auth-error" role="alert">{{CONTACT_ERROR}}</p>
+        {{CONTACT_SUCCESS_BLOCK}}
+        {{CONTACT_ERROR_BLOCK}}
 
         <form class="login-form contact-form" action="/contact" method="post">
           <label for="name">Name</label>

@@ -233,6 +233,20 @@ img {
   border-color: #d69ac0;
 }
 
+.login-form select {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border-radius: 11px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: #fff7fb;
+  font-size: 1rem;
+}
+
+.login-form select:focus {
+  outline: 2px solid #d69ac0;
+  border-color: #d69ac0;
+}
+
 .contact-form textarea {
   width: 100%;
   padding: 0.8rem 0.9rem;
@@ -278,6 +292,69 @@ img {
 .signup-heading {
   margin: 0 0 0.6rem;
   font-size: clamp(1.35rem, 3vw, 1.8rem);
+}
+
+.admin-page {
+  padding: 2rem 0 3rem;
+}
+
+.admin-page h1 {
+  margin: 0 0 0.4rem;
+}
+
+.admin-page > p {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+.admin-panel {
+  margin-top: 1.8rem;
+  background: var(--pink-card);
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 18px;
+  padding: 1.2rem;
+  overflow-x: auto;
+}
+
+.admin-panel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.35rem;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0.65rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  font-weight: 800;
+}
+
+.admin-table td:nth-child(4) {
+  min-width: 220px;
+}
+
+.admin-logout-form {
+  margin: 0;
+}
+
+.admin-logout-btn {
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
 }
 
 footer {
