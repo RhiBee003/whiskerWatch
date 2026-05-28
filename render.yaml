@@ -1,9 +1,10 @@
 services:
   - type: web
     name: whiskerwatch
-    runtime: docker
+    runtime: rust
     plan: free
-    dockerfilePath: ./Dockerfile
+    buildCommand: cargo build --release
+    startCommand: ./target/release/whiskerWatchWeb
     envVars:
       - key: PORT
         value: 8080
