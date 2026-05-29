@@ -382,7 +382,7 @@ fn default_profile(email: &str) -> UserProfile {
             UserTask {
                 id: "litter_check".to_string(),
                 title: "Refresh litter box".to_string(),
-                completed: true,
+                completed: false,
                 due_label: "Yesterday".to_string(),
                 reward: 10,
             },
