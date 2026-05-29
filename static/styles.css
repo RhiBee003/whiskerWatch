@@ -223,7 +223,7 @@ img {
   font-weight: 700;
 }
 
-.login-form input {
+.login-form input:not([type="radio"]):not([type="checkbox"]) {
   width: 100%;
   padding: 0.8rem 0.9rem;
   border-radius: 11px;
@@ -963,19 +963,53 @@ footer p {
   border: 0;
 }
 
+.indoor-outdoor-fieldset {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 0.75rem;
+  align-items: stretch;
+}
+
 .indoor-outdoor-fieldset legend,
 .vaccine-history-fieldset legend {
   font-weight: 800;
   margin-bottom: 0.45rem;
 }
 
+.indoor-outdoor-fieldset legend {
+  grid-column: 1 / -1;
+}
+
 .radio-pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin-right: 0.75rem;
+  gap: 0.5rem;
+  margin: 0;
   font-weight: 700;
   cursor: pointer;
+}
+
+.radio-pill input[type="radio"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--pink-accent);
+}
+
+@media (max-width: 480px) {
+  .indoor-outdoor-fieldset {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .radio-pill {
+    padding: 0.55rem 0.7rem;
+    border-radius: 12px;
+    background: var(--pink-input);
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    min-height: 2.75rem;
+  }
 }
 
 .vaccine-rows {
