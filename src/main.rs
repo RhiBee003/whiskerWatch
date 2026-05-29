@@ -892,6 +892,8 @@ async fn paw_points_buy(
         "100" => 100,
         "250" => 250,
         "500" => 500,
+        "1000" => 1000,
+        "5000" => 5000,
         _ => return Redirect::to("/home?tab=account&status=points_invalid"),
     };
 
