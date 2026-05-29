@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhiskerWatch — My Home</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, {{USER_NAME}}!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home">HOME</a>
+        <a href="/feedback">FEEDBACK</a>
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <div class="dashboard-shell section">
+      {{STATUS_BLOCK}}
+
+      <div class="dashboard-stats">
+        <div class="stat-chip">
+          <span class="stat-label">Paw Points</span>
+          <span class="stat-value">{{PAW_POINTS}}</span>
+        </div>
+        <div class="stat-chip">
+          <span class="stat-label">Parent Level</span>
+          <span class="stat-value">Level {{PARENT_LEVEL}}</span>
+        </div>
+      </div>
+
+      <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
+        <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true">My Pet</button>
+        <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false">Paw Points</button>
+        <button type="button" class="dashboard-tab" data-tab="outfits" role="tab" aria-selected="false">Outfits</button>
+        <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
+        <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
+        <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
+      </nav>
+
+      <main class="dashboard-panels">
+        <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
+          <div class="pet-showcase">
+            <div class="pet-avatar" aria-hidden="true">{{PET_EMOJI}}</div>
+            <div class="pet-details">
+              <h1>{{PET_NAME}}</h1>
+              <p class="pet-meta">{{PET_BREED}} · Mood: {{PET_MOOD}}</p>
+              <p class="pet-outfit">Wearing: <strong>{{EQUIPPED_OUTFIT}}</strong></p>
+              <p class="pet-blurb">
+                {{PET_NAME}} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section id="panel-points" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Paw Points &amp; Parent Level</h1>
+          <div class="points-grid">
+            <article class="dashboard-card">
+              <h2>Your Balance</h2>
+              <p class="points-big">{{PAW_POINTS}} paw points</p>
+              <p>Earn more by completing care tasks for your real cat.</p>
+            </article>
+            <article class="dashboard-card">
+              <h2>Parent Level {{PARENT_LEVEL}}</h2>
+              <div class="level-bar" aria-hidden="true">
+                <span class="level-fill" style="width: {{LEVEL_PROGRESS}}%"></span>
+              </div>
+              <p>{{LEVEL_PROGRESS_TEXT}}</p>
+            </article>
+          </div>
+          <article class="dashboard-card">
+            <h2>Recent Activity</h2>
+            <ul class="activity-list">
+              {{ACTIVITY_LIST}}
+            </ul>
+          </article>
+        </section>
+
+        <section id="panel-outfits" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Outfit Shop</h1>
+          <p class="panel-intro">Spend paw points on cute looks for {{PET_NAME}}.</p>
+          <div class="outfit-grid">
+            {{OUTFIT_CARDS}}
+          </div>
+        </section>
+
+        <section id="panel-account" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Account</h1>
+          <div class="account-grid">
+            <article class="dashboard-card">
+              <h2>Profile</h2>
+              <dl class="account-dl">
+                <dt>Name</dt>
+                <dd>{{USER_NAME}}</dd>
+                <dt>Email</dt>
+                <dd>{{USER_EMAIL}}</dd>
+                <dt>Member since</dt>
+                <dd>{{MEMBER_SINCE}}</dd>
+              </dl>
+            </article>
+            <article class="dashboard-card">
+              <h2>Buy Paw Points</h2>
+              <p>Add points instantly with your card (demo checkout).</p>
+              <form class="login-form buy-points-form" action="/home/paw-points/buy" method="post">
+                <label for="package">Point package</label>
+                <select id="package" name="package" required>
+                  <option value="100">100 points — $4.99</option>
+                  <option value="250">250 points — $9.99</option>
+                  <option value="500">500 points — $17.99</option>
+                </select>
+
+                <label for="card_name">Name on card</label>
+                <input id="card_name" name="card_name" type="text" placeholder="Alex Parent" required />
+
+                <label for="card_number">Card number</label>
+                <input id="card_number" name="card_number" type="text" inputmode="numeric" placeholder="4242 4242 4242 4242" required />
+
+                <div class="card-row">
+                  <div>
+                    <label for="card_expiry">Expiry</label>
+                    <input id="card_expiry" name="card_expiry" type="text" placeholder="MM/YY" required />
+                  </div>
+                  <div>
+                    <label for="card_cvv">CVV</label>
+                    <input id="card_cvv" name="card_cvv" type="text" inputmode="numeric" placeholder="123" required />
+                  </div>
+                </div>
+
+                <button type="submit" class="download-btn login-submit">Purchase paw points</button>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section id="panel-tasks" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Care Tasks</h1>
+          <p class="panel-intro">Complete tasks to earn paw points and level up as a cat parent.</p>
+          <ul class="task-list">
+            {{TASK_LIST}}
+          </ul>
+        </section>
+
+        <section id="panel-calendar" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Calendar</h1>
+          <p class="panel-intro">{{CALENDAR_MONTH_LABEL}}</p>
+          <div class="calendar-layout">
+            <div class="calendar-grid" aria-label="Month calendar">
+              {{CALENDAR_GRID}}
+            </div>
+            <article class="dashboard-card calendar-events">
+              <h2>Upcoming</h2>
+              <ul class="event-list">
+                {{EVENT_LIST}}
+              </ul>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/dashboard.js"></script>
+  </body>
+</html>

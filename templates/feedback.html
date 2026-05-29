@@ -29,10 +29,10 @@
 
         <form class="login-form contact-form" action="/feedback" method="post">
           <label for="name">Name</label>
-          <input id="name" name="name" type="text" placeholder="Your name" required />
+          <input id="name" name="name" type="text" placeholder="Your name" value="{{FORM_NAME}}" required />
 
           <label for="email">Email</label>
-          <input id="email" name="email" type="email" placeholder="you@example.com" required />
+          <input id="email" name="email" type="email" placeholder="you@example.com" value="{{FORM_EMAIL}}" required />
 
           <label for="category">Type</label>
           <select id="category" name="category" required>

@@ -8,7 +8,7 @@ use axum::{
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
@@ -18,10 +18,12 @@ use tower_http::services::ServeDir;
 use uuid::Uuid;
 
 const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
+const USER_SESSION_COOKIE: &str = "ww_user_session";
 
 #[derive(Clone)]
 struct AppState {
     admin_sessions: Arc<Mutex<HashSet<String>>>,
+    user_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +63,108 @@ struct User {
     email: String,
     password: String,
     created_at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct UserTask {
+    id: String,
+    title: String,
+    completed: bool,
+    due_label: String,
+    reward: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CalendarEvent {
+    day: u32,
+    title: String,
+    time_label: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ProfileActivity {
+    message: String,
+    timestamp: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct UserProfile {
+    email: String,
+    paw_points: u32,
+    parent_level: u32,
+    parent_xp: u32,
+    pet_name: String,
+    pet_breed: String,
+    pet_mood: String,
+    pet_emoji: String,
+    equipped_outfit: String,
+    owned_outfits: Vec<String>,
+    tasks: Vec<UserTask>,
+    calendar_events: Vec<CalendarEvent>,
+    activity: Vec<ProfileActivity>,
+}
+
+struct OutfitCatalogItem {
+    id: &'static str,
+    name: &'static str,
+    emoji: &'static str,
+    price: u32,
+}
+
+const OUTFIT_CATALOG: [OutfitCatalogItem; 4] = [
+    OutfitCatalogItem {
+        id: "cozy_sweater",
+        name: "Cozy Sweater",
+        emoji: "🧶",
+        price: 50,
+    },
+    OutfitCatalogItem {
+        id: "party_bow",
+        name: "Party Bow Tie",
+        emoji: "🎀",
+        price: 75,
+    },
+    OutfitCatalogItem {
+        id: "space_helmet",
+        name: "Space Helmet",
+        emoji: "🪐",
+        price: 120,
+    },
+    OutfitCatalogItem {
+        id: "rainbow_scarf",
+        name: "Rainbow Scarf",
+        emoji: "🌈",
+        price: 90,
+    },
+];
+
+#[derive(Deserialize, Default)]
+struct DashboardQuery {
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OutfitBuyForm {
+    outfit_id: String,
+}
+
+#[derive(Deserialize)]
+struct OutfitEquipForm {
+    outfit_id: String,
+}
+
+#[derive(Deserialize)]
+struct TaskToggleForm {
+    task_id: String,
+}
+
+#[derive(Deserialize)]
+struct PawPointsBuyForm {
+    package: String,
+    card_name: String,
+    card_number: String,
+    card_expiry: String,
+    card_cvv: String,
 }
 
 #[derive(Deserialize)]
@@ -201,7 +305,215 @@ fn clear_admin_session(state: &AppState, jar: CookieJar) -> CookieJar {
     jar.remove(Cookie::from(ADMIN_SESSION_COOKIE))
 }
 
-async fn index_page() -> impl IntoResponse {
+fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
+    let cookie = jar.get(USER_SESSION_COOKIE)?;
+    state
+        .user_sessions
+        .lock()
+        .expect("user session lock")
+        .get(cookie.value())
+        .cloned()
+}
+
+async fn user_name_for_email(email: &str) -> Option<String> {
+    load_users()
+        .await
+        .into_iter()
+        .find(|user| user.email.eq_ignore_ascii_case(email))
+        .map(|user| user.name)
+}
+
+async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
+    let Some(email) = user_session_email(state, jar) else {
+        return (String::new(), String::new());
+    };
+
+    let form_email = escape_html_attr(&email);
+    let form_name = user_name_for_email(&email)
+        .await
+        .map(|name| escape_html_attr(&name))
+        .unwrap_or_default();
+    (form_name, form_email)
+}
+
+fn clear_user_session(state: &AppState, jar: CookieJar) -> CookieJar {
+    if let Some(cookie) = jar.get(USER_SESSION_COOKIE) {
+        state
+            .user_sessions
+            .lock()
+            .expect("user session lock")
+            .remove(cookie.value());
+    }
+
+    jar.remove(Cookie::from(USER_SESSION_COOKIE))
+}
+
+fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String, Redirect> {
+    user_session_email(state, jar).ok_or_else(|| Redirect::to("/login"))
+}
+
+fn default_profile(email: &str) -> UserProfile {
+    UserProfile {
+        email: email.to_string(),
+        paw_points: 150,
+        parent_level: 2,
+        parent_xp: 40,
+        pet_name: "Mochi".to_string(),
+        pet_breed: "Tabby companion".to_string(),
+        pet_mood: "Playful".to_string(),
+        pet_emoji: "🐱".to_string(),
+        equipped_outfit: "Classic Collar".to_string(),
+        owned_outfits: vec!["classic_collar".to_string()],
+        tasks: vec![
+            UserTask {
+                id: "feed_breakfast".to_string(),
+                title: "Morning feeding".to_string(),
+                completed: false,
+                due_label: "Today · 8:00 AM".to_string(),
+                reward: 15,
+            },
+            UserTask {
+                id: "play_session".to_string(),
+                title: "15-minute play session".to_string(),
+                completed: false,
+                due_label: "Today · 5:30 PM".to_string(),
+                reward: 20,
+            },
+            UserTask {
+                id: "litter_check".to_string(),
+                title: "Refresh litter box".to_string(),
+                completed: true,
+                due_label: "Yesterday".to_string(),
+                reward: 10,
+            },
+            UserTask {
+                id: "water_bowl".to_string(),
+                title: "Refill water bowl".to_string(),
+                completed: false,
+                due_label: "Today · anytime".to_string(),
+                reward: 12,
+            },
+        ],
+        calendar_events: vec![
+            CalendarEvent {
+                day: 29,
+                title: "Vet checkup reminder".to_string(),
+                time_label: "May 29 · 2:00 PM".to_string(),
+            },
+            CalendarEvent {
+                day: 31,
+                title: "Grooming day".to_string(),
+                time_label: "May 31 · 10:00 AM".to_string(),
+            },
+            CalendarEvent {
+                day: 3,
+                title: "New treats delivery".to_string(),
+                time_label: "Jun 3 · afternoon".to_string(),
+            },
+        ],
+        activity: vec![
+            ProfileActivity {
+                message: "Welcome to your WhiskerWatch home!".to_string(),
+                timestamp: timestamp_now(),
+            },
+            ProfileActivity {
+                message: "Earned 10 paw points for litter box care.".to_string(),
+                timestamp: timestamp_now().saturating_sub(86_400),
+            },
+        ],
+    }
+}
+
+async fn load_profiles() -> Vec<UserProfile> {
+    load_json_lines::<UserProfile>("data/user_profiles.jsonl").await
+}
+
+async fn save_profile(profile: &UserProfile) -> Result<(), std::io::Error> {
+    let mut profiles = load_profiles().await;
+    if let Some(existing) = profiles
+        .iter_mut()
+        .find(|item| item.email.eq_ignore_ascii_case(&profile.email))
+    {
+        *existing = profile.clone();
+    } else {
+        profiles.push(profile.clone());
+    }
+
+    fs::create_dir_all("data").await?;
+    let mut lines = String::new();
+    for item in profiles {
+        lines.push_str(&serde_json::to_string(&item).expect("profile should serialize"));
+        lines.push('\n');
+    }
+    fs::write("data/user_profiles.jsonl", lines).await
+}
+
+async fn get_or_create_profile(email: &str) -> UserProfile {
+    if let Some(profile) = load_profiles()
+        .await
+        .into_iter()
+        .find(|item| item.email.eq_ignore_ascii_case(email))
+    {
+        return profile;
+    }
+
+    let profile = default_profile(email);
+    let _ = save_profile(&profile).await;
+    profile
+}
+
+fn push_activity(profile: &mut UserProfile, message: &str) {
+    profile.activity.push(ProfileActivity {
+        message: message.to_string(),
+        timestamp: timestamp_now(),
+    });
+    if profile.activity.len() > 8 {
+        let overflow = profile.activity.len() - 8;
+        profile.activity.drain(0..overflow);
+    }
+}
+
+fn level_progress(profile: &UserProfile) -> (u32, String) {
+    let xp_per_level = 100;
+    let progress = (profile.parent_xp * 100) / xp_per_level;
+    let remaining = xp_per_level.saturating_sub(profile.parent_xp);
+    let text = if remaining == 0 {
+        "Ready to level up! Complete more tasks.".to_string()
+    } else {
+        format!("{remaining} XP to reach level {}.", profile.parent_level + 1)
+    };
+    (progress.min(100), text)
+}
+
+fn outfit_by_id(id: &str) -> Option<&'static OutfitCatalogItem> {
+    OUTFIT_CATALOG.iter().find(|item| item.id == id)
+}
+
+fn create_user_session(state: &AppState, jar: CookieJar, email: &str) -> CookieJar {
+    let session_id = Uuid::new_v4().to_string();
+    state
+        .user_sessions
+        .lock()
+        .expect("user session lock")
+        .insert(session_id.clone(), email.to_string());
+
+    let mut cookie = Cookie::new(USER_SESSION_COOKIE, session_id);
+    cookie.set_http_only(true);
+    cookie.set_path("/");
+    cookie.set_same_site(SameSite::Lax);
+    jar.add(cookie)
+}
+
+fn signed_in_redirect(state: &AppState, jar: CookieJar, email: &str) -> Response {
+    let jar = create_user_session(state, jar, email);
+    (jar, Redirect::to("/home")).into_response()
+}
+
+async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    if user_session_email(&state, &jar).is_some() {
+        return Redirect::to("/home").into_response();
+    }
+
     match fs::read_to_string("static/index.html").await {
         Ok(contents) => Html(contents).into_response(),
         Err(_) => (
@@ -212,7 +524,413 @@ async fn index_page() -> impl IntoResponse {
     }
 }
 
-async fn login_page(Query(query): Query<LoginQuery>) -> impl IntoResponse {
+fn dashboard_status_block(status: Option<&str>) -> String {
+    match status {
+        Some("outfit_bought") => {
+            r#"<p class="auth-success" role="status">Outfit purchased and equipped! Your pet looks adorable.</p>"#
+        }
+        Some("outfit_equipped") => {
+            r#"<p class="auth-success" role="status">Outfit equipped for your pet.</p>"#
+        }
+        Some("outfit_owned") => {
+            r#"<p class="auth-error" role="alert">You already own that outfit.</p>"#
+        }
+        Some("outfit_points") => {
+            r#"<p class="auth-error" role="alert">Not enough paw points for that outfit.</p>"#
+        }
+        Some("outfit_invalid") => {
+            r#"<p class="auth-error" role="alert">That outfit is not available.</p>"#
+        }
+        Some("points_bought") => {
+            r#"<p class="auth-success" role="status">Paw points added! Thanks for your purchase.</p>"#
+        }
+        Some("points_invalid") => {
+            r#"<p class="auth-error" role="alert">Please fill out all card fields to purchase points.</p>"#
+        }
+        Some("task_done") => {
+            r#"<p class="auth-success" role="status">Task completed! Paw points and XP added.</p>"#
+        }
+        Some("task_reopened") => {
+            r#"<p class="auth-success" role="status">Task marked as incomplete.</p>"#
+        }
+        Some("task_invalid") => {
+            r#"<p class="auth-error" role="alert">That task could not be updated.</p>"#
+        }
+        _ => "",
+    }
+    .to_string()
+}
+
+fn render_activity_list(profile: &UserProfile) -> String {
+    if profile.activity.is_empty() {
+        return "<li>No activity yet — complete a task to get started!</li>".to_string();
+    }
+
+    profile
+        .activity
+        .iter()
+        .rev()
+        .take(5)
+        .map(|item| format!("<li>{}</li>", escape_html(&item.message)))
+        .collect()
+}
+
+fn render_outfit_cards(profile: &UserProfile) -> String {
+    OUTFIT_CATALOG
+        .iter()
+        .map(|outfit| {
+            let owned = profile.owned_outfits.iter().any(|id| id == outfit.id);
+            let equipped = profile.equipped_outfit == outfit.name;
+            let mut classes = vec!["outfit-card"];
+            if owned {
+                classes.push("owned");
+            }
+            if equipped {
+                classes.push("equipped");
+            }
+
+            let action = if equipped {
+                r#"<span class="outfit-badge">Currently equipped</span>"#.to_string()
+            } else if owned {
+                format!(
+                    r#"<form action="/home/outfits/equip" method="post"><input type="hidden" name="outfit_id" value="{}" /><button type="submit" class="download-btn outfit-btn">Equip</button></form>"#,
+                    escape_html_attr(outfit.id)
+                )
+            } else {
+                format!(
+                    r#"<form action="/home/outfits/buy" method="post"><input type="hidden" name="outfit_id" value="{}" /><button type="submit" class="download-btn outfit-btn">Buy for {} pts</button></form>"#,
+                    escape_html_attr(outfit.id),
+                    outfit.price
+                )
+            };
+
+            format!(
+                r#"<article class="{}"><div class="outfit-emoji">{}</div><h3>{}</h3><p class="outfit-price">{} paw points</p><div class="outfit-actions">{}</div></article>"#,
+                classes.join(" "),
+                outfit.emoji,
+                escape_html(outfit.name),
+                outfit.price,
+                action
+            )
+        })
+        .collect()
+}
+
+fn render_task_list(profile: &UserProfile) -> String {
+    profile
+        .tasks
+        .iter()
+        .map(|task| {
+            let completed_class = if task.completed { " completed" } else { "" };
+            let button_label = if task.completed {
+                "Mark incomplete"
+            } else {
+                "Complete"
+            };
+            format!(
+                r#"<li class="task-item{completed_class}"><div><p class="task-title">{title}</p><p class="task-due">{due} · +{reward} pts</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="{id}" /><button type="submit" class="download-btn task-toggle-btn">{button_label}</button></form></li>"#,
+                completed_class = completed_class,
+                title = escape_html(&task.title),
+                due = escape_html(&task.due_label),
+                reward = task.reward,
+                id = escape_html_attr(&task.id),
+                button_label = button_label,
+            )
+        })
+        .collect()
+}
+
+fn render_calendar_grid(profile: &UserProfile) -> String {
+    let weekday_labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let mut html = String::new();
+
+    for label in weekday_labels {
+        html.push_str(&format!(r#"<span class="calendar-head">{label}</span>"#));
+    }
+
+    let first_weekday = 5_u32;
+    let days_in_month = 31_u32;
+    let today = 29_u32;
+
+    for _ in 0..first_weekday {
+        html.push_str(r#"<span class="calendar-day empty"></span>"#);
+    }
+
+    let event_days: HashSet<u32> = profile.calendar_events.iter().map(|e| e.day).collect();
+
+    for day in 1..=days_in_month {
+        let mut classes = vec!["calendar-day"];
+        if day == today {
+            classes.push("today");
+        }
+        if event_days.contains(&day) {
+            classes.push("has-event");
+        }
+        html.push_str(&format!(
+            r#"<span class="{}" aria-label="May {}">{day}</span>"#,
+            classes.join(" "),
+            day
+        ));
+    }
+
+    html
+}
+
+fn render_event_list(profile: &UserProfile) -> String {
+    if profile.calendar_events.is_empty() {
+        return "<li>No upcoming events yet.</li>".to_string();
+    }
+
+    profile
+        .calendar_events
+        .iter()
+        .map(|event| {
+            format!(
+                "<li><strong>{}</strong> — {}</li>",
+                escape_html(&event.time_label),
+                escape_html(&event.title)
+            )
+        })
+        .collect()
+}
+
+async fn member_since_label(email: &str) -> String {
+    load_users()
+        .await
+        .into_iter()
+        .find(|user| user.email.eq_ignore_ascii_case(email))
+        .map(|user| format_timestamp(user.created_at))
+        .unwrap_or_else(|| "Recently joined".to_string())
+}
+
+async fn dashboard_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<DashboardQuery>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let profile = get_or_create_profile(&email).await;
+    let user_name = user_name_for_email(&email)
+        .await
+        .unwrap_or_else(|| "Parent".to_string());
+    let (level_progress_pct, level_progress_text) = level_progress(&profile);
+
+    let template = match fs::read_to_string("templates/dashboard.html").await {
+        Ok(contents) => contents,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not load dashboard".to_string(),
+            )
+                .into_response()
+        }
+    };
+
+    let body = template
+        .replace("{{USER_NAME}}", &escape_html(&user_name))
+        .replace("{{USER_EMAIL}}", &escape_html(&email))
+        .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&email).await))
+        .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
+        .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
+        .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
+        .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
+        .replace("{{PET_NAME}}", &escape_html(&profile.pet_name))
+        .replace("{{PET_BREED}}", &escape_html(&profile.pet_breed))
+        .replace("{{PET_MOOD}}", &escape_html(&profile.pet_mood))
+        .replace("{{PET_EMOJI}}", &profile.pet_emoji)
+        .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
+        .replace("{{STATUS_BLOCK}}", &dashboard_status_block(query.status.as_deref()))
+        .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
+        .replace("{{OUTFIT_CARDS}}", &render_outfit_cards(&profile))
+        .replace("{{TASK_LIST}}", &render_task_list(&profile))
+        .replace("{{CALENDAR_GRID}}", &render_calendar_grid(&profile))
+        .replace("{{EVENT_LIST}}", &render_event_list(&profile))
+        .replace("{{CALENDAR_MONTH_LABEL}}", "May 2026 — your cat care schedule");
+
+    Html(body).into_response()
+}
+
+async fn outfit_buy(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<OutfitBuyForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let Some(outfit) = outfit_by_id(form.outfit_id.trim()) else {
+        return Redirect::to("/home?tab=outfits&status=outfit_invalid");
+    };
+
+    let mut profile = get_or_create_profile(&email).await;
+
+    if profile.owned_outfits.iter().any(|id| id == outfit.id) {
+        return Redirect::to("/home?tab=outfits&status=outfit_owned");
+    }
+
+    if profile.paw_points < outfit.price {
+        return Redirect::to("/home?tab=outfits&status=outfit_points");
+    }
+
+    profile.paw_points -= outfit.price;
+    profile.owned_outfits.push(outfit.id.to_string());
+    profile.equipped_outfit = outfit.name.to_string();
+    push_activity(
+        &mut profile,
+        &format!("Purchased {} for {} paw points.", outfit.name, outfit.price),
+    );
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?tab=outfits&status=outfit_bought"),
+        Err(_) => Redirect::to("/home?tab=outfits&status=outfit_invalid"),
+    }
+}
+
+async fn outfit_equip(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<OutfitEquipForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let Some(outfit) = outfit_by_id(form.outfit_id.trim()) else {
+        return Redirect::to("/home?tab=outfits&status=outfit_invalid");
+    };
+
+    let mut profile = get_or_create_profile(&email).await;
+
+    if !profile.owned_outfits.iter().any(|id| id == outfit.id) {
+        return Redirect::to("/home?tab=outfits&status=outfit_invalid");
+    }
+
+    profile.equipped_outfit = outfit.name.to_string();
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Equipped {} on {}.", outfit.name, pet_name),
+    );
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?tab=outfits&status=outfit_equipped"),
+        Err(_) => Redirect::to("/home?tab=outfits&status=outfit_invalid"),
+    }
+}
+
+async fn task_toggle(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<TaskToggleForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut profile = get_or_create_profile(&email).await;
+    let task_id = form.task_id.trim();
+
+    let Some(index) = profile.tasks.iter().position(|task| task.id == task_id) else {
+        return Redirect::to("/home?tab=tasks&status=task_invalid");
+    };
+
+    if profile.tasks[index].completed {
+        let title = profile.tasks[index].title.clone();
+        profile.tasks[index].completed = false;
+        push_activity(&mut profile, &format!("Reopened task: {title}."));
+        return match save_profile(&profile).await {
+            Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened"),
+            Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+        };
+    }
+
+    let reward = profile.tasks[index].reward;
+    let title = profile.tasks[index].title.clone();
+    profile.tasks[index].completed = true;
+    profile.paw_points += reward;
+    profile.parent_xp += reward / 2;
+    if profile.parent_xp >= 100 {
+        profile.parent_xp -= 100;
+        profile.parent_level += 1;
+        let new_level = profile.parent_level;
+        push_activity(
+            &mut profile,
+            &format!("Leveled up to Parent Level {new_level}!"),
+        );
+    }
+    push_activity(
+        &mut profile,
+        &format!("Completed \"{title}\" and earned {reward} paw points."),
+    );
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?tab=tasks&status=task_done"),
+        Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+    }
+}
+
+async fn paw_points_buy(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<PawPointsBuyForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let card_name = form.card_name.trim();
+    let card_number = form.card_number.trim();
+    let card_expiry = form.card_expiry.trim();
+    let card_cvv = form.card_cvv.trim();
+
+    if card_name.is_empty() || card_number.is_empty() || card_expiry.is_empty() || card_cvv.is_empty()
+    {
+        return Redirect::to("/home?tab=account&status=points_invalid");
+    }
+
+    let points: u32 = match form.package.trim() {
+        "100" => 100,
+        "250" => 250,
+        "500" => 500,
+        _ => return Redirect::to("/home?tab=account&status=points_invalid"),
+    };
+
+    let mut profile = get_or_create_profile(&email).await;
+    profile.paw_points += points;
+    push_activity(
+        &mut profile,
+        &format!("Purchased {points} paw points with card ending {}.", &card_number[card_number.len().saturating_sub(4)..]),
+    );
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?tab=account&status=points_bought"),
+        Err(_) => Redirect::to("/home?tab=account&status=points_invalid"),
+    }
+}
+
+async fn user_logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let jar = clear_user_session(&state, jar);
+    (jar, Redirect::to("/")).into_response()
+}
+
+async fn login_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<LoginQuery>,
+) -> impl IntoResponse {
+    if user_session_email(&state, &jar).is_some() {
+        return Redirect::to("/home").into_response();
+    }
+
     match fs::read_to_string("templates/login.html").await {
         Ok(contents) => {
             let login_error_block = match query.error.as_deref() {
@@ -241,7 +959,15 @@ async fn login_page(Query(query): Query<LoginQuery>) -> impl IntoResponse {
     }
 }
 
-async fn signup_page(Query(query): Query<SignupQuery>) -> impl IntoResponse {
+async fn signup_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<SignupQuery>,
+) -> impl IntoResponse {
+    if user_session_email(&state, &jar).is_some() {
+        return Redirect::to("/home").into_response();
+    }
+
     match fs::read_to_string("templates/signup.html").await {
         Ok(contents) => {
             let signup_error_block = match query.error.as_deref() {
@@ -277,9 +1003,14 @@ async fn signup_page(Query(query): Query<SignupQuery>) -> impl IntoResponse {
     }
 }
 
-async fn contact_page(Query(query): Query<ContactQuery>) -> impl IntoResponse {
+async fn contact_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<ContactQuery>,
+) -> impl IntoResponse {
     match fs::read_to_string("templates/contact.html").await {
         Ok(contents) => {
+            let (form_name, form_email) = form_prefill(&state, &jar).await;
             let contact_success_block = match query.status.as_deref() {
                 Some("sent") => {
                     r#"<p class="auth-success" role="status">Thanks! Your message was received. We will get back to you soon.</p>"#
@@ -295,9 +1026,13 @@ async fn contact_page(Query(query): Query<ContactQuery>) -> impl IntoResponse {
                 }
                 _ => "",
             };
+            let contact_email = escape_html(&admin_email());
             let body = contents
                 .replace("{{CONTACT_SUCCESS_BLOCK}}", contact_success_block)
-                .replace("{{CONTACT_ERROR_BLOCK}}", contact_error_block);
+                .replace("{{CONTACT_ERROR_BLOCK}}", contact_error_block)
+                .replace("{{CONTACT_EMAIL}}", &contact_email)
+                .replace("{{FORM_NAME}}", &form_name)
+                .replace("{{FORM_EMAIL}}", &form_email);
             Html(body).into_response()
         }
         Err(_) => (
@@ -308,9 +1043,14 @@ async fn contact_page(Query(query): Query<ContactQuery>) -> impl IntoResponse {
     }
 }
 
-async fn feedback_page(Query(query): Query<FeedbackQuery>) -> impl IntoResponse {
+async fn feedback_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<FeedbackQuery>,
+) -> impl IntoResponse {
     match fs::read_to_string("templates/feedback.html").await {
         Ok(contents) => {
+            let (form_name, form_email) = form_prefill(&state, &jar).await;
             let feedback_success_block = match query.status.as_deref() {
                 Some("sent") => {
                     r#"<p class="auth-success" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
@@ -328,7 +1068,9 @@ async fn feedback_page(Query(query): Query<FeedbackQuery>) -> impl IntoResponse 
             };
             let body = contents
                 .replace("{{FEEDBACK_SUCCESS_BLOCK}}", feedback_success_block)
-                .replace("{{FEEDBACK_ERROR_BLOCK}}", feedback_error_block);
+                .replace("{{FEEDBACK_ERROR_BLOCK}}", feedback_error_block)
+                .replace("{{FORM_NAME}}", &form_name)
+                .replace("{{FORM_EMAIL}}", &form_email);
             Html(body).into_response()
         }
         Err(_) => (
@@ -357,11 +1099,11 @@ async fn login_submit(
     }
 
     if email.eq_ignore_ascii_case("demo@whiskerwatch.app") && password == "meow123" {
-        return Redirect::to("/?login=success").into_response();
+        return signed_in_redirect(&state, jar, email);
     }
 
     if user_login_valid(email, password).await {
-        return Redirect::to("/?login=success").into_response();
+        return signed_in_redirect(&state, jar, email);
     }
 
     if !email_exists(email).await {
@@ -417,22 +1159,26 @@ async fn save_user(form: &SignupForm) -> Result<(), std::io::Error> {
     append_json_line("data/users.jsonl", &user).await
 }
 
-async fn signup_submit(Form(form): Form<SignupForm>) -> impl IntoResponse {
+async fn signup_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<SignupForm>,
+) -> Response {
     let name = form.name.trim();
     let email = form.email.trim();
     let password = form.password.trim();
 
     if name.is_empty() || email.is_empty() || password.is_empty() {
-        return Redirect::to("/signup?error=missing");
+        return Redirect::to("/signup?error=missing").into_response();
     }
 
     if email_exists(email).await {
-        return Redirect::to("/signup?error=exists");
+        return Redirect::to("/signup?error=exists").into_response();
     }
 
     match save_user(&form).await {
-        Ok(()) => Redirect::to("/login?signup=created"),
-        Err(_) => Redirect::to("/signup?error=failed"),
+        Ok(()) => signed_in_redirect(&state, jar, email),
+        Err(_) => Redirect::to("/signup?error=failed").into_response(),
     }
 }
 
@@ -665,10 +1411,17 @@ async fn admin_logout(State(state): State<AppState>, jar: CookieJar) -> impl Int
 async fn main() {
     let state = AppState {
         admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+        user_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/home", get(dashboard_page))
+        .route("/home/outfits/buy", post(outfit_buy))
+        .route("/home/outfits/equip", post(outfit_equip))
+        .route("/home/tasks/toggle", post(task_toggle))
+        .route("/home/paw-points/buy", post(paw_points_buy))
+        .route("/logout", post(user_logout))
         .route("/login", get(login_page).post(login_submit))
         .route("/signup", get(signup_page).post(signup_submit))
         .route("/contact", get(contact_page).post(contact_submit))
