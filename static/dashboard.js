@@ -172,4 +172,46 @@
   } else if (calendarDays.length > 0) {
     selectDay(calendarDays[0]);
   }
+
+  const vaccineRows = document.getElementById("vaccine-rows");
+  const addVaccineRowBtn = document.getElementById("add-vaccine-row");
+
+  function bindVaccineRow(row) {
+    const removeBtn = row.querySelector(".vaccine-remove-btn");
+    if (!removeBtn) {
+      return;
+    }
+    removeBtn.hidden = vaccineRows && vaccineRows.children.length <= 1;
+    removeBtn.addEventListener("click", () => {
+      if (!vaccineRows || vaccineRows.children.length <= 1) {
+        return;
+      }
+      row.remove();
+      vaccineRows.querySelectorAll(".vaccine-remove-btn").forEach((btn, index, all) => {
+        btn.hidden = all.length <= 1;
+      });
+    });
+  }
+
+  if (vaccineRows) {
+    vaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
+  }
+
+  if (addVaccineRowBtn && vaccineRows) {
+    addVaccineRowBtn.addEventListener("click", () => {
+      const template = vaccineRows.querySelector(".vaccine-row");
+      if (!template) {
+        return;
+      }
+      const row = template.cloneNode(true);
+      row.querySelectorAll("select, input").forEach((field) => {
+        field.value = "";
+      });
+      vaccineRows.appendChild(row);
+      vaccineRows.querySelectorAll(".vaccine-remove-btn").forEach((btn) => {
+        btn.hidden = false;
+      });
+      bindVaccineRow(row);
+    });
+  }
 })();

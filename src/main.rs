@@ -101,6 +101,12 @@ fn default_calendar_year() -> u32 {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct VaccineRecord {
+    vaccine_name: String,
+    date: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct ProfileActivity {
     message: String,
     timestamp: u64,
@@ -130,6 +136,10 @@ struct UserProfile {
     pet_conditions: String,
     #[serde(default)]
     pet_medications: String,
+    #[serde(default)]
+    pet_indoor_outdoor: Option<String>,
+    #[serde(default)]
+    vaccine_history: Vec<VaccineRecord>,
     tasks: Vec<UserTask>,
     calendar_events: Vec<CalendarEvent>,
     activity: Vec<ProfileActivity>,
@@ -194,9 +204,14 @@ struct OnboardingForm {
     cat_name: String,
     age_value: String,
     age_unit: String,
+    pet_indoor_outdoor: String,
     last_vet_date: String,
     conditions: String,
     medications: String,
+    #[serde(default)]
+    vaccine_names: Vec<String>,
+    #[serde(default)]
+    vaccine_dates: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -481,6 +496,8 @@ fn default_profile(email: &str) -> UserProfile {
         last_vet_date: None,
         pet_conditions: String::new(),
         pet_medications: String::new(),
+        pet_indoor_outdoor: None,
+        vaccine_history: vec![],
         tasks: default_starter_tasks(),
         calendar_events: vec![],
         activity: vec![],
@@ -616,6 +633,291 @@ fn parse_vet_date(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VaccineKind {
+    Fvrcp,
+    Rabies,
+    Felv,
+}
+
+fn normalize_vaccine_kind(name: &str) -> Option<VaccineKind> {
+    let key = name
+        .trim()
+        .to_lowercase()
+        .replace([' ', '-', '_'], "");
+
+    if key.contains("fvrcp") || key.contains("felineviral") || key == "distemper" {
+        return Some(VaccineKind::Fvrcp);
+    }
+    if key.contains("rabies") {
+        return Some(VaccineKind::Rabies);
+    }
+    if key.contains("felv") || key.contains("leukemia") {
+        return Some(VaccineKind::Felv);
+    }
+
+    None
+}
+
+fn parse_vaccine_history(names: &[String], dates: &[String]) -> Vec<VaccineRecord> {
+    let count = names.len().min(dates.len());
+    let mut history = Vec::new();
+
+    for index in 0..count {
+        let name = names[index].trim();
+        let date = dates[index].trim();
+        if name.is_empty() || date.is_empty() || parse_vet_date(date).is_none() {
+            continue;
+        }
+        history.push(VaccineRecord {
+            vaccine_name: name.to_string(),
+            date: date.to_string(),
+        });
+    }
+
+    history
+}
+
+fn pet_birth_date(profile: &UserProfile, reference: NaiveDate) -> Option<NaiveDate> {
+    if let Some(weeks) = profile.pet_age_weeks {
+        return reference.checked_sub_signed(Duration::weeks(weeks as i64));
+    }
+    if let Some(years) = profile.pet_age_years {
+        return reference.checked_sub_signed(Duration::days(i64::from(years) * 365));
+    }
+    None
+}
+
+fn history_dates_for_kind(history: &[VaccineRecord], kind: VaccineKind) -> Vec<NaiveDate> {
+    history
+        .iter()
+        .filter_map(|record| {
+            normalize_vaccine_kind(&record.vaccine_name)
+                .filter(|record_kind| *record_kind == kind)
+                .and_then(|_| parse_vet_date(&record.date))
+        })
+        .collect()
+}
+
+fn latest_history_date(history: &[VaccineRecord], kind: VaccineKind) -> Option<NaiveDate> {
+    history_dates_for_kind(history, kind).into_iter().max()
+}
+
+fn is_dose_satisfied(kind: VaccineKind, target: NaiveDate, history: &[VaccineRecord]) -> bool {
+    history_dates_for_kind(history, kind)
+        .into_iter()
+        .any(|given| {
+            let delta = (given - target).num_days();
+            delta >= -21 && delta <= 42
+        })
+}
+
+fn indoor_outdoor_display(value: Option<&str>) -> String {
+    match value.map(str::trim).map(str::to_lowercase).as_deref() {
+        Some("outdoor") => "Outdoor cat".to_string(),
+        Some("indoor") => "Indoor cat".to_string(),
+        _ => "Not set".to_string(),
+    }
+}
+
+fn is_outdoor_cat(profile: &UserProfile) -> bool {
+    profile
+        .pet_indoor_outdoor
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("outdoor"))
+}
+
+fn week_from_birth(birth: NaiveDate, weeks: u32) -> NaiveDate {
+    birth + Duration::weeks(i64::from(weeks))
+}
+
+fn push_vaccine_reminder(
+    events: &mut Vec<CalendarEvent>,
+    date: NaiveDate,
+    label: &str,
+    pet_name: &str,
+    today: NaiveDate,
+    horizon: NaiveDate,
+) {
+    if date < today || date > horizon {
+        return;
+    }
+    events.push(calendar_event_from_date(
+        date,
+        &format!("{label} — {pet_name}"),
+    ));
+}
+
+fn schedule_kitten_vaccines(
+    events: &mut Vec<CalendarEvent>,
+    profile: &UserProfile,
+    birth: NaiveDate,
+    today: NaiveDate,
+    horizon: NaiveDate,
+    pet_name: &str,
+) {
+    let history = &profile.vaccine_history;
+
+    for week in [6u32, 10, 14, 18] {
+        let target = week_from_birth(birth, week);
+        if !is_dose_satisfied(VaccineKind::Fvrcp, target, history) {
+            push_vaccine_reminder(events, target, "FVRCP vaccine", pet_name, today, horizon);
+        }
+    }
+
+    if let Some(last_fvrcp) = latest_history_date(history, VaccineKind::Fvrcp) {
+        let mut next = last_fvrcp + Duration::weeks(4);
+        while next <= horizon {
+            let age_weeks = next.signed_duration_since(birth).num_weeks();
+            if age_weeks > 20 {
+                break;
+            }
+            if !is_dose_satisfied(VaccineKind::Fvrcp, next, history) {
+                push_vaccine_reminder(events, next, "FVRCP vaccine", pet_name, today, horizon);
+            }
+            next += Duration::weeks(4);
+        }
+    }
+
+    let rabies_at = week_from_birth(birth, 15);
+    if !is_dose_satisfied(VaccineKind::Rabies, rabies_at, history) {
+        push_vaccine_reminder(events, rabies_at, "Rabies vaccine", pet_name, today, horizon);
+    }
+
+    let felv_at = week_from_birth(birth, 8);
+    if !is_dose_satisfied(VaccineKind::Felv, felv_at, history) {
+        push_vaccine_reminder(events, felv_at, "FeLV vaccine", pet_name, today, horizon);
+    }
+
+    let felv_booster_at = latest_history_date(history, VaccineKind::Felv)
+        .map(|first| first + Duration::weeks(4))
+        .unwrap_or_else(|| week_from_birth(birth, 12));
+    if !is_dose_satisfied(VaccineKind::Felv, felv_booster_at, history) {
+        push_vaccine_reminder(
+            events,
+            felv_booster_at,
+            "FeLV booster",
+            pet_name,
+            today,
+            horizon,
+        );
+    }
+}
+
+fn schedule_adult_vaccines(
+    events: &mut Vec<CalendarEvent>,
+    profile: &UserProfile,
+    birth: NaiveDate,
+    today: NaiveDate,
+    horizon: NaiveDate,
+    pet_name: &str,
+) {
+    let history = &profile.vaccine_history;
+    let one_year = birth + Duration::weeks(52);
+
+    let mut fvrcp_next = latest_history_date(history, VaccineKind::Fvrcp)
+        .map(|last| last + Duration::days(365 * 3))
+        .unwrap_or(one_year);
+    while fvrcp_next < today {
+        fvrcp_next += Duration::days(365 * 3);
+    }
+    while fvrcp_next <= horizon {
+        if !is_dose_satisfied(VaccineKind::Fvrcp, fvrcp_next, history) {
+            let label = if fvrcp_next == one_year {
+                "FVRCP booster (1 year)"
+            } else {
+                "FVRCP booster"
+            };
+            push_vaccine_reminder(events, fvrcp_next, label, pet_name, today, horizon);
+        }
+        fvrcp_next += Duration::days(365 * 3);
+    }
+
+    let mut rabies_next = latest_history_date(history, VaccineKind::Rabies)
+        .map(|last| last + Duration::days(365 * 3))
+        .unwrap_or(one_year);
+    while rabies_next < today {
+        rabies_next += Duration::days(365 * 3);
+    }
+    while rabies_next <= horizon {
+        if !is_dose_satisfied(VaccineKind::Rabies, rabies_next, history) {
+            let label = if rabies_next == one_year {
+                "Rabies booster (1 year)"
+            } else {
+                "Rabies booster"
+            };
+            push_vaccine_reminder(events, rabies_next, label, pet_name, today, horizon);
+        }
+        rabies_next += Duration::days(365 * 3);
+    }
+
+    let felv_interval = if is_outdoor_cat(profile) {
+        Duration::days(365)
+    } else {
+        Duration::days(365 * 3)
+    };
+
+    let mut felv_next = latest_history_date(history, VaccineKind::Felv)
+        .map(|last| last + felv_interval)
+        .unwrap_or(one_year);
+    while felv_next < today {
+        felv_next += felv_interval;
+    }
+    while felv_next <= horizon {
+        if !is_dose_satisfied(VaccineKind::Felv, felv_next, history) {
+            let label = if felv_next == one_year {
+                "FeLV vaccine (1 year)"
+            } else if is_outdoor_cat(profile) {
+                "FeLV vaccine (yearly)"
+            } else {
+                "FeLV vaccine (3-year)"
+            };
+            push_vaccine_reminder(events, felv_next, label, pet_name, today, horizon);
+        }
+        felv_next += felv_interval;
+    }
+}
+
+fn generate_vaccine_calendar_events(
+    profile: &UserProfile,
+    reference_date: NaiveDate,
+) -> Vec<CalendarEvent> {
+    let Some(birth) = pet_birth_date(profile, reference_date) else {
+        return Vec::new();
+    };
+
+    let pet_name = if profile.pet_name.is_empty() {
+        "Your cat".to_string()
+    } else {
+        profile.pet_name.clone()
+    };
+
+    let today = reference_date;
+    let horizon = reference_date + Duration::days(730);
+    let mut events = Vec::new();
+
+    if let Some(weeks) = profile.pet_age_weeks {
+        if weeks <= 20 {
+            schedule_kitten_vaccines(&mut events, profile, birth, today, horizon, &pet_name);
+        }
+        if weeks > 20 {
+            schedule_adult_vaccines(&mut events, profile, birth, today, horizon, &pet_name);
+        }
+    } else if profile.pet_age_years.is_some_and(|years| (1..=10).contains(&years)) {
+        schedule_adult_vaccines(&mut events, profile, birth, today, horizon, &pet_name);
+    }
+
+    events.sort_by_key(|event| (event.year, event.month, event.day));
+    events
+}
+
+fn merge_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -> Vec<CalendarEvent> {
+    let mut events = generate_vet_calendar_events(profile, signup_date);
+    events.extend(generate_vaccine_calendar_events(profile, signup_date));
+    events.sort_by_key(|event| (event.year, event.month, event.day));
+    events
+}
+
 fn generate_vet_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -> Vec<CalendarEvent> {
     let anchor = profile
         .last_vet_date
@@ -677,12 +979,35 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
         escape_html(&profile.pet_medications)
     };
 
+    let lifestyle = escape_html(&indoor_outdoor_display(
+        profile.pet_indoor_outdoor.as_deref(),
+    ));
+
+    let vaccine_list = if profile.vaccine_history.is_empty() {
+        "None recorded".to_string()
+    } else {
+        let items: String = profile
+            .vaccine_history
+            .iter()
+            .map(|record| {
+                format!(
+                    "<li><strong>{}</strong> — {}</li>",
+                    escape_html(&record.vaccine_name),
+                    escape_html(&record.date)
+                )
+            })
+            .collect();
+        format!(r#"<ul class="vaccine-history-list">{items}</ul>"#)
+    };
+
     format!(
-        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd></dl>"#,
+        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl>"#,
         age = escape_html(&age_display(profile)),
+        lifestyle = lifestyle,
         last_vet = last_vet,
         conditions = conditions,
         medications = medications,
+        vaccine_list = vaccine_list,
     )
 }
 
@@ -694,7 +1019,7 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
     r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
   <div class="onboarding-modal">
     <h2 id="onboarding-title">Tell us about your cat 🐾</h2>
-    <p class="onboarding-intro">We will personalize your pet tab and schedule vet reminders on your calendar.</p>
+    <p class="onboarding-intro">We will personalize your pet tab and schedule vet and vaccine reminders on your calendar.</p>
     <form class="onboarding-form login-form" action="/home/onboarding" method="post">
       <label for="cat_name">Cat's name</label>
       <input id="cat_name" name="cat_name" type="text" placeholder="Mochi" required />
@@ -712,11 +1037,37 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
           </select>
         </div>
       </div>
-      <p class="field-hint">Use weeks for kittens under 16 weeks — they get vet reminders every 4 weeks. Cats 1–10 years get yearly reminders; 10+ years get reminders every 6 months.</p>
+      <p class="field-hint">Use weeks for kittens (6–20 weeks) so we can schedule FVRCP, rabies, and FeLV doses. Cats 1–10 years get booster schedules; 10+ years get vet reminders every 6 months.</p>
+
+      <fieldset class="indoor-outdoor-fieldset">
+        <legend>Indoor or outdoor cat?</legend>
+        <label class="radio-pill"><input type="radio" name="pet_indoor_outdoor" value="indoor" required /> Indoor</label>
+        <label class="radio-pill"><input type="radio" name="pet_indoor_outdoor" value="outdoor" required /> Outdoor</label>
+      </fieldset>
+      <p class="field-hint">Outdoor cats need FeLV vaccines yearly; indoor cats every 3 years after the first year.</p>
 
       <label for="last_vet_date">Last vet appointment</label>
       <input id="last_vet_date" name="last_vet_date" type="date" />
       <p class="field-hint">Optional — leave blank if this is their first visit. We will start reminders from today.</p>
+
+      <fieldset class="vaccine-history-fieldset">
+        <legend>Vaccine history</legend>
+        <p class="field-hint">Record vaccines your cat already received so we do not duplicate reminders.</p>
+        <div id="vaccine-rows" class="vaccine-rows">
+          <div class="vaccine-row">
+            <select name="vaccine_names" aria-label="Vaccine name">
+              <option value="">Select vaccine</option>
+              <option value="FVRCP">FVRCP</option>
+              <option value="Rabies">Rabies</option>
+              <option value="FeLV">FeLV</option>
+              <option value="Other">Other</option>
+            </select>
+            <input name="vaccine_dates" type="date" aria-label="Vaccine date" />
+            <button type="button" class="vaccine-remove-btn" hidden aria-label="Remove vaccine row">×</button>
+          </div>
+        </div>
+        <button type="button" class="download-btn vaccine-add-btn" id="add-vaccine-row">+ Add vaccine</button>
+      </fieldset>
 
       <label for="conditions">Health conditions</label>
       <textarea id="conditions" name="conditions" rows="2" placeholder="e.g. asthma, arthritis"></textarea>
@@ -812,10 +1163,10 @@ fn dashboard_status_block(status: Option<&str>) -> String {
             r#"<p class="auth-error" role="alert">That task could not be updated.</p>"#
         }
         Some("onboarding_done") => {
-            r#"<p class="auth-success" role="status">Welcome! Your cat profile is saved and vet reminders are on your calendar.</p>"#
+            r#"<p class="auth-success" role="status">Welcome! Your cat profile is saved with vet and vaccine reminders on your calendar.</p>"#
         }
         Some("onboarding_invalid") => {
-            r#"<p class="auth-error" role="alert">Please enter your cat's name and a valid age.</p>"#
+            r#"<p class="auth-error" role="alert">Please enter your cat's name, a valid age, and whether they are indoor or outdoor.</p>"#
         }
         _ => "",
     }
@@ -1130,6 +1481,13 @@ async fn onboarding_submit(
         Err(()) => return Redirect::to("/home?status=onboarding_invalid"),
     };
 
+    let indoor_outdoor = form.pet_indoor_outdoor.trim().to_lowercase();
+    if indoor_outdoor != "indoor" && indoor_outdoor != "outdoor" {
+        return Redirect::to("/home?status=onboarding_invalid");
+    }
+
+    let vaccine_history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
+
     let last_vet_date = {
         let trimmed = form.last_vet_date.trim();
         if trimmed.is_empty() {
@@ -1152,13 +1510,15 @@ async fn onboarding_submit(
     profile.last_vet_date = last_vet_date;
     profile.pet_conditions = form.conditions.trim().to_string();
     profile.pet_medications = form.medications.trim().to_string();
+    profile.pet_indoor_outdoor = Some(indoor_outdoor);
+    profile.vaccine_history = vaccine_history;
     profile.onboarding_completed = true;
-    profile.calendar_events = generate_vet_calendar_events(&profile, signup_date);
+    profile.calendar_events = merge_calendar_events(&profile, signup_date);
 
     let pet_name = profile.pet_name.clone();
     push_activity(
         &mut profile,
-        &format!("Set up {pet_name}'s profile and vet care schedule."),
+        &format!("Set up {pet_name}'s profile, vet visits, and vaccine schedule."),
     );
 
     match save_profile(&profile).await {
@@ -1820,6 +2180,76 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 async fn admin_logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let jar = clear_admin_session(&state, jar);
     (jar, Redirect::to("/login")).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_profile_weeks(weeks: u32, indoor: &str) -> UserProfile {
+        UserProfile {
+            email: "test@example.com".to_string(),
+            paw_points: 0,
+            parent_level: 1,
+            parent_xp: 0,
+            pet_name: "Mochi".to_string(),
+            pet_breed: String::new(),
+            pet_mood: String::new(),
+            pet_emoji: "🐱".to_string(),
+            equipped_outfit: String::new(),
+            owned_outfits: vec![],
+            onboarding_completed: true,
+            pet_age_weeks: Some(weeks),
+            pet_age_years: None,
+            last_vet_date: None,
+            pet_conditions: String::new(),
+            pet_medications: String::new(),
+            pet_indoor_outdoor: Some(indoor.to_string()),
+            vaccine_history: vec![],
+            tasks: vec![],
+            calendar_events: vec![],
+            activity: vec![],
+        }
+    }
+
+    #[test]
+    fn kitten_gets_fvrcp_and_rabies_slots() {
+        let profile = test_profile_weeks(10, "indoor");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        let events = generate_vaccine_calendar_events(&profile, today);
+        let titles: Vec<String> = events.iter().map(|e| e.title.clone()).collect();
+        assert!(titles.iter().any(|t| t.contains("FVRCP")));
+        assert!(titles.iter().any(|t| t.contains("Rabies")));
+    }
+
+    #[test]
+    fn recorded_fvrcp_skips_nearby_reminder() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        let birth = pet_birth_date(&profile, today).expect("birth");
+        let week_10 = week_from_birth(birth, 10);
+        profile.vaccine_history.push(VaccineRecord {
+            vaccine_name: "FVRCP".to_string(),
+            date: week_10.format("%Y-%m-%d").to_string(),
+        });
+        let events = generate_vaccine_calendar_events(&profile, today);
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.title.contains("FVRCP") && event.day == week_10.day())
+        );
+    }
+
+    #[test]
+    fn outdoor_cat_gets_yearly_felv_after_year_one() {
+        let profile = test_profile_weeks(52, "outdoor");
+        let mut profile = profile;
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        let events = generate_vaccine_calendar_events(&profile, today);
+        assert!(events.iter().any(|event| event.title.contains("FeLV")));
+    }
 }
 
 #[tokio::main]
