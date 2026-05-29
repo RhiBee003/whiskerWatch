@@ -731,6 +731,28 @@ footer p {
   font-size: 0.9rem;
   border-radius: 10px;
   background: var(--pink-surface-soft);
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.calendar-day:hover:not(.empty) {
+  background: #f5c4dc;
+}
+
+.calendar-day.selected {
+  background: #e8357a;
+  color: #fff;
+  border: 2px solid #c42d68;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(200, 45, 104, 0.35);
+}
+
+.calendar-day.selected.has-event::after,
+.calendar-day.selected.has-task::after {
+  background: #fff;
 }
 
 .calendar-day.empty {
@@ -747,7 +769,8 @@ footer p {
   font-weight: 800;
 }
 
-.calendar-day.has-event::after {
+.calendar-day.has-event::after,
+.calendar-day.has-task::after {
   content: "";
   width: 5px;
   height: 5px;
@@ -757,8 +780,33 @@ footer p {
   margin-top: 1.1rem;
 }
 
+.calendar-day.has-task {
+  background: #f5d0e4;
+}
+
 .calendar-day {
   position: relative;
+}
+
+.calendar-detail-subhead {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.calendar-day-tasks {
+  margin-bottom: 0.5rem;
+}
+
+.calendar-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.calendar-day-hint {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .buy-points-form {
@@ -833,4 +881,77 @@ footer p {
     flex-wrap: wrap;
     justify-content: center;
   }
+}
+
+.onboarding-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(74, 40, 64, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.onboarding-modal {
+  width: min(480px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--pink-card);
+  border: 2px solid rgba(30, 22, 35, 0.2);
+  border-radius: 22px;
+  padding: 1.5rem 1.6rem;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+
+.onboarding-modal h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.6rem;
+}
+
+.onboarding-intro {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.onboarding-form textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  background: var(--pink-input);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.age-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.field-hint {
+  margin: -0.35rem 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.pet-health-dl {
+  margin: 1rem 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  text-align: left;
+}
+
+.pet-health-dl dt {
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.pet-health-dl dd {
+  margin: 0;
+  font-weight: 700;
 }

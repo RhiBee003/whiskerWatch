@@ -56,6 +56,7 @@
               <p class="pet-blurb">
                 {{PET_NAME}} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!
               </p>
+              {{PET_HEALTH_INFO}}
             </div>
           </div>
         </section>
@@ -158,8 +159,12 @@
               {{CALENDAR_GRID}}
             </div>
             <article class="dashboard-card calendar-events">
-              <h2>Upcoming</h2>
-              <ul class="event-list">
+              <h2 id="calendar-events-heading">Select a date</h2>
+              <p class="calendar-day-hint" id="calendar-day-hint">Click any day to see scheduled tasks and events.</p>
+              <h3 class="calendar-detail-subhead" id="calendar-tasks-heading" hidden>Tasks</h3>
+              <ul class="task-list calendar-day-tasks" id="calendar-day-tasks" hidden></ul>
+              <h3 class="calendar-detail-subhead" id="calendar-events-subheading" hidden>Events</h3>
+              <ul class="event-list" id="event-list">
                 {{EVENT_LIST}}
               </ul>
             </article>
@@ -168,6 +173,9 @@
       </main>
     </div>
 
+    {{ONBOARDING_MODAL}}
+
+    <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/dashboard.js"></script>
   </body>
 </html>

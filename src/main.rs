@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -71,14 +72,32 @@ struct UserTask {
     title: String,
     completed: bool,
     due_label: String,
+    #[serde(default)]
+    due_day: Option<u32>,
+    #[serde(default)]
+    due_month: Option<u32>,
+    #[serde(default)]
+    due_year: Option<u32>,
     reward: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CalendarEvent {
     day: u32,
+    #[serde(default = "default_calendar_month")]
+    month: u32,
+    #[serde(default = "default_calendar_year")]
+    year: u32,
     title: String,
     time_label: String,
+}
+
+fn default_calendar_month() -> u32 {
+    5
+}
+
+fn default_calendar_year() -> u32 {
+    2026
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -99,6 +118,18 @@ struct UserProfile {
     pet_emoji: String,
     equipped_outfit: String,
     owned_outfits: Vec<String>,
+    #[serde(default)]
+    onboarding_completed: bool,
+    #[serde(default)]
+    pet_age_weeks: Option<u32>,
+    #[serde(default)]
+    pet_age_years: Option<u32>,
+    #[serde(default)]
+    last_vet_date: Option<String>,
+    #[serde(default)]
+    pet_conditions: String,
+    #[serde(default)]
+    pet_medications: String,
     tasks: Vec<UserTask>,
     calendar_events: Vec<CalendarEvent>,
     activity: Vec<ProfileActivity>,
@@ -156,6 +187,16 @@ struct OutfitEquipForm {
 #[derive(Deserialize)]
 struct TaskToggleForm {
     task_id: String,
+}
+
+#[derive(Deserialize)]
+struct OnboardingForm {
+    cat_name: String,
+    age_value: String,
+    age_unit: String,
+    last_vet_date: String,
+    conditions: String,
+    medications: String,
 }
 
 #[derive(Deserialize)]
@@ -352,65 +393,96 @@ fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String,
     user_session_email(state, jar).ok_or_else(|| Redirect::to("/login"))
 }
 
+fn default_starter_tasks() -> Vec<UserTask> {
+    let today = Local::now().date_naive();
+    let yesterday = today.pred_opt().unwrap_or(today);
+    let month = today.month();
+    let year = today.year() as u32;
+
+    vec![
+        UserTask {
+            id: "feed_breakfast".to_string(),
+            title: "Morning feeding".to_string(),
+            completed: false,
+            due_label: "Today · 8:00 AM".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
+            reward: 15,
+        },
+        UserTask {
+            id: "play_session".to_string(),
+            title: "15-minute play session".to_string(),
+            completed: false,
+            due_label: "Today · 5:30 PM".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
+            reward: 20,
+        },
+        UserTask {
+            id: "litter_check".to_string(),
+            title: "Refresh litter box".to_string(),
+            completed: false,
+            due_label: "Yesterday".to_string(),
+            due_day: Some(yesterday.day()),
+            due_month: Some(yesterday.month()),
+            due_year: Some(yesterday.year() as u32),
+            reward: 10,
+        },
+        UserTask {
+            id: "water_bowl".to_string(),
+            title: "Refill water bowl".to_string(),
+            completed: false,
+            due_label: "Today · anytime".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
+            reward: 12,
+        },
+    ]
+}
+
+fn task_schedule_date(task: &UserTask) -> Option<NaiveDate> {
+    if let Some(day) = task.due_day {
+        let today = Local::now().date_naive();
+        let month = task.due_month.unwrap_or_else(|| today.month());
+        let year = task.due_year.unwrap_or_else(|| today.year() as u32);
+        return NaiveDate::from_ymd_opt(year as i32, month, day);
+    }
+
+    let label = task.due_label.to_lowercase();
+    let today = Local::now().date_naive();
+    if label.starts_with("today") {
+        return Some(today);
+    }
+    if label.starts_with("yesterday") {
+        return today.pred_opt();
+    }
+
+    None
+}
+
 fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
         paw_points: 0,
         parent_level: 1,
         parent_xp: 0,
-        pet_name: "Mochi".to_string(),
-        pet_breed: "Tabby companion".to_string(),
-        pet_mood: "Playful".to_string(),
+        pet_name: "Your cat".to_string(),
+        pet_breed: "Add your cat's details".to_string(),
+        pet_mood: "Waiting to meet you".to_string(),
         pet_emoji: "🐱".to_string(),
         equipped_outfit: "Classic Collar".to_string(),
         owned_outfits: vec!["classic_collar".to_string()],
-        tasks: vec![
-            UserTask {
-                id: "feed_breakfast".to_string(),
-                title: "Morning feeding".to_string(),
-                completed: false,
-                due_label: "Today · 8:00 AM".to_string(),
-                reward: 15,
-            },
-            UserTask {
-                id: "play_session".to_string(),
-                title: "15-minute play session".to_string(),
-                completed: false,
-                due_label: "Today · 5:30 PM".to_string(),
-                reward: 20,
-            },
-            UserTask {
-                id: "litter_check".to_string(),
-                title: "Refresh litter box".to_string(),
-                completed: false,
-                due_label: "Yesterday".to_string(),
-                reward: 10,
-            },
-            UserTask {
-                id: "water_bowl".to_string(),
-                title: "Refill water bowl".to_string(),
-                completed: false,
-                due_label: "Today · anytime".to_string(),
-                reward: 12,
-            },
-        ],
-        calendar_events: vec![
-            CalendarEvent {
-                day: 29,
-                title: "Vet checkup reminder".to_string(),
-                time_label: "May 29 · 2:00 PM".to_string(),
-            },
-            CalendarEvent {
-                day: 31,
-                title: "Grooming day".to_string(),
-                time_label: "May 31 · 10:00 AM".to_string(),
-            },
-            CalendarEvent {
-                day: 3,
-                title: "New treats delivery".to_string(),
-                time_label: "Jun 3 · afternoon".to_string(),
-            },
-        ],
+        onboarding_completed: false,
+        pet_age_weeks: None,
+        pet_age_years: None,
+        last_vet_date: None,
+        pet_conditions: String::new(),
+        pet_medications: String::new(),
+        tasks: default_starter_tasks(),
+        calendar_events: vec![],
         activity: vec![],
     }
 }
@@ -480,6 +552,198 @@ fn outfit_by_id(id: &str) -> Option<&'static OutfitCatalogItem> {
     OUTFIT_CATALOG.iter().find(|item| item.id == id)
 }
 
+const MONTH_NAMES: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+fn parse_age(age_value: &str, age_unit: &str) -> Result<(Option<u32>, Option<u32>), ()> {
+    let value: u32 = age_value.trim().parse().map_err(|_| ())?;
+    if value == 0 {
+        return Err(());
+    }
+
+    match age_unit.trim().to_lowercase().as_str() {
+        "weeks" | "week" => Ok((Some(value), None)),
+        "years" | "year" => Ok((None, Some(value))),
+        _ => Err(()),
+    }
+}
+
+fn age_display(profile: &UserProfile) -> String {
+    if let Some(weeks) = profile.pet_age_weeks {
+        return format!("{weeks} weeks old");
+    }
+    if let Some(years) = profile.pet_age_years {
+        return format!("{years} years old");
+    }
+    "Age not set".to_string()
+}
+
+fn vet_reminder_interval(profile: &UserProfile) -> Duration {
+    if profile.pet_age_weeks.is_some_and(|weeks| weeks < 16) {
+        return Duration::weeks(4);
+    }
+
+    if profile.pet_age_years.is_some_and(|years| years >= 10) {
+        return Duration::days(182);
+    }
+
+    Duration::days(365)
+}
+
+fn format_event_time_label(date: NaiveDate) -> String {
+    let month = MONTH_NAMES
+        .get(date.month0() as usize)
+        .unwrap_or(&"???");
+    format!("{month} {} · 10:00 AM", date.day())
+}
+
+fn calendar_event_from_date(date: NaiveDate, title: &str) -> CalendarEvent {
+    CalendarEvent {
+        day: date.day(),
+        month: date.month(),
+        year: date.year() as u32,
+        title: title.to_string(),
+        time_label: format_event_time_label(date),
+    }
+}
+
+fn parse_vet_date(value: &str) -> Option<NaiveDate> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").ok()
+}
+
+fn generate_vet_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -> Vec<CalendarEvent> {
+    let anchor = profile
+        .last_vet_date
+        .as_deref()
+        .and_then(parse_vet_date)
+        .unwrap_or(signup_date);
+
+    let pet_name = if profile.pet_name.is_empty() {
+        "Your cat".to_string()
+    } else {
+        profile.pet_name.clone()
+    };
+
+    let mut events = Vec::new();
+
+    if profile.last_vet_date.is_some() {
+        events.push(calendar_event_from_date(
+            anchor,
+            &format!("Last vet visit — {pet_name}"),
+        ));
+    }
+
+    let interval = vet_reminder_interval(profile);
+    let reminder_title = format!("Vet checkup reminder — {pet_name}");
+    let horizon = signup_date + Duration::days(730);
+    let mut next = anchor + interval;
+
+    while next <= horizon {
+        if profile.last_vet_date.is_none() || next > anchor {
+            events.push(calendar_event_from_date(next, &reminder_title));
+        }
+        next += interval;
+    }
+
+    events.sort_by_key(|event| (event.year, event.month, event.day));
+    events
+}
+
+fn render_pet_health_info(profile: &UserProfile) -> String {
+    if !profile.onboarding_completed {
+        return String::new();
+    }
+
+    let last_vet = profile
+        .last_vet_date
+        .as_deref()
+        .map(|date| escape_html(date))
+        .unwrap_or_else(|| "Not recorded".to_string());
+
+    let conditions = if profile.pet_conditions.trim().is_empty() {
+        "None noted".to_string()
+    } else {
+        escape_html(&profile.pet_conditions)
+    };
+
+    let medications = if profile.pet_medications.trim().is_empty() {
+        "None noted".to_string()
+    } else {
+        escape_html(&profile.pet_medications)
+    };
+
+    format!(
+        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd></dl>"#,
+        age = escape_html(&age_display(profile)),
+        last_vet = last_vet,
+        conditions = conditions,
+        medications = medications,
+    )
+}
+
+fn render_onboarding_modal(profile: &UserProfile) -> String {
+    if profile.onboarding_completed {
+        return String::new();
+    }
+
+    r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+  <div class="onboarding-modal">
+    <h2 id="onboarding-title">Tell us about your cat 🐾</h2>
+    <p class="onboarding-intro">We will personalize your pet tab and schedule vet reminders on your calendar.</p>
+    <form class="onboarding-form login-form" action="/home/onboarding" method="post">
+      <label for="cat_name">Cat's name</label>
+      <input id="cat_name" name="cat_name" type="text" placeholder="Mochi" required />
+
+      <div class="age-row">
+        <div>
+          <label for="age_value">Age</label>
+          <input id="age_value" name="age_value" type="number" min="1" placeholder="12" required />
+        </div>
+        <div>
+          <label for="age_unit">Unit</label>
+          <select id="age_unit" name="age_unit" required>
+            <option value="weeks">Weeks (under 1 year)</option>
+            <option value="years" selected>Years</option>
+          </select>
+        </div>
+      </div>
+      <p class="field-hint">Use weeks for kittens under 16 weeks — they get vet reminders every 4 weeks. Cats 1–10 years get yearly reminders; 10+ years get reminders every 6 months.</p>
+
+      <label for="last_vet_date">Last vet appointment</label>
+      <input id="last_vet_date" name="last_vet_date" type="date" />
+      <p class="field-hint">Optional — leave blank if this is their first visit. We will start reminders from today.</p>
+
+      <label for="conditions">Health conditions</label>
+      <textarea id="conditions" name="conditions" rows="2" placeholder="e.g. asthma, arthritis"></textarea>
+
+      <label for="medications">Medications</label>
+      <textarea id="medications" name="medications" rows="2" placeholder="e.g. flea prevention monthly"></textarea>
+
+      <button type="submit" class="download-btn login-submit">Save &amp; continue</button>
+    </form>
+  </div>
+</div>"#
+        .to_string()
+}
+
+fn current_calendar_month() -> u32 {
+    Local::now().month()
+}
+
+fn current_calendar_year() -> u32 {
+    Local::now().year() as u32
+}
+
+fn calendar_month_label(month: u32, year: u32) -> String {
+    let name = MONTH_NAMES.get(month.saturating_sub(1) as usize).unwrap_or(&"???");
+    format!("{name} {year} — your cat care schedule")
+}
+
 fn create_user_session(state: &AppState, jar: CookieJar, email: &str) -> CookieJar {
     let session_id = Uuid::new_v4().to_string();
     state
@@ -546,6 +810,12 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("task_invalid") => {
             r#"<p class="auth-error" role="alert">That task could not be updated.</p>"#
+        }
+        Some("onboarding_done") => {
+            r#"<p class="auth-success" role="status">Welcome! Your cat profile is saved and vet reminders are on your calendar.</p>"#
+        }
+        Some("onboarding_invalid") => {
+            r#"<p class="auth-error" role="alert">Please enter your cat's name and a valid age.</p>"#
         }
         _ => "",
     }
@@ -631,7 +901,7 @@ fn render_task_list(profile: &UserProfile) -> String {
         .collect()
 }
 
-fn render_calendar_grid(profile: &UserProfile) -> String {
+fn render_calendar_grid(profile: &UserProfile, month: u32, year: u32) -> String {
     let weekday_labels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     let mut html = String::new();
 
@@ -639,28 +909,56 @@ fn render_calendar_grid(profile: &UserProfile) -> String {
         html.push_str(&format!(r#"<span class="calendar-head">{label}</span>"#));
     }
 
-    let first_weekday = 5_u32;
-    let days_in_month = 31_u32;
-    let today = 29_u32;
+    let first_of_month = NaiveDate::from_ymd_opt(year as i32, month, 1).unwrap_or_else(|| {
+        NaiveDate::from_ymd_opt(2026, 5, 1).expect("valid fallback date")
+    });
+    let first_weekday = first_of_month.weekday().num_days_from_sunday();
+    let days_in_month = if month == 12 {
+        NaiveDate::from_ymd_opt(year as i32 + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(year as i32, month + 1, 1)
+    }
+    .and_then(|next| next.pred_opt())
+    .map(|d| d.day())
+    .unwrap_or(31);
+
+    let today = Local::now().date_naive();
+    let today_in_view = today.year() as u32 == year && today.month() == month;
 
     for _ in 0..first_weekday {
         html.push_str(r#"<span class="calendar-day empty"></span>"#);
     }
 
-    let event_days: HashSet<u32> = profile.calendar_events.iter().map(|e| e.day).collect();
+    let event_days: HashSet<u32> = profile
+        .calendar_events
+        .iter()
+        .filter(|e| e.month == month && e.year == year)
+        .map(|e| e.day)
+        .collect();
+
+    let task_days: HashSet<u32> = profile
+        .tasks
+        .iter()
+        .filter_map(task_schedule_date)
+        .filter(|date| date.month() == month && date.year() as u32 == year)
+        .map(|date| date.day())
+        .collect();
 
     for day in 1..=days_in_month {
         let mut classes = vec!["calendar-day"];
-        if day == today {
+        if today_in_view && day == today.day() {
             classes.push("today");
         }
         if event_days.contains(&day) {
             classes.push("has-event");
         }
+        if task_days.contains(&day) {
+            classes.push("has-task");
+        }
+        let month_name = MONTH_NAMES.get(month.saturating_sub(1) as usize).unwrap_or(&"???");
         html.push_str(&format!(
-            r#"<span class="{}" aria-label="May {}">{day}</span>"#,
-            classes.join(" "),
-            day
+            r#"<button type="button" class="{}" data-day="{day}" data-month="{month}" data-year="{year}" aria-label="{month_name} {day}, {year}" aria-pressed="false">{day}</button>"#,
+            classes.join(" ")
         ));
     }
 
@@ -677,12 +975,65 @@ fn render_event_list(profile: &UserProfile) -> String {
         .iter()
         .map(|event| {
             format!(
-                "<li><strong>{}</strong> — {}</li>",
-                escape_html(&event.time_label),
-                escape_html(&event.title)
+                r#"<li data-day="{day}" data-month="{month}" data-year="{year}"><strong>{time}</strong> — {title}</li>"#,
+                day = event.day,
+                month = event.month,
+                year = event.year,
+                time = escape_html(&event.time_label),
+                title = escape_html(&event.title),
             )
         })
         .collect()
+}
+
+fn render_calendar_data_json(profile: &UserProfile, month: u32, year: u32) -> String {
+    let today = Local::now().date_naive();
+    let events: Vec<_> = profile
+        .calendar_events
+        .iter()
+        .map(|event| {
+            serde_json::json!({
+                "day": event.day,
+                "month": event.month,
+                "year": event.year,
+                "title": event.title,
+                "time_label": event.time_label,
+            })
+        })
+        .collect();
+
+    let tasks: Vec<_> = profile
+        .tasks
+        .iter()
+        .filter_map(|task| {
+            task_schedule_date(task).map(|date| {
+                serde_json::json!({
+                    "day": date.day(),
+                    "month": date.month(),
+                    "year": date.year(),
+                    "id": task.id,
+                    "title": task.title,
+                    "due_label": task.due_label,
+                    "reward": task.reward,
+                    "completed": task.completed,
+                })
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "viewMonth": month,
+        "viewYear": year,
+        "todayDay": if today.year() as u32 == year && today.month() == month {
+            today.day()
+        } else {
+            0
+        },
+        "events": events,
+        "tasks": tasks,
+    });
+
+    serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
 }
 
 async fn member_since_label(email: &str) -> String {
@@ -709,6 +1060,8 @@ async fn dashboard_page(
         .await
         .unwrap_or_else(|| "Parent".to_string());
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
+    let calendar_month = current_calendar_month();
+    let calendar_year = current_calendar_year();
 
     let template = match fs::read_to_string("templates/dashboard.html").await {
         Ok(contents) => contents,
@@ -733,16 +1086,85 @@ async fn dashboard_page(
         .replace("{{PET_BREED}}", &escape_html(&profile.pet_breed))
         .replace("{{PET_MOOD}}", &escape_html(&profile.pet_mood))
         .replace("{{PET_EMOJI}}", &profile.pet_emoji)
+        .replace("{{PET_HEALTH_INFO}}", &render_pet_health_info(&profile))
+        .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
         .replace("{{STATUS_BLOCK}}", &dashboard_status_block(query.status.as_deref()))
         .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
         .replace("{{OUTFIT_CARDS}}", &render_outfit_cards(&profile))
         .replace("{{TASK_LIST}}", &render_task_list(&profile))
-        .replace("{{CALENDAR_GRID}}", &render_calendar_grid(&profile))
+        .replace(
+            "{{CALENDAR_GRID}}",
+            &render_calendar_grid(&profile, calendar_month, calendar_year),
+        )
         .replace("{{EVENT_LIST}}", &render_event_list(&profile))
-        .replace("{{CALENDAR_MONTH_LABEL}}", "May 2026 — your cat care schedule");
+        .replace(
+            "{{CALENDAR_DATA_JSON}}",
+            &render_calendar_data_json(&profile, calendar_month, calendar_year),
+        )
+        .replace(
+            "{{CALENDAR_MONTH_LABEL}}",
+            &calendar_month_label(calendar_month, calendar_year),
+        );
 
     Html(body).into_response()
+}
+
+async fn onboarding_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<OnboardingForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let cat_name = form.cat_name.trim();
+    if cat_name.is_empty() {
+        return Redirect::to("/home?status=onboarding_invalid");
+    }
+
+    let (pet_age_weeks, pet_age_years) = match parse_age(&form.age_value, &form.age_unit) {
+        Ok(age) => age,
+        Err(()) => return Redirect::to("/home?status=onboarding_invalid"),
+    };
+
+    let last_vet_date = {
+        let trimmed = form.last_vet_date.trim();
+        if trimmed.is_empty() {
+            None
+        } else if parse_vet_date(trimmed).is_some() {
+            Some(trimmed.to_string())
+        } else {
+            return Redirect::to("/home?status=onboarding_invalid");
+        }
+    };
+
+    let mut profile = get_or_create_profile(&email).await;
+    let signup_date = Local::now().date_naive();
+
+    profile.pet_name = cat_name.to_string();
+    profile.pet_breed = "Your companion".to_string();
+    profile.pet_mood = "Happy".to_string();
+    profile.pet_age_weeks = pet_age_weeks;
+    profile.pet_age_years = pet_age_years;
+    profile.last_vet_date = last_vet_date;
+    profile.pet_conditions = form.conditions.trim().to_string();
+    profile.pet_medications = form.medications.trim().to_string();
+    profile.onboarding_completed = true;
+    profile.calendar_events = generate_vet_calendar_events(&profile, signup_date);
+
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Set up {pet_name}'s profile and vet care schedule."),
+    );
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?status=onboarding_done"),
+        Err(_) => Redirect::to("/home?status=onboarding_invalid"),
+    }
 }
 
 async fn outfit_buy(
@@ -1410,6 +1832,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index_page))
         .route("/home", get(dashboard_page))
+        .route("/home/onboarding", post(onboarding_submit))
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
