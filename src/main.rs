@@ -7,7 +7,10 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use chrono::{Datelike, Duration, Local, NaiveDate};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{Deserializer, Error as DeError},
+};
 use std::{
     collections::{HashMap, HashSet},
     env,
@@ -203,7 +206,29 @@ struct TaskToggleForm {
     task_id: String,
 }
 
-#[derive(Deserialize)]
+fn group_form_fields(pairs: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
+    let mut fields = HashMap::new();
+    for (key, value) in pairs {
+        fields.entry(key).or_insert_with(Vec::new).push(value);
+    }
+    fields
+}
+
+fn form_scalar<E: DeError>(
+    fields: &HashMap<String, Vec<String>>,
+    key: &'static str,
+) -> Result<String, E> {
+    fields
+        .get(key)
+        .and_then(|values| values.first())
+        .cloned()
+        .ok_or_else(|| DeError::missing_field(key))
+}
+
+fn form_vec(fields: &HashMap<String, Vec<String>>, key: &str) -> Vec<String> {
+    fields.get(key).cloned().unwrap_or_default()
+}
+
 struct OnboardingForm {
     cat_name: String,
     age_value: String,
@@ -212,10 +237,30 @@ struct OnboardingForm {
     last_vet_date: String,
     conditions: String,
     medications: String,
-    #[serde(default)]
     vaccine_names: Vec<String>,
-    #[serde(default)]
     vaccine_dates: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for OnboardingForm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let pairs = Vec::<(String, String)>::deserialize(deserializer)?;
+        let fields = group_form_fields(pairs);
+
+        Ok(OnboardingForm {
+            cat_name: form_scalar(&fields, "cat_name")?,
+            age_value: form_scalar(&fields, "age_value")?,
+            age_unit: form_scalar(&fields, "age_unit")?,
+            pet_indoor_outdoor: form_scalar(&fields, "pet_indoor_outdoor")?,
+            last_vet_date: form_scalar(&fields, "last_vet_date")?,
+            conditions: form_scalar(&fields, "conditions")?,
+            medications: form_scalar(&fields, "medications")?,
+            vaccine_names: form_vec(&fields, "vaccine_names"),
+            vaccine_dates: form_vec(&fields, "vaccine_dates"),
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -2199,6 +2244,45 @@ mod tests {
         let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
         let events = generate_vaccine_calendar_events(&profile, today);
         assert!(events.iter().any(|event| event.title.contains("FeLV")));
+    }
+
+    fn onboarding_form_body(extra: &str) -> String {
+        format!(
+            "cat_name=Mochi&age_value=2&age_unit=years&pet_indoor_outdoor=indoor&last_vet_date=&conditions=&medications={extra}"
+        )
+    }
+
+    #[test]
+    fn onboarding_form_deserializes_zero_vaccines() {
+        let form: OnboardingForm =
+            serde_urlencoded::from_str(&onboarding_form_body("&vaccine_names=&vaccine_dates="))
+                .expect("form");
+        assert!(parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates).is_empty());
+    }
+
+    #[test]
+    fn onboarding_form_deserializes_single_vaccine() {
+        let form: OnboardingForm = serde_urlencoded::from_str(&onboarding_form_body(
+            "&vaccine_names=FVRCP&vaccine_dates=2024-01-15",
+        ))
+        .expect("form");
+        assert_eq!(form.vaccine_names, vec!["FVRCP"]);
+        assert_eq!(form.vaccine_dates, vec!["2024-01-15"]);
+        let history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].vaccine_name, "FVRCP");
+    }
+
+    #[test]
+    fn onboarding_form_deserializes_multiple_vaccines() {
+        let form: OnboardingForm = serde_urlencoded::from_str(&onboarding_form_body(
+            "&vaccine_names=FVRCP&vaccine_names=Rabies&vaccine_dates=2024-01-15&vaccine_dates=2024-02-20",
+        ))
+        .expect("form");
+        assert_eq!(form.vaccine_names, vec!["FVRCP", "Rabies"]);
+        assert_eq!(form.vaccine_dates, vec!["2024-01-15", "2024-02-20"]);
+        let history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
+        assert_eq!(history.len(), 2);
     }
 }
 
