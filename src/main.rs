@@ -355,7 +355,7 @@ fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String,
 fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
-        paw_points: 150,
+        paw_points: 0,
         parent_level: 2,
         parent_xp: 40,
         pet_name: "Mochi".to_string(),
