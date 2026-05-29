@@ -1,11 +1,22 @@
+# User accounts and profiles are stored in SQLite at $DATA_DIR/whiskerwatch.db.
+# Render's default filesystem is EPHEMERAL — data is wiped on every deploy/restart.
+# Attach a persistent disk (paid plan) so accounts survive redeploys:
+#   Dashboard → whiskerwatch → Disks → Add disk → mount path /data
+# Or upgrade this service plan so the disk block below is applied on deploy.
 services:
   - type: web
     name: whiskerwatch
     runtime: rust
-    plan: free
+    plan: starter
     buildCommand: cargo build --release
     startCommand: ./target/release/whiskerWatchWeb
+    disk:
+      name: whiskerwatch-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
+      - key: DATA_DIR
+        value: /data
       - key: ADMIN_EMAIL
         value: rhibee003@gmail.com
       - key: ADMIN_PASSWORD

@@ -14,15 +14,19 @@ use std::{
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::{fs, io::AsyncWriteExt, net::TcpListener};
+use tokio::{fs, net::TcpListener};
 use tower_http::services::ServeDir;
 use uuid::Uuid;
+
+mod storage;
+use storage::Storage;
 
 const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
 const USER_SESSION_COOKIE: &str = "ww_user_session";
 
 #[derive(Clone)]
 struct AppState {
+    storage: Storage,
     admin_sessions: Arc<Mutex<HashSet<String>>>,
     user_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
@@ -371,11 +375,12 @@ fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
         .cloned()
 }
 
-async fn user_name_for_email(email: &str) -> Option<String> {
-    load_users()
-        .await
-        .into_iter()
-        .find(|user| user.email.eq_ignore_ascii_case(email))
+fn user_name_for_email(state: &AppState, email: &str) -> Option<String> {
+    state
+        .storage
+        .find_user_by_email(email)
+        .ok()
+        .flatten()
         .map(|user| user.name)
 }
 
@@ -385,8 +390,7 @@ async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
     };
 
     let form_email = escape_html_attr(&email);
-    let form_name = user_name_for_email(&email)
-        .await
+    let form_name = user_name_for_email(state, &email)
         .map(|name| escape_html_attr(&name))
         .unwrap_or_default();
     (form_name, form_email)
@@ -504,41 +508,17 @@ fn default_profile(email: &str) -> UserProfile {
     }
 }
 
-async fn load_profiles() -> Vec<UserProfile> {
-    load_json_lines::<UserProfile>("data/user_profiles.jsonl").await
+async fn save_profile(state: &AppState, profile: &UserProfile) -> Result<(), storage::StorageError> {
+    state.storage.save_profile(profile)
 }
 
-async fn save_profile(profile: &UserProfile) -> Result<(), std::io::Error> {
-    let mut profiles = load_profiles().await;
-    if let Some(existing) = profiles
-        .iter_mut()
-        .find(|item| item.email.eq_ignore_ascii_case(&profile.email))
-    {
-        *existing = profile.clone();
-    } else {
-        profiles.push(profile.clone());
-    }
-
-    fs::create_dir_all("data").await?;
-    let mut lines = String::new();
-    for item in profiles {
-        lines.push_str(&serde_json::to_string(&item).expect("profile should serialize"));
-        lines.push('\n');
-    }
-    fs::write("data/user_profiles.jsonl", lines).await
-}
-
-async fn get_or_create_profile(email: &str) -> UserProfile {
-    if let Some(profile) = load_profiles()
-        .await
-        .into_iter()
-        .find(|item| item.email.eq_ignore_ascii_case(email))
-    {
+async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
+    if let Ok(Some(profile)) = state.storage.load_profile(email) {
         return profile;
     }
 
     let profile = default_profile(email);
-    let _ = save_profile(&profile).await;
+    let _ = save_profile(state, &profile).await;
     profile
 }
 
@@ -1387,11 +1367,12 @@ fn render_calendar_data_json(profile: &UserProfile, month: u32, year: u32) -> St
     serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
 }
 
-async fn member_since_label(email: &str) -> String {
-    load_users()
-        .await
-        .into_iter()
-        .find(|user| user.email.eq_ignore_ascii_case(email))
+async fn member_since_label(state: &AppState, email: &str) -> String {
+    state
+        .storage
+        .find_user_by_email(email)
+        .ok()
+        .flatten()
         .map(|user| format_timestamp(user.created_at))
         .unwrap_or_else(|| "Recently joined".to_string())
 }
@@ -1406,10 +1387,8 @@ async fn dashboard_page(
         Err(redirect) => return redirect.into_response(),
     };
 
-    let profile = get_or_create_profile(&email).await;
-    let user_name = user_name_for_email(&email)
-        .await
-        .unwrap_or_else(|| "Parent".to_string());
+    let profile = get_or_create_profile(&state, &email).await;
+    let user_name = user_name_for_email(&state, &email).unwrap_or_else(|| "Parent".to_string());
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
     let calendar_month = current_calendar_month();
     let calendar_year = current_calendar_year();
@@ -1428,7 +1407,7 @@ async fn dashboard_page(
     let body = template
         .replace("{{USER_NAME}}", &escape_html(&user_name))
         .replace("{{USER_EMAIL}}", &escape_html(&email))
-        .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&email).await))
+        .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&state, &email).await))
         .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
         .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
@@ -1499,7 +1478,7 @@ async fn onboarding_submit(
         }
     };
 
-    let mut profile = get_or_create_profile(&email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
     let signup_date = Local::now().date_naive();
 
     profile.pet_name = cat_name.to_string();
@@ -1521,7 +1500,7 @@ async fn onboarding_submit(
         &format!("Set up {pet_name}'s profile, vet visits, and vaccine schedule."),
     );
 
-    match save_profile(&profile).await {
+    match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?status=onboarding_done"),
         Err(_) => Redirect::to("/home?status=onboarding_invalid"),
     }
@@ -1541,7 +1520,7 @@ async fn outfit_buy(
         return Redirect::to("/home?tab=outfits&status=outfit_invalid");
     };
 
-    let mut profile = get_or_create_profile(&email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
 
     if profile.owned_outfits.iter().any(|id| id == outfit.id) {
         return Redirect::to("/home?tab=outfits&status=outfit_owned");
@@ -1559,7 +1538,7 @@ async fn outfit_buy(
         &format!("Purchased {} for {} paw points.", outfit.name, outfit.price),
     );
 
-    match save_profile(&profile).await {
+    match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=outfits&status=outfit_bought"),
         Err(_) => Redirect::to("/home?tab=outfits&status=outfit_invalid"),
     }
@@ -1579,7 +1558,7 @@ async fn outfit_equip(
         return Redirect::to("/home?tab=outfits&status=outfit_invalid");
     };
 
-    let mut profile = get_or_create_profile(&email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
 
     if !profile.owned_outfits.iter().any(|id| id == outfit.id) {
         return Redirect::to("/home?tab=outfits&status=outfit_invalid");
@@ -1592,7 +1571,7 @@ async fn outfit_equip(
         &format!("Equipped {} on {}.", outfit.name, pet_name),
     );
 
-    match save_profile(&profile).await {
+    match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=outfits&status=outfit_equipped"),
         Err(_) => Redirect::to("/home?tab=outfits&status=outfit_invalid"),
     }
@@ -1608,7 +1587,7 @@ async fn task_toggle(
         Err(redirect) => return redirect,
     };
 
-    let mut profile = get_or_create_profile(&email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
     let task_id = form.task_id.trim();
 
     let Some(index) = profile.tasks.iter().position(|task| task.id == task_id) else {
@@ -1619,7 +1598,7 @@ async fn task_toggle(
         let title = profile.tasks[index].title.clone();
         profile.tasks[index].completed = false;
         push_activity(&mut profile, &format!("Reopened task: {title}."));
-        return match save_profile(&profile).await {
+        return match save_profile(&state, &profile).await {
             Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened"),
             Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
         };
@@ -1644,7 +1623,7 @@ async fn task_toggle(
         &format!("Completed \"{title}\" and earned {reward} paw points."),
     );
 
-    match save_profile(&profile).await {
+    match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=tasks&status=task_done"),
         Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
     }
@@ -1679,14 +1658,14 @@ async fn paw_points_buy(
         _ => return Redirect::to("/home?tab=account&status=points_invalid"),
     };
 
-    let mut profile = get_or_create_profile(&email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
     profile.paw_points += points;
     push_activity(
         &mut profile,
         &format!("Purchased {points} paw points with card ending {}.", &card_number[card_number.len().saturating_sub(4)..]),
     );
 
-    match save_profile(&profile).await {
+    match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=account&status=points_bought"),
         Err(_) => Redirect::to("/home?tab=account&status=points_invalid"),
     }
@@ -1877,11 +1856,11 @@ async fn login_submit(
         return signed_in_redirect(&state, jar, email);
     }
 
-    if user_login_valid(email, password).await {
+    if user_login_valid(&state, email, password) {
         return signed_in_redirect(&state, jar, email);
     }
 
-    if !email_exists(email).await {
+    if !email_exists(&state, email) {
         let encoded_email = encode_component(email);
         return Redirect::to(&format!("/signup?reason=notfound&email={encoded_email}")).into_response();
     }
@@ -1889,41 +1868,24 @@ async fn login_submit(
     Redirect::to("/login?error=invalid").into_response()
 }
 
-async fn load_users() -> Vec<User> {
-    let contents = match fs::read_to_string("data/users.jsonl").await {
-        Ok(contents) => contents,
-        Err(_) => return Vec::new(),
-    };
-
-    contents
-        .lines()
-        .filter_map(|line| serde_json::from_str::<User>(line).ok())
-        .collect()
+fn user_login_valid(state: &AppState, email: &str, password: &str) -> bool {
+    state
+        .storage
+        .validate_login(email, password)
+        .unwrap_or(false)
 }
 
-async fn user_login_valid(email: &str, password: &str) -> bool {
-    load_users()
-        .await
-        .into_iter()
-        .any(|user| user.email.eq_ignore_ascii_case(email) && user.password == password)
-}
-
-async fn email_exists(email: &str) -> bool {
+fn email_exists(state: &AppState, email: &str) -> bool {
     if email.eq_ignore_ascii_case("demo@whiskerwatch.app")
         || email.eq_ignore_ascii_case(&admin_email())
     {
         return true;
     }
 
-    load_users()
-        .await
-        .into_iter()
-        .any(|user| user.email.eq_ignore_ascii_case(email))
+    state.storage.user_exists(email).unwrap_or(false)
 }
 
-async fn save_user(form: &SignupForm) -> Result<(), std::io::Error> {
-    fs::create_dir_all("data").await?;
-
+fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::StorageError> {
     let user = User {
         name: form.name.trim().to_string(),
         email: form.email.trim().to_string(),
@@ -1931,7 +1893,7 @@ async fn save_user(form: &SignupForm) -> Result<(), std::io::Error> {
         created_at: timestamp_now(),
     };
 
-    append_json_line("data/users.jsonl", &user).await
+    state.storage.save_user(&user)
 }
 
 async fn signup_submit(
@@ -1947,29 +1909,20 @@ async fn signup_submit(
         return Redirect::to("/signup?error=missing").into_response();
     }
 
-    if email_exists(email).await {
+    if email_exists(&state, email) {
         return Redirect::to("/signup?error=exists").into_response();
     }
 
-    match save_user(&form).await {
+    match save_user(&state, &form) {
         Ok(()) => signed_in_redirect(&state, jar, email),
         Err(_) => Redirect::to("/signup?error=failed").into_response(),
     }
 }
 
-async fn append_json_line<T: Serialize>(path: &str, value: &T) -> Result<(), std::io::Error> {
-    fs::create_dir_all("data").await?;
-    let line = serde_json::to_string(value).expect("value should serialize");
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .await?;
-    file.write_all(format!("{line}\n").as_bytes()).await?;
-    Ok(())
-}
-
-async fn save_contact_submission(form: &ContactForm) -> Result<(), std::io::Error> {
+fn save_contact_submission(
+    state: &AppState,
+    form: &ContactForm,
+) -> Result<(), storage::StorageError> {
     let submission = ContactSubmission {
         name: form.name.trim().to_string(),
         email: form.email.trim().to_string(),
@@ -1978,10 +1931,13 @@ async fn save_contact_submission(form: &ContactForm) -> Result<(), std::io::Erro
         submitted_at: timestamp_now(),
     };
 
-    append_json_line("data/contact_messages.jsonl", &submission).await
+    state.storage.save_contact(&submission)
 }
 
-async fn save_feedback_submission(form: &FeedbackForm) -> Result<(), std::io::Error> {
+fn save_feedback_submission(
+    state: &AppState,
+    form: &FeedbackForm,
+) -> Result<(), storage::StorageError> {
     let submission = FeedbackSubmission {
         name: form.name.trim().to_string(),
         email: form.email.trim().to_string(),
@@ -1990,10 +1946,13 @@ async fn save_feedback_submission(form: &FeedbackForm) -> Result<(), std::io::Er
         submitted_at: timestamp_now(),
     };
 
-    append_json_line("data/feedback.jsonl", &submission).await
+    state.storage.save_feedback(&submission)
 }
 
-async fn contact_submit(Form(form): Form<ContactForm>) -> impl IntoResponse {
+async fn contact_submit(
+    State(state): State<AppState>,
+    Form(form): Form<ContactForm>,
+) -> impl IntoResponse {
     let name = form.name.trim();
     let email = form.email.trim();
     let subject = form.subject.trim();
@@ -2003,13 +1962,16 @@ async fn contact_submit(Form(form): Form<ContactForm>) -> impl IntoResponse {
         return Redirect::to("/contact?status=missing");
     }
 
-    match save_contact_submission(&form).await {
+    match save_contact_submission(&state, &form) {
         Ok(()) => Redirect::to("/contact?status=sent"),
         Err(_) => Redirect::to("/contact?status=failed"),
     }
 }
 
-async fn feedback_submit(Form(form): Form<FeedbackForm>) -> impl IntoResponse {
+async fn feedback_submit(
+    State(state): State<AppState>,
+    Form(form): Form<FeedbackForm>,
+) -> impl IntoResponse {
     let name = form.name.trim();
     let email = form.email.trim();
     let category = form.category.trim();
@@ -2023,22 +1985,10 @@ async fn feedback_submit(Form(form): Form<FeedbackForm>) -> impl IntoResponse {
         return Redirect::to("/feedback?status=missing");
     }
 
-    match save_feedback_submission(&form).await {
+    match save_feedback_submission(&state, &form) {
         Ok(()) => Redirect::to("/feedback?status=sent"),
         Err(_) => Redirect::to("/feedback?status=failed"),
     }
-}
-
-async fn load_json_lines<T: for<'de> Deserialize<'de>>(path: &str) -> Vec<T> {
-    let contents = match fs::read_to_string(path).await {
-        Ok(contents) => contents,
-        Err(_) => return Vec::new(),
-    };
-
-    contents
-        .lines()
-        .filter_map(|line| serde_json::from_str::<T>(line).ok())
-        .collect()
 }
 
 fn render_submission_rows(
@@ -2069,8 +2019,8 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         return Redirect::to("/login").into_response();
     }
 
-    let feedback = load_json_lines::<FeedbackSubmission>("data/feedback.jsonl").await;
-    let contacts = load_json_lines::<ContactSubmission>("data/contact_messages.jsonl").await;
+    let feedback = state.storage.load_feedback().unwrap_or_default();
+    let contacts = state.storage.load_contacts().unwrap_or_default();
 
     let feedback_rows: Vec<(&str, &str, &str, &str, u64)> = feedback
         .iter()
@@ -2254,7 +2204,16 @@ mod tests {
 
 #[tokio::main]
 async fn main() {
+    let storage = Storage::open().unwrap_or_else(|error| {
+        panic!("failed to open storage: {error:?}");
+    });
+    eprintln!(
+        "Using data directory: {} (database: whiskerwatch.db)",
+        storage.data_dir().display()
+    );
+
     let state = AppState {
+        storage,
         admin_sessions: Arc::new(Mutex::new(HashSet::new())),
         user_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
