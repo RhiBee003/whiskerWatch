@@ -356,8 +356,8 @@ fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
         paw_points: 0,
-        parent_level: 2,
-        parent_xp: 40,
+        parent_level: 1,
+        parent_xp: 0,
         pet_name: "Mochi".to_string(),
         pet_breed: "Tabby companion".to_string(),
         pet_mood: "Playful".to_string(),
@@ -411,16 +411,7 @@ fn default_profile(email: &str) -> UserProfile {
                 time_label: "Jun 3 · afternoon".to_string(),
             },
         ],
-        activity: vec![
-            ProfileActivity {
-                message: "Welcome to your WhiskerWatch home!".to_string(),
-                timestamp: timestamp_now(),
-            },
-            ProfileActivity {
-                message: "Earned 10 paw points for litter box care.".to_string(),
-                timestamp: timestamp_now().saturating_sub(86_400),
-            },
-        ],
+        activity: vec![],
     }
 }
 
