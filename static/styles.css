@@ -425,9 +425,11 @@ img {
   margin-bottom: 0.5rem;
 }
 
-.homepage-footer .logo-text {
-  color: #fff;
-  font-size: 1.6rem;
+.homepage-footer .brand-logo {
+  height: 1.8rem;
+  width: auto;
+  filter: brightness(0) invert(1);
+  box-shadow: none;
 }
 
 .homepage-footer p {
