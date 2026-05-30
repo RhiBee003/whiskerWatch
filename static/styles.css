@@ -1,5 +1,5 @@
 :root {
-  --pink-bg: #e8a0c4;
+  --pink-bg: #fac8dd;
   --pink-card: #f2b8d4;
   --pink-surface: rgba(255, 205, 225, 0.52);
   --pink-surface-soft: rgba(255, 215, 232, 0.45);
@@ -29,7 +29,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 1.2rem 3rem;
-  background: rgba(232, 160, 196, 0.94);
+  background: rgba(250, 200, 221, 0.94);
   backdrop-filter: blur(8px);
 }
 
@@ -55,7 +55,7 @@ body {
   border-radius: 0.55rem;
   font-size: 1.2rem;
   border: 2px solid #211a23;
-  background: #f0a0c8;
+  background: #fac8dd;
 }
 
 .logo-text {
@@ -378,7 +378,7 @@ footer {
 
 footer .logo-mark {
   border-color: #fff;
-  background: #f0a0c8;
+  background: #fac8dd;
 }
 
 footer p {
@@ -389,7 +389,7 @@ footer p {
 
 /* Logged-in dashboard */
 .dashboard-body {
-  background: linear-gradient(165deg, #d890b4 0%, #e8b0cc 45%, #f4c8dc 100%);
+  background: linear-gradient(165deg, #f0b0cc 0%, #fac8dd 45%, #fde4ef 100%);
   min-height: 100vh;
 }
 
@@ -401,7 +401,7 @@ footer p {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 2rem;
-  background: rgba(210, 115, 160, 0.96);
+  background: rgba(240, 168, 200, 0.96);
   backdrop-filter: blur(10px);
   border-bottom: 2px solid rgba(80, 40, 60, 0.12);
 }
