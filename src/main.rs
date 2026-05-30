@@ -1096,7 +1096,7 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
               <option value="Other">Other</option>
             </select>
             <input name="vaccine_dates" type="date" aria-label="Vaccine date" />
-            <button type="button" class="vaccine-remove-btn" hidden aria-label="Remove vaccine row">×</button>
+            <button type="button" class="vaccine-remove-btn" aria-label="Remove vaccine row">×</button>
           </div>
         </div>
         <button type="button" class="download-btn vaccine-add-btn" id="add-vaccine-row">+ Add vaccine</button>

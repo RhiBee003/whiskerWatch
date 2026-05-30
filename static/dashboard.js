@@ -175,21 +175,21 @@
 
   const vaccineRows = document.getElementById("vaccine-rows");
   const addVaccineRowBtn = document.getElementById("add-vaccine-row");
+  const vaccineRowTemplate =
+    vaccineRows && vaccineRows.querySelector(".vaccine-row")
+      ? vaccineRows.querySelector(".vaccine-row").cloneNode(true)
+      : null;
 
   function bindVaccineRow(row) {
     const removeBtn = row.querySelector(".vaccine-remove-btn");
     if (!removeBtn) {
       return;
     }
-    removeBtn.hidden = vaccineRows && vaccineRows.children.length <= 1;
     removeBtn.addEventListener("click", () => {
-      if (!vaccineRows || vaccineRows.children.length <= 1) {
+      if (!vaccineRows) {
         return;
       }
       row.remove();
-      vaccineRows.querySelectorAll(".vaccine-remove-btn").forEach((btn, index, all) => {
-        btn.hidden = all.length <= 1;
-      });
     });
   }
 
@@ -197,20 +197,13 @@
     vaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
   }
 
-  if (addVaccineRowBtn && vaccineRows) {
+  if (addVaccineRowBtn && vaccineRows && vaccineRowTemplate) {
     addVaccineRowBtn.addEventListener("click", () => {
-      const template = vaccineRows.querySelector(".vaccine-row");
-      if (!template) {
-        return;
-      }
-      const row = template.cloneNode(true);
+      const row = vaccineRowTemplate.cloneNode(true);
       row.querySelectorAll("select, input").forEach((field) => {
         field.value = "";
       });
       vaccineRows.appendChild(row);
-      vaccineRows.querySelectorAll(".vaccine-remove-btn").forEach((btn) => {
-        btn.hidden = false;
-      });
       bindVaccineRow(row);
     });
   }
