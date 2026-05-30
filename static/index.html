@@ -6,62 +6,169 @@
     <title>WhiskerWatch</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <header class="topbar">
-      <div class="brand" aria-label="WhiskerWatch">
-        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
-      </div>
+  <body class="homepage">
+    <header class="topbar homepage-topbar">
+      <a class="brand" href="#home" aria-label="WhiskerWatch home">
+        <img class="brand-cat-icon" src="/images/logo.png" alt="" />
+        <span class="logo-text">whiskerwatch</span>
+      </a>
       <nav>
         <a href="#home">HOME</a>
         <a href="#features">FEATURES</a>
-        <a href="/login">LOG IN</a>
-        <a href="/feedback">FEEDBACK</a>
+        {{AUTH_NAV_LINK}}
         <a href="/contact">CONTACT</a>
       </nav>
     </header>
 
     <main id="home">
-      <section class="hero section">
-        <div class="copy">
-          <h1>WhiskerWatch helps you stay on top of your cat's needs.</h1>
-          <a class="download-btn" href="#download">Download the App</a>
-          <a class="download-btn" href="/feedback">Send Feedback</a>
-          <p>
-            Get helpful alerts for feeding, play, checkups, and more. Complete tasks to earn paw points, then spend
-            them on cute outfits and snacks for your personal virtual pet.
+      <section class="home-hero section">
+        <div class="home-hero-copy">
+          <h1>The app for cat owners, from a cat owner.</h1>
+          <a class="home-download-btn" href="#download" id="download">
+            <span class="home-app-icon" aria-hidden="true">
+              <span class="home-app-icon-ww">WW</span>
+            </span>
+            <span class="home-download-label">Download the App</span>
+            <svg class="home-download-arrow" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 3v12m0 0l4-4m-4 4l-4-4M5 19h14"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                fill="none"
+              />
+            </svg>
+          </a>
+          <p class="home-hero-sub">
+            Get the app on your watch to stay updated on your kitties needs! ios and android compatible.
           </p>
+        </div>
+        <div class="home-hero-art">
+          <img src="/images/hero-woman-cat.png" alt="A cat owner playing with a black kitten" />
         </div>
       </section>
 
-      <section class="feature-strip section" id="features">
-        <article class="card">
-          <h2>Get alerts when your cat needs care.</h2>
-          <p>WhiskerWatch sends reminders for the moments that matter, from playtime to meals.</p>
+      <section class="home-features" id="features">
+        <article class="home-feature home-feature-play">
+          <div class="home-feature-card">
+            <h2>Be notified when it's time to play!</h2>
+            <div class="ww-notification">
+              <div class="ww-notif-icon" aria-hidden="true">
+                <span>WW</span>
+              </div>
+              <div class="ww-notif-body">
+                <strong>WhiskerWatch</strong>
+                <p>Cinder needs attention ~ Click now to log quality time spent with your fur baby!</p>
+              </div>
+            </div>
+          </div>
+          <div class="home-feature-art home-feature-art-right">
+            <span class="home-connector home-connector-right" aria-hidden="true"></span>
+            <img src="/images/cat-leaping.png" alt="Black cat leaping through a cozy living room" />
+          </div>
         </article>
-        <article class="card">
-          <h2>Earn paw points by completing care tasks.</h2>
-          <p>Every completed reminder helps your real cat and rewards you with points.</p>
+
+        <article class="home-feature home-feature-feed">
+          <div class="home-feature-art home-feature-art-left">
+            <span class="home-connector home-connector-left" aria-hidden="true"></span>
+            <img src="/images/cat-eating.png" alt="Black cat eating from a bowl" />
+          </div>
+          <div class="home-feature-card">
+            <h2>Feeding reminders so your kitties are always on schedule!</h2>
+            <div class="ww-notification">
+              <div class="ww-notif-icon" aria-hidden="true">
+                <span>WW</span>
+              </div>
+              <div class="ww-notif-body">
+                <strong>WhiskerWatch</strong>
+                <p>Cinder is hangry ~ Feed your fur babies and check in for paw points while they eat!</p>
+              </div>
+            </div>
+          </div>
         </article>
-        <article class="card">
-          <h2>Your virtual pet reflects your cat's needs.</h2>
-          <p>Use paw points to unlock adorable outfits and snacks for your personal companion.</p>
+
+        <article class="home-feature home-feature-health">
+          <div class="home-feature-card">
+            <h2>Alway stay up to date on shots and check ups with check up + health tracking</h2>
+            <div class="ww-notification">
+              <div class="ww-notif-icon" aria-hidden="true">
+                <span>WW</span>
+              </div>
+              <div class="ww-notif-body">
+                <strong>WhiskerWatch</strong>
+                <p>Fill out Cinders monthly health report for paw points!</p>
+              </div>
+            </div>
+            <div class="ww-notification">
+              <div class="ww-notif-icon" aria-hidden="true">
+                <span>WW</span>
+              </div>
+              <div class="ww-notif-body">
+                <strong>WhiskerWatch</strong>
+                <p>Schedule with the doc! 25 days until Cinder's recommended vet appointment.</p>
+              </div>
+            </div>
+          </div>
+          <div class="home-feature-art home-feature-art-right">
+            <span class="home-connector home-connector-right" aria-hidden="true"></span>
+            <img src="/images/vet-scene.png" alt="Veterinarian examining a black cat" />
+          </div>
         </article>
       </section>
 
-      <section class="cta section" id="download">
-        <div class="cta-card">
-          <h2>Download on iOS or Android</h2>
-          <p>Start tracking care, earning paw points, and customizing your virtual pet today.</p>
+      <section class="home-pawpoints section">
+        <div class="home-pawpoints-phone">
+          <img src="/images/phone-mockup.png" alt="Happy Paws Tracker app showing Cinder's check-up and shots due" />
+        </div>
+        <div class="home-pawpoints-copy">
+          <h2 class="home-serif-title">Paw points!</h2>
+          <img class="home-paw-cookies" src="/images/paw-cookies.png" alt="Stack of paw-shaped cookies" />
+          <div class="home-progress-bar" role="presentation">
+            <span class="home-progress-fill"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-earn section">
+        <div class="home-earn-card">
+          <h3>Earn paw points to customize your kitty.</h3>
+          <div class="ww-notification">
+            <div class="ww-notif-icon" aria-hidden="true">
+              <span>WW</span>
+            </div>
+            <div class="ww-notif-body">
+              <strong>WhiskerWatch</strong>
+              <p>You have 1000 paw points ~ Go shopping for cat and environment customization!</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-shop section" id="contact">
+        <h2 class="home-serif-title home-shop-title">Paw points!</h2>
+        <img class="home-paw-cookies home-shop-cookies" src="/images/paw-cookies.png" alt="" aria-hidden="true" />
+        <div class="home-progress-bar home-shop-progress" role="presentation">
+          <span class="home-progress-fill"></span>
+        </div>
+        <div class="home-shop-grid-wrap">
+          <img src="/images/shop-grid.png" alt="Outfit shop: detective hat, crown, pirate hat, and kimono" />
         </div>
       </section>
     </main>
 
-    <footer id="contact">
-      <div class="brand" aria-label="WhiskerWatch">
-        <span class="logo-mark" aria-hidden="true">🐾</span>
+    <footer class="homepage-footer">
+      <div class="homepage-footer-brand">
+        <img class="brand-cat-icon" src="/images/logo.png" alt="" />
         <span class="logo-text">whiskerwatch</span>
       </div>
-      <p>Care for your real cat, then reward your virtual pet with paw point goodies.</p>
+      <p>Keep your kitties happy ~ in home life, <strong>and virtual!</strong></p>
+      <p class="homepage-footer-links">
+        <a href="/login">Log in</a>
+        <span aria-hidden="true">·</span>
+        <a href="/contact">Contact</a>
+      </p>
     </footer>
   </body>
 </html>

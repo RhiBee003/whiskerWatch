@@ -1146,7 +1146,13 @@ async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     }
 
     match fs::read_to_string("static/index.html").await {
-        Ok(contents) => Html(contents).into_response(),
+        Ok(contents) => {
+            let html = contents.replace(
+                "{{AUTH_NAV_LINK}}",
+                r#"<a href="/login">LOG IN</a>"#,
+            );
+            Html(html).into_response()
+        }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Could not load homepage".to_string(),
