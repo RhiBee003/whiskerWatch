@@ -420,6 +420,14 @@ fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
         .cloned()
 }
 
+fn auth_nav_link_html(state: &AppState, jar: &CookieJar) -> &'static str {
+    if user_session_email(state, jar).is_some() {
+        r#"<a href="/home?tab=account">ACCOUNT</a>"#
+    } else {
+        r#"<a href="/login">LOG IN</a>"#
+    }
+}
+
 fn user_name_for_email(state: &AppState, email: &str) -> Option<String> {
     state
         .storage
@@ -1147,10 +1155,7 @@ async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 
     match fs::read_to_string("static/index.html").await {
         Ok(contents) => {
-            let html = contents.replace(
-                "{{AUTH_NAV_LINK}}",
-                r#"<a href="/login">LOG IN</a>"#,
-            );
+            let html = contents.replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar));
             Html(html).into_response()
         }
         Err(_) => (
@@ -2310,6 +2315,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(index_page))
+        .route("/index.html", get(|| async { Redirect::permanent("/") }))
         .route("/home", get(dashboard_page))
         .route("/home/onboarding", post(onboarding_submit))
         .route("/home/outfits/buy", post(outfit_buy))
