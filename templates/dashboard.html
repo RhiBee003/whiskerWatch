@@ -42,6 +42,7 @@
         <button type="button" class="dashboard-tab" data-tab="outfits" role="tab" aria-selected="false">Outfits</button>
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
+        <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
       </nav>
 
@@ -122,6 +123,11 @@
           </ul>
         </section>
 
+        <section id="panel-health" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Health</h1>
+          {{HEALTH_TAB_CONTENT}}
+        </section>
+
         <section id="panel-calendar" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Calendar</h1>
           <p class="panel-intro">{{CALENDAR_MONTH_LABEL}}</p>
@@ -145,6 +151,7 @@
     </div>
 
     {{ONBOARDING_MODAL}}
+    {{VET_FOLLOWUP_MODAL}}
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/dashboard.js"></script>

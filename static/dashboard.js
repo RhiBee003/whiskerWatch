@@ -22,13 +22,23 @@
 
   const params = new URLSearchParams(window.location.search);
   const requestedTab = params.get("tab");
-  const validTabs = ["pet", "points", "outfits", "account", "tasks", "calendar"];
+  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "calendar"];
   if (requestedTab && validTabs.includes(requestedTab)) {
     showTab(requestedTab);
   }
 
+  const vetFollowup = params.get("vet_followup");
+  if (vetFollowup === "1" && !requestedTab) {
+    showTab("tasks");
+  }
+
   if (params.has("status") || params.has("tab")) {
-    const cleanUrl = window.location.pathname + (requestedTab ? "?tab=" + requestedTab : "");
+    const cleanParams = new URLSearchParams();
+    if (requestedTab) {
+      cleanParams.set("tab", requestedTab);
+    }
+    const cleanQuery = cleanParams.toString();
+    const cleanUrl = window.location.pathname + (cleanQuery ? "?" + cleanQuery : "");
     window.history.replaceState({}, document.title, cleanUrl);
   }
 
@@ -175,10 +185,19 @@
 
   const vaccineRows = document.getElementById("vaccine-rows");
   const addVaccineRowBtn = document.getElementById("add-vaccine-row");
-  const vaccineRowTemplate =
-    vaccineRows && vaccineRows.querySelector(".vaccine-row")
-      ? vaccineRows.querySelector(".vaccine-row").cloneNode(true)
-      : null;
+  const vetVaccineRows = document.getElementById("vet-vaccine-rows");
+  const vetAddVaccineRowBtn = document.getElementById("vet-add-vaccine-row");
+
+  function vaccineRowTemplateFrom(container) {
+    if (!container) {
+      return null;
+    }
+    const row = container.querySelector(".vaccine-row");
+    return row ? row.cloneNode(true) : null;
+  }
+
+  const onboardingVaccineTemplate = vaccineRowTemplateFrom(vaccineRows);
+  const vetVaccineTemplate = vaccineRowTemplateFrom(vetVaccineRows);
 
   function bindVaccineRow(row) {
     const removeBtn = row.querySelector(".vaccine-remove-btn");
@@ -186,9 +205,6 @@
       return;
     }
     removeBtn.addEventListener("click", () => {
-      if (!vaccineRows) {
-        return;
-      }
       row.remove();
     });
   }
@@ -197,13 +213,28 @@
     vaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
   }
 
-  if (addVaccineRowBtn && vaccineRows && vaccineRowTemplate) {
+  if (addVaccineRowBtn && vaccineRows && onboardingVaccineTemplate) {
     addVaccineRowBtn.addEventListener("click", () => {
-      const row = vaccineRowTemplate.cloneNode(true);
+      const row = onboardingVaccineTemplate.cloneNode(true);
       row.querySelectorAll("select, input").forEach((field) => {
         field.value = "";
       });
       vaccineRows.appendChild(row);
+      bindVaccineRow(row);
+    });
+  }
+
+  if (vetVaccineRows) {
+    vetVaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
+  }
+
+  if (vetAddVaccineRowBtn && vetVaccineRows && vetVaccineTemplate) {
+    vetAddVaccineRowBtn.addEventListener("click", () => {
+      const row = vetVaccineTemplate.cloneNode(true);
+      row.querySelectorAll("select, input").forEach((field) => {
+        field.value = "";
+      });
+      vetVaccineRows.appendChild(row);
       bindVaccineRow(row);
     });
   }

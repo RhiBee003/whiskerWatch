@@ -117,6 +117,14 @@ struct VaccineRecord {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+struct VeterinaryNote {
+    date: String,
+    note: String,
+}
+
+const VET_APPOINTMENT_TASK_ID: &str = "vet_appointment_asap";
+
+#[derive(Serialize, Deserialize, Clone)]
 struct ProfileActivity {
     message: String,
     timestamp: u64,
@@ -142,6 +150,12 @@ struct UserProfile {
     pet_age_years: Option<u32>,
     #[serde(default)]
     last_vet_date: Option<String>,
+    #[serde(default)]
+    never_been_to_vet: bool,
+    #[serde(default)]
+    veterinary_notes: Vec<VeterinaryNote>,
+    #[serde(default)]
+    vet_followup_pending: bool,
     #[serde(default)]
     pet_conditions: String,
     #[serde(default)]
@@ -193,6 +207,7 @@ const OUTFIT_CATALOG: [OutfitCatalogItem; 4] = [
 struct DashboardQuery {
     status: Option<String>,
     session_id: Option<String>,
+    vet_followup: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -277,6 +292,30 @@ impl<'de> Deserialize<'de> for OnboardingForm {
             never_been_to_vet: form_checkbox(&fields, "never_been_to_vet"),
             conditions: form_scalar(&fields, "conditions")?,
             medications: form_scalar(&fields, "medications")?,
+            vaccine_names: form_vec(&fields, "vaccine_names"),
+            vaccine_dates: form_vec(&fields, "vaccine_dates"),
+        })
+    }
+}
+
+struct VetVisitForm {
+    last_vet_date: String,
+    vet_note: String,
+    vaccine_names: Vec<String>,
+    vaccine_dates: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for VetVisitForm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let pairs = Vec::<(String, String)>::deserialize(deserializer)?;
+        let fields = group_form_fields(pairs);
+
+        Ok(VetVisitForm {
+            last_vet_date: form_optional_scalar(&fields, "last_vet_date"),
+            vet_note: form_optional_scalar(&fields, "vet_note"),
             vaccine_names: form_vec(&fields, "vaccine_names"),
             vaccine_dates: form_vec(&fields, "vaccine_dates"),
         })
@@ -586,6 +625,9 @@ fn default_profile(email: &str) -> UserProfile {
         pet_age_weeks: None,
         pet_age_years: None,
         last_vet_date: None,
+        never_been_to_vet: false,
+        veterinary_notes: vec![],
+        vet_followup_pending: false,
         pet_conditions: String::new(),
         pet_medications: String::new(),
         pet_indoor_outdoor: None,
@@ -601,13 +643,165 @@ async fn save_profile(state: &AppState, profile: &UserProfile) -> Result<(), sto
 }
 
 async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
-    if let Ok(Some(profile)) = state.storage.load_profile(email) {
-        return profile;
+    let mut profile = if let Ok(Some(profile)) = state.storage.load_profile(email) {
+        profile
+    } else {
+        default_profile(email)
+    };
+
+    if refresh_profile_tasks(&mut profile) {
+        let _ = save_profile(state, &profile).await;
     }
 
-    let profile = default_profile(email);
-    let _ = save_profile(state, &profile).await;
     profile
+}
+
+fn is_daily_task(task: &UserTask) -> bool {
+    task.due_label.to_lowercase().contains("daily") || task.id == VET_APPOINTMENT_TASK_ID
+}
+
+fn vet_appointment_task(today: NaiveDate) -> UserTask {
+    UserTask {
+        id: VET_APPOINTMENT_TASK_ID.to_string(),
+        title: "Make vet appointment ASAP".to_string(),
+        completed: false,
+        due_label: "Daily · urgent".to_string(),
+        due_day: Some(today.day()),
+        due_month: Some(today.month()),
+        due_year: Some(today.year() as u32),
+        reward: 30,
+    }
+}
+
+fn vaccines_due_or_overdue(profile: &UserProfile, today: NaiveDate) -> bool {
+    let Some(birth) = pet_birth_date(profile, today) else {
+        return false;
+    };
+
+    let history = &profile.vaccine_history;
+
+    if let Some(weeks) = profile.pet_age_weeks {
+        if weeks <= 20 {
+            for week in [6u32, 10, 14, 18] {
+                let target = week_from_birth(birth, week);
+                if target <= today && !is_dose_satisfied(VaccineKind::Fvrcp, target, history) {
+                    return true;
+                }
+            }
+
+            let rabies_at = week_from_birth(birth, 15);
+            if rabies_at <= today && !is_dose_satisfied(VaccineKind::Rabies, rabies_at, history) {
+                return true;
+            }
+
+            let felv_at = week_from_birth(birth, 8);
+            if felv_at <= today && !is_dose_satisfied(VaccineKind::Felv, felv_at, history) {
+                return true;
+            }
+
+            let felv_booster = latest_history_date(history, VaccineKind::Felv)
+                .map(|first| first + Duration::weeks(4))
+                .unwrap_or_else(|| week_from_birth(birth, 12));
+            if felv_booster <= today && !is_dose_satisfied(VaccineKind::Felv, felv_booster, history) {
+                return true;
+            }
+        }
+    }
+
+    let one_year = birth + Duration::weeks(52);
+
+    for kind in [VaccineKind::Fvrcp, VaccineKind::Rabies] {
+        let interval = Duration::days(365 * 3);
+        let mut next = latest_history_date(history, kind)
+            .map(|last| last + interval)
+            .unwrap_or(one_year);
+        while next <= today {
+            if !is_dose_satisfied(kind, next, history) {
+                return true;
+            }
+            next += interval;
+        }
+    }
+
+    let felv_interval = if is_outdoor_cat(profile) {
+        Duration::days(365)
+    } else {
+        Duration::days(365 * 3)
+    };
+    let mut felv_next = latest_history_date(history, VaccineKind::Felv)
+        .map(|last| last + felv_interval)
+        .unwrap_or(one_year);
+    while felv_next <= today {
+        if !is_dose_satisfied(VaccineKind::Felv, felv_next, history) {
+            return true;
+        }
+        felv_next += felv_interval;
+    }
+
+    generate_vaccine_calendar_events(profile, today)
+        .iter()
+        .any(|event| {
+            NaiveDate::from_ymd_opt(event.year as i32, event.month, event.day)
+                .is_some_and(|date| date <= today)
+        })
+}
+
+fn needs_vet_appointment_asap(profile: &UserProfile, today: NaiveDate) -> bool {
+    if !profile.onboarding_completed {
+        return false;
+    }
+
+    if profile.never_been_to_vet {
+        return true;
+    }
+
+    if profile.last_vet_date.is_none() {
+        return true;
+    }
+
+    vaccines_due_or_overdue(profile, today)
+}
+
+fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
+    let today = Local::now().date_naive();
+    let month = today.month();
+    let year = today.year() as u32;
+    let day = today.day();
+    let mut changed = false;
+
+    for task in &mut profile.tasks {
+        if is_daily_task(task) {
+            let stale = task.due_day != Some(day)
+                || task.due_month != Some(month)
+                || task.due_year != Some(year);
+            if stale {
+                task.completed = false;
+                task.due_day = Some(day);
+                task.due_month = Some(month);
+                task.due_year = Some(year);
+                if task.id == VET_APPOINTMENT_TASK_ID {
+                    task.due_label = "Daily · urgent".to_string();
+                }
+                changed = true;
+            }
+        }
+    }
+
+    let needs_vet = needs_vet_appointment_asap(profile, today);
+    let has_vet_task = profile
+        .tasks
+        .iter()
+        .any(|task| task.id == VET_APPOINTMENT_TASK_ID);
+
+    if needs_vet && !has_vet_task {
+        profile.tasks.insert(0, vet_appointment_task(today));
+        changed = true;
+    } else if !needs_vet && has_vet_task {
+        profile.tasks.retain(|task| task.id != VET_APPOINTMENT_TASK_ID);
+        changed = true;
+    }
+
+    changed
 }
 
 pub(crate) fn push_activity(profile: &mut UserProfile, message: &str) {
@@ -1069,13 +1263,178 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
     };
 
     format!(
-        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl>"#,
+        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl><p class="field-hint">See the <strong>Health</strong> tab for full veterinary notes and records.</p>"#,
         age = escape_html(&age_display(profile)),
         lifestyle = lifestyle,
         last_vet = last_vet,
         conditions = conditions,
         medications = medications,
         vaccine_list = vaccine_list,
+    )
+}
+
+fn render_vaccine_row_html(name: &str, date: &str) -> String {
+    let options = ["FVRCP", "Rabies", "FeLV", "Other"];
+    let select_options: String = options
+        .iter()
+        .map(|option| {
+            let selected = if name.eq_ignore_ascii_case(option) {
+                " selected"
+            } else {
+                ""
+            };
+            format!(r#"<option value="{option}"{selected}>{option}</option>"#)
+        })
+        .collect();
+
+    format!(
+        r#"<div class="vaccine-row"><select name="vaccine_names" aria-label="Vaccine name"><option value="">Select vaccine</option>{select_options}</select><input name="vaccine_dates" type="date" value="{date}" aria-label="Vaccine date" /><button type="button" class="vaccine-remove-btn" aria-label="Remove vaccine row">×</button></div>"#,
+        date = escape_html_attr(date),
+    )
+}
+
+fn render_vet_followup_modal(profile: &UserProfile, show: bool) -> String {
+    if !show || !profile.onboarding_completed {
+        return String::new();
+    }
+
+    let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+    let last_vet_value = profile
+        .last_vet_date
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&today);
+
+    let vaccine_rows = if profile.vaccine_history.is_empty() {
+        render_vaccine_row_html("", "")
+    } else {
+        profile
+            .vaccine_history
+            .iter()
+            .map(|record| render_vaccine_row_html(&record.vaccine_name, &record.date))
+            .collect::<String>()
+    };
+
+    format!(
+        r#"<div class="onboarding-backdrop" id="vet-followup-modal" role="dialog" aria-modal="true" aria-labelledby="vet-followup-title">
+  <div class="onboarding-modal">
+    <h2 id="vet-followup-title">Record vet visit 🏥</h2>
+    <p class="onboarding-intro">Update vaccines and add notes from your appointment so your Health tab stays current.</p>
+    <form class="onboarding-form login-form" action="/home/vet-visit" method="post">
+      <label for="vet_last_vet_date">Last vet appointment</label>
+      <input id="vet_last_vet_date" name="last_vet_date" type="date" value="{last_vet}" />
+
+      <fieldset class="vaccine-history-fieldset">
+        <legend>Vaccines given</legend>
+        <p class="field-hint">Add or edit vaccines from this visit.</p>
+        <div id="vet-vaccine-rows" class="vaccine-rows">
+          {vaccine_rows}
+        </div>
+        <button type="button" class="download-btn vaccine-add-btn" id="vet-add-vaccine-row">+ Add vaccine</button>
+      </fieldset>
+
+      <label for="vet_note">Veterinary notes</label>
+      <textarea id="vet_note" name="vet_note" rows="4" placeholder="Exam findings, recommendations, follow-up instructions…"></textarea>
+
+      <button type="submit" class="download-btn login-submit">Save vet visit</button>
+    </form>
+  </div>
+</div>"#,
+        last_vet = escape_html_attr(last_vet_value),
+        vaccine_rows = vaccine_rows,
+    )
+}
+
+fn render_health_tab(profile: &UserProfile) -> String {
+    if !profile.onboarding_completed {
+        return r#"<p class="panel-intro">Complete onboarding on your first visit to see health records here.</p>"#.to_string();
+    }
+
+    let last_vet = profile
+        .last_vet_date
+        .as_deref()
+        .map(|date| escape_html(date))
+        .unwrap_or_else(|| "Never".to_string());
+
+    let conditions = if profile.pet_conditions.trim().is_empty() {
+        "None noted".to_string()
+    } else {
+        escape_html(&profile.pet_conditions)
+    };
+
+    let medications = if profile.pet_medications.trim().is_empty() {
+        "None noted".to_string()
+    } else {
+        escape_html(&profile.pet_medications)
+    };
+
+    let lifestyle = escape_html(&indoor_outdoor_display(
+        profile.pet_indoor_outdoor.as_deref(),
+    ));
+
+    let vaccine_list = if profile.vaccine_history.is_empty() {
+        "<li>No vaccines recorded yet.</li>".to_string()
+    } else {
+        profile
+            .vaccine_history
+            .iter()
+            .map(|record| {
+                format!(
+                    "<li><strong>{}</strong> — {}</li>",
+                    escape_html(&record.vaccine_name),
+                    escape_html(&record.date)
+                )
+            })
+            .collect()
+    };
+
+    let notes_list = if profile.veterinary_notes.is_empty() {
+        "<li>No veterinary notes yet. Complete a vet appointment task to add notes.</li>".to_string()
+    } else {
+        profile
+            .veterinary_notes
+            .iter()
+            .rev()
+            .map(|entry| {
+                format!(
+                    "<li><strong>{}</strong><p>{}</p></li>",
+                    escape_html(&entry.date),
+                    escape_html(&entry.note)
+                )
+            })
+            .collect()
+    };
+
+    format!(
+        r#"<p class="panel-intro">Health records for {pet_name} — vaccines, vet visits, and notes.</p>
+<div class="health-grid">
+  <article class="dashboard-card">
+    <h2>Overview</h2>
+    <dl class="pet-health-dl">
+      <dt>Age</dt><dd>{age}</dd>
+      <dt>Lifestyle</dt><dd>{lifestyle}</dd>
+      <dt>Last vet appointment</dt><dd>{last_vet}</dd>
+      <dt>Conditions</dt><dd>{conditions}</dd>
+      <dt>Medications</dt><dd>{medications}</dd>
+    </dl>
+  </article>
+  <article class="dashboard-card">
+    <h2>Vaccine history</h2>
+    <ul class="vaccine-history-list health-record-list">{vaccine_list}</ul>
+  </article>
+  <article class="dashboard-card health-notes-card">
+    <h2>Veterinary notes</h2>
+    <ul class="health-notes-list">{notes_list}</ul>
+  </article>
+</div>"#,
+        pet_name = escape_html(&profile.pet_name),
+        age = escape_html(&age_display(profile)),
+        lifestyle = lifestyle,
+        last_vet = last_vet,
+        conditions = conditions,
+        medications = medications,
+        vaccine_list = vaccine_list,
+        notes_list = notes_list,
     )
 }
 
@@ -1253,6 +1612,12 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("onboarding_invalid") => {
             r#"<p class="auth-error" role="alert">Please enter your cat's name, a valid age, and whether they are indoor or outdoor.</p>"#
+        }
+        Some("vet_visit_done") => {
+            r#"<p class="auth-success" role="status">Vet visit saved! Vaccines and health notes updated.</p>"#
+        }
+        Some("vet_visit_invalid") => {
+            r#"<p class="auth-error" role="alert">Could not save vet visit. Check vaccine dates and try again.</p>"#
         }
         _ => "",
     }
@@ -1500,6 +1865,8 @@ async fn dashboard_page(
     }
 
     let profile = get_or_create_profile(&state, &email).await;
+    let show_vet_followup = profile.vet_followup_pending
+        || query.vet_followup.as_deref().is_some_and(|value| value == "1");
     let user_name = user_name_for_email(&state, &email).unwrap_or_else(|| "Parent".to_string());
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
     let calendar_month = current_calendar_month();
@@ -1530,6 +1897,11 @@ async fn dashboard_page(
         .replace("{{PET_EMOJI}}", &profile.pet_emoji)
         .replace("{{PET_HEALTH_INFO}}", &render_pet_health_info(&profile))
         .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
+        .replace(
+            "{{VET_FOLLOWUP_MODAL}}",
+            &render_vet_followup_modal(&profile, show_vet_followup),
+        )
+        .replace("{{HEALTH_TAB_CONTENT}}", &render_health_tab(&profile))
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
         .replace("{{STATUS_BLOCK}}", &dashboard_status_block(query.status.as_deref()))
         .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
@@ -1601,6 +1973,7 @@ async fn onboarding_submit(
     profile.pet_mood = "Happy".to_string();
     profile.pet_age_weeks = pet_age_weeks;
     profile.pet_age_years = pet_age_years;
+    profile.never_been_to_vet = form.never_been_to_vet;
     profile.last_vet_date = last_vet_date;
     profile.pet_conditions = form.conditions.trim().to_string();
     profile.pet_medications = form.medications.trim().to_string();
@@ -1608,6 +1981,7 @@ async fn onboarding_submit(
     profile.vaccine_history = vaccine_history;
     profile.onboarding_completed = true;
     profile.calendar_events = merge_calendar_events(&profile, signup_date);
+    let _ = refresh_profile_tasks(&mut profile);
 
     let pet_name = profile.pet_name.clone();
     push_activity(
@@ -1738,9 +2112,76 @@ async fn task_toggle(
         &format!("Completed \"{title}\" and earned {reward} paw points."),
     );
 
+    let is_vet_task = task_id == VET_APPOINTMENT_TASK_ID;
+    if is_vet_task {
+        profile.vet_followup_pending = true;
+    }
+
     match save_profile(&state, &profile).await {
+        Ok(()) if is_vet_task => {
+            Redirect::to("/home?tab=tasks&vet_followup=1&status=task_done")
+        }
         Ok(()) => Redirect::to("/home?tab=tasks&status=task_done"),
         Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+    }
+}
+
+async fn vet_visit_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<VetVisitForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+
+    let vaccine_history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
+
+    let last_vet_date = {
+        let trimmed = form.last_vet_date.trim();
+        if trimmed.is_empty() {
+            None
+        } else if parse_vet_date(trimmed).is_some() {
+            Some(trimmed.to_string())
+        } else {
+            return Redirect::to("/home?tab=health&status=vet_visit_invalid");
+        }
+    };
+
+    let note_text = form.vet_note.trim();
+    if !note_text.is_empty() {
+        let note_date = last_vet_date
+            .clone()
+            .unwrap_or_else(|| Local::now().date_naive().format("%Y-%m-%d").to_string());
+        profile.veterinary_notes.push(VeterinaryNote {
+            date: note_date,
+            note: note_text.to_string(),
+        });
+    }
+
+    profile.vaccine_history = vaccine_history;
+    if last_vet_date.is_some() {
+        profile.last_vet_date = last_vet_date;
+        profile.never_been_to_vet = false;
+    }
+    profile.vet_followup_pending = false;
+
+    let today = Local::now().date_naive();
+    profile.calendar_events = merge_calendar_events(&profile, today);
+    let _ = refresh_profile_tasks(&mut profile);
+
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Recorded a vet visit for {pet_name} and updated health records."),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to("/home?tab=health&status=vet_visit_done"),
+        Err(_) => Redirect::to("/home?tab=health&status=vet_visit_invalid"),
     }
 }
 
@@ -2043,7 +2484,10 @@ async fn signup_submit(
 
     match save_user(&state, &form) {
         Ok(()) => signed_in_redirect(&state, jar, email),
-        Err(_) => Redirect::to("/signup?error=failed").into_response(),
+        Err(error) => {
+            eprintln!("signup failed for {email}: {error}");
+            Redirect::to("/signup?error=failed").into_response()
+        }
     }
 }
 
@@ -2280,6 +2724,9 @@ mod tests {
             pet_age_weeks: Some(weeks),
             pet_age_years: None,
             last_vet_date: None,
+            never_been_to_vet: false,
+            veterinary_notes: vec![],
+            vet_followup_pending: false,
             pet_conditions: String::new(),
             pet_medications: String::new(),
             pet_indoor_outdoor: Some(indoor.to_string()),
@@ -2398,6 +2845,35 @@ mod tests {
                 .any(|event| event.title.contains("Vet checkup reminder"))
         );
     }
+
+    #[test]
+    fn never_been_to_vet_triggers_asap_task() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        profile.never_been_to_vet = true;
+        profile.last_vet_date = None;
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        assert!(needs_vet_appointment_asap(&profile, today));
+        profile.tasks.clear();
+        assert!(refresh_profile_tasks(&mut profile));
+        assert!(
+            profile
+                .tasks
+                .iter()
+                .any(|task| task.id == VET_APPOINTMENT_TASK_ID)
+        );
+    }
+
+    #[test]
+    fn overdue_vaccine_triggers_asap_task() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        profile.never_been_to_vet = false;
+        profile.last_vet_date = Some("2025-01-01".to_string());
+        assert!(vaccines_due_or_overdue(&profile, today));
+        assert!(needs_vet_appointment_asap(&profile, today));
+    }
 }
 
 #[tokio::main]
@@ -2406,8 +2882,9 @@ async fn main() {
         panic!("failed to open storage: {error:?}");
     });
     eprintln!(
-        "Using data directory: {} (database: whiskerwatch.db)",
-        storage.data_dir().display()
+        "Using data directory: {} (database: {})",
+        storage.data_dir().display(),
+        storage.db_path().display()
     );
 
     let state = AppState {
@@ -2421,6 +2898,7 @@ async fn main() {
         .route("/index.html", get(|| async { Redirect::permanent("/") }))
         .route("/home", get(dashboard_page))
         .route("/home/onboarding", post(onboarding_submit))
+        .route("/home/vet-visit", post(vet_visit_submit))
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
