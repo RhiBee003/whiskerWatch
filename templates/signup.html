@@ -97,8 +97,34 @@
               </span>
             </button>
           </div>
+          <ul
+            class="password-requirements"
+            id="signup-password-requirements"
+            aria-live="polite"
+            aria-label="Password requirements"
+          >
+            <li id="pw-req-length" data-requirement="length">
+              <span class="password-req-icon" aria-hidden="true"></span>
+              At least 5 characters
+            </li>
+            <li id="pw-req-digit" data-requirement="digit">
+              <span class="password-req-icon" aria-hidden="true"></span>
+              At least one number
+            </li>
+            <li id="pw-req-special" data-requirement="special">
+              <span class="password-req-icon" aria-hidden="true"></span>
+              At least one special character
+            </li>
+          </ul>
 
-          <button type="submit" class="download-btn login-submit">Sign Up</button>
+          <button
+            type="submit"
+            class="download-btn login-submit"
+            id="signup-submit"
+            disabled
+          >
+            Sign Up
+          </button>
         </form>
 
         <p class="auth-footer">Already have an account?</p>
@@ -107,6 +133,53 @@
     </main>
     <script src="/password-toggle.js"></script>
     <script>
+      (function () {
+        var form = document.querySelector(".login-form");
+        var passwordInput = document.getElementById("signup-password");
+        var submitBtn = document.getElementById("signup-submit");
+        var reqLength = document.getElementById("pw-req-length");
+        var reqDigit = document.getElementById("pw-req-digit");
+        var reqSpecial = document.getElementById("pw-req-special");
+
+        function passwordChecks(value) {
+          return {
+            length: value.length >= 5,
+            digit: /\d/.test(value),
+            special: /[^A-Za-z0-9]/.test(value),
+          };
+        }
+
+        function setRequirementState(item, met) {
+          item.classList.toggle("password-req-met", met);
+          item.classList.toggle("password-req-unmet", !met);
+          item.setAttribute("aria-checked", met ? "true" : "false");
+        }
+
+        function updatePasswordRequirements() {
+          var value = passwordInput.value;
+          var checks = passwordChecks(value);
+          setRequirementState(reqLength, checks.length);
+          setRequirementState(reqDigit, checks.digit);
+          setRequirementState(reqSpecial, checks.special);
+          var valid =
+            checks.length && checks.digit && checks.special;
+          submitBtn.disabled = !valid;
+          return valid;
+        }
+
+        passwordInput.addEventListener("input", updatePasswordRequirements);
+        passwordInput.addEventListener("blur", updatePasswordRequirements);
+
+        form.addEventListener("submit", function (event) {
+          if (!updatePasswordRequirements()) {
+            event.preventDefault();
+            passwordInput.focus();
+          }
+        });
+
+        updatePasswordRequirements();
+      })();
+
       if (window.location.search) {
         window.history.replaceState({}, document.title, window.location.pathname);
       }

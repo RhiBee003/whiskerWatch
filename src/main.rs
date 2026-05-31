@@ -2589,6 +2589,9 @@ async fn signup_page(
                 Some("username") => {
                     r#"<p class="auth-error" role="alert">That username is already taken. Please choose another.</p>"#
                 }
+                Some("password") => {
+                    r#"<p class="auth-error" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
+                }
                 Some("failed") => {
                     r#"<p class="auth-error" role="alert">We could not create your account. Please try again.</p>"#
                 }
@@ -2768,6 +2771,15 @@ fn email_exists(state: &AppState, email: &str) -> bool {
     email_exists_result(state, email).unwrap_or(false)
 }
 
+fn password_meets_signup_requirements(password: &str) -> bool {
+    if password.len() < 5 {
+        return false;
+    }
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    let has_special = password.chars().any(|c| !c.is_alphanumeric());
+    has_digit && has_special
+}
+
 fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::StorageError> {
     let user = User {
         username: form.username.trim().to_string(),
@@ -2799,6 +2811,12 @@ async fn signup_submit(
         || password.is_empty()
     {
         return Redirect::to("/signup?error=missing").into_response();
+    }
+
+    if !password_meets_signup_requirements(password) {
+        let encoded_email = encode_component(email);
+        return Redirect::to(&format!("/signup?error=password&email={encoded_email}"))
+            .into_response();
     }
 
     if email_exists(&state, email) {
@@ -3075,6 +3093,24 @@ mod tests {
             stripe_customer_id: None,
             pet_photo_url: None,
         }
+    }
+
+    #[test]
+    fn signup_password_requires_minimum_length() {
+        assert!(!password_meets_signup_requirements("a1!"));
+        assert!(password_meets_signup_requirements("ab12!"));
+    }
+
+    #[test]
+    fn signup_password_requires_digit() {
+        assert!(!password_meets_signup_requirements("abcde!"));
+        assert!(password_meets_signup_requirements("abcde1!"));
+    }
+
+    #[test]
+    fn signup_password_requires_special_character() {
+        assert!(!password_meets_signup_requirements("abcde1"));
+        assert!(password_meets_signup_requirements("abcde1!"));
     }
 
     #[test]
