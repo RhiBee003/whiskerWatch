@@ -1,14 +1,34 @@
 (function () {
   document.querySelectorAll("[data-password-toggle]").forEach(function (btn) {
-    var field = btn.closest(".password-field") && btn.closest(".password-field").querySelector("input");
+    var wrap = btn.closest(".password-field");
+    var field = wrap && wrap.querySelector("input");
     if (!field) return;
 
+    var iconShow = btn.querySelector(".password-toggle-icon--show");
+    var iconHide = btn.querySelector(".password-toggle-icon--hide");
+
+    function updateToggleState(showing) {
+      field.type = showing ? "text" : "password";
+      btn.setAttribute("aria-label", showing ? "Hide password" : "Show password");
+      btn.setAttribute("aria-pressed", showing ? "true" : "false");
+      if (iconShow) iconShow.hidden = showing;
+      if (iconHide) iconHide.hidden = !showing;
+    }
+
+    function syncVisibility() {
+      var hasText = field.value.length >= 1;
+      btn.classList.toggle("password-toggle--hidden", !hasText);
+      if (!hasText) {
+        updateToggleState(false);
+      }
+    }
+
+    field.addEventListener("input", syncVisibility);
+    syncVisibility();
+
     btn.addEventListener("click", function () {
-      var show = field.type === "password";
-      field.type = show ? "text" : "password";
-      btn.textContent = show ? "Hide" : "Show";
-      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
-      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      if (field.value.length < 1) return;
+      updateToggleState(field.type === "password");
     });
   });
 })();
