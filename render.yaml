@@ -1,21 +1,27 @@
-# Deploy the Rust server (NOT the old React static site).
-# If whiskerwatch.onrender.com still shows a React SPA with <div id="root">,
-# reconfigure the Render service: Runtime = Rust, Branch = main, Build = cargo build --release.
+# WhiskerWatch Render Blueprint — Rust web service (NOT a static React site).
 #
-# User accounts and profiles are stored in SQLite at $DATA_DIR/whiskerwatch.db.
-# Render's default filesystem is EPHEMERAL — data is wiped on every deploy/restart.
-# Attach a persistent disk (paid plan) so accounts survive redeploys:
-#   Dashboard → whiskerwatch → Disks → Add disk → mount path /data
-# Or upgrade this service plan so the disk block below is applied on deploy.
+# If https://whiskerwatch.onrender.com still shows a React SPA (<div id="root">),
+# the existing Render resource is a Static Site from March 2025. Runtime cannot be
+# changed after creation — delete that Static Site, then sync this Blueprint to
+# create a Web Service named "whiskerwatch" (same .onrender.com URL).
+#
+# GitHub default branch should be "main" (Settings → Branches) so auto-deploy
+# matches this file. Repo: https://github.com/RhiBee003/whiskerWatch.git
+#
+# SQLite lives at $DATA_DIR/whiskerwatch.db. Attach the disk below (Starter plan+)
+# so user accounts survive redeploys.
 services:
   - type: web
     name: whiskerwatch
     runtime: rust
     plan: starter
+    region: oregon
     repo: https://github.com/RhiBee003/whiskerWatch.git
     branch: main
     buildCommand: cargo build --release
     startCommand: ./target/release/whiskerWatchWeb
+    healthCheckPath: /
+    autoDeploy: true
     disk:
       name: whiskerwatch-data
       mountPath: /data
