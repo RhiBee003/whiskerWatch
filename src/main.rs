@@ -483,7 +483,6 @@ fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String,
 
 fn default_starter_tasks() -> Vec<UserTask> {
     let today = Local::now().date_naive();
-    let yesterday = today.pred_opt().unwrap_or(today);
     let month = today.month();
     let year = today.year() as u32;
 
@@ -499,6 +498,16 @@ fn default_starter_tasks() -> Vec<UserTask> {
             reward: 15,
         },
         UserTask {
+            id: "water_bowl_morning".to_string(),
+            title: "Fill water bowl".to_string(),
+            completed: false,
+            due_label: "Daily · 8:00 AM".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
+            reward: 12,
+        },
+        UserTask {
             id: "play_session".to_string(),
             title: "15-minute play session".to_string(),
             completed: false,
@@ -512,17 +521,27 @@ fn default_starter_tasks() -> Vec<UserTask> {
             id: "litter_check".to_string(),
             title: "Refresh litter box".to_string(),
             completed: false,
-            due_label: "Yesterday".to_string(),
-            due_day: Some(yesterday.day()),
-            due_month: Some(yesterday.month()),
-            due_year: Some(yesterday.year() as u32),
+            due_label: "Daily · anytime".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
             reward: 10,
         },
         UserTask {
-            id: "water_bowl".to_string(),
-            title: "Refill water bowl".to_string(),
+            id: "replace_litter".to_string(),
+            title: "Replace litter".to_string(),
             completed: false,
-            due_label: "Today · anytime".to_string(),
+            due_label: "Weekly · anytime".to_string(),
+            due_day: Some(today.day()),
+            due_month: Some(month),
+            due_year: Some(year),
+            reward: 25,
+        },
+        UserTask {
+            id: "water_bowl_night".to_string(),
+            title: "Fill water bowl".to_string(),
+            completed: false,
+            due_label: "Daily · 9:00 PM".to_string(),
             due_day: Some(today.day()),
             due_month: Some(month),
             due_year: Some(year),
