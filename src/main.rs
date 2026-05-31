@@ -1910,6 +1910,7 @@ async fn contact_page(
             let body = contents
                 .replace("{{CONTACT_SUCCESS_BLOCK}}", contact_success_block)
                 .replace("{{CONTACT_ERROR_BLOCK}}", contact_error_block)
+                .replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar))
                 .replace("{{CONTACT_EMAIL}}", &contact_email)
                 .replace("{{FORM_NAME}}", &form_name)
                 .replace("{{FORM_EMAIL}}", &form_email);
@@ -1949,6 +1950,7 @@ async fn feedback_page(
             let body = contents
                 .replace("{{FEEDBACK_SUCCESS_BLOCK}}", feedback_success_block)
                 .replace("{{FEEDBACK_ERROR_BLOCK}}", feedback_error_block)
+                .replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar))
                 .replace("{{FORM_NAME}}", &form_name)
                 .replace("{{FORM_EMAIL}}", &form_email);
             Html(body).into_response()
