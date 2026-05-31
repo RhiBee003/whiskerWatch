@@ -32,7 +32,18 @@
           <input id="email" name="email" type="email" placeholder="demo@whiskerwatch.app" required />
 
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" placeholder="meow123" required />
+          <div class="password-field">
+            <input id="password" name="password" type="password" placeholder="meow123" required />
+            <button
+              type="button"
+              class="password-toggle"
+              data-password-toggle
+              aria-label="Show password"
+              aria-pressed="false"
+            >
+              Show
+            </button>
+          </div>
 
           <button type="submit" class="download-btn login-submit">Log In</button>
         </form>
@@ -41,6 +52,7 @@
         <a href="/signup" class="download-btn auth-link-btn">Sign Up</a>
       </section>
     </main>
+    <script src="/password-toggle.js"></script>
     <script>
       if (window.location.search) {
         window.history.replaceState({}, document.title, window.location.pathname);

@@ -42,7 +42,24 @@
           />
 
           <label for="signup-password">Password</label>
-          <input id="signup-password" name="password" type="password" placeholder="Choose a password" required />
+          <div class="password-field">
+            <input
+              id="signup-password"
+              name="password"
+              type="password"
+              placeholder="Choose a password"
+              required
+            />
+            <button
+              type="button"
+              class="password-toggle"
+              data-password-toggle
+              aria-label="Show password"
+              aria-pressed="false"
+            >
+              Show
+            </button>
+          </div>
 
           <button type="submit" class="download-btn login-submit">Sign Up</button>
         </form>
@@ -51,6 +68,7 @@
         <a href="/login" class="download-btn auth-link-btn">Log In</a>
       </section>
     </main>
+    <script src="/password-toggle.js"></script>
     <script>
       if (window.location.search) {
         window.history.replaceState({}, document.title, window.location.pathname);
