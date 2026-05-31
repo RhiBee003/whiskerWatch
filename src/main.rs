@@ -737,19 +737,52 @@ async fn save_pet_photo(
     Ok(format!("/uploads/{filename}"))
 }
 
+fn render_pet_user_photo_optional(profile: &UserProfile) -> String {
+    let Some(url) = profile.pet_photo_url.as_deref().filter(|value| !value.is_empty()) else {
+        return String::new();
+    };
+    let name = escape_html(&profile.pet_name);
+    format!(
+        r#"<div class="pet-user-photo-optional" hidden>
+      <img src="{url}" alt="Photo of {name}" width="96" height="96" />
+    </div>"#,
+        url = escape_html_attr(url),
+        name = name,
+    )
+}
+
 fn render_pet_avatar(profile: &UserProfile) -> String {
-    if let Some(url) = profile.pet_photo_url.as_deref().filter(|value| !value.is_empty()) {
-        format!(
-            r#"<img class="pet-avatar pet-avatar-photo" src="{url}" alt="Photo of {name}" />"#,
-            url = escape_html_attr(url),
-            name = escape_html(&profile.pet_name),
-        )
+    let pet_name = escape_html(&profile.pet_name);
+    let display_name = if profile.pet_name.trim().is_empty() {
+        "Cinder".to_string()
     } else {
-        format!(
-            r#"<div class="pet-avatar pet-avatar-placeholder" aria-hidden="true">{emoji}</div>"#,
-            emoji = profile.pet_emoji,
-        )
-    }
+        pet_name.clone()
+    };
+    let photo_toggle = if profile
+        .pet_photo_url
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        r#"<button type="button" class="cinder-photo-toggle" aria-pressed="false">Show my cat photo</button>"#
+    } else {
+        ""
+    };
+    let user_photo = render_pet_user_photo_optional(profile);
+    format!(
+        r#"<div class="pet-cinder-stage" id="cinder-pet-stage" data-pet-name="{display_name}">
+      <p class="cinder-pet-label">{display_name}</p>
+      <div class="cinder-orbit-arena" aria-hidden="true">
+        <div class="cinder-walker">
+          <img class="cinder-sprite" src="/images/cinder/idle.svg" width="96" height="96" alt="" />
+        </div>
+      </div>
+      {user_photo}
+      {photo_toggle}
+    </div>"#,
+        display_name = display_name,
+        user_photo = user_photo,
+        photo_toggle = photo_toggle,
+    )
 }
 
 async fn save_profile(state: &AppState, profile: &UserProfile) -> Result<(), storage::StorageError> {
@@ -3114,20 +3147,22 @@ mod tests {
     }
 
     #[test]
-    fn render_pet_avatar_uses_photo_when_present() {
-        let mut profile = test_profile_weeks(10, "indoor");
-        profile.pet_photo_url = Some("/uploads/example.jpg".to_string());
+    fn render_pet_avatar_renders_cinder_stage() {
+        let profile = test_profile_weeks(10, "indoor");
         let html = render_pet_avatar(&profile);
-        assert!(html.contains("pet-avatar-photo"));
-        assert!(html.contains("/uploads/example.jpg"));
+        assert!(html.contains("cinder-pet-stage"));
+        assert!(html.contains("/images/cinder/idle.svg"));
+        assert!(html.contains("Mochi"));
     }
 
     #[test]
-    fn render_pet_avatar_falls_back_to_emoji() {
-        let profile = test_profile_weeks(10, "indoor");
+    fn render_pet_user_photo_optional_when_uploaded() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        profile.pet_photo_url = Some("/uploads/example.jpg".to_string());
         let html = render_pet_avatar(&profile);
-        assert!(html.contains("pet-avatar-placeholder"));
-        assert!(html.contains("🐱"));
+        assert!(html.contains("cinder-photo-toggle"));
+        assert!(html.contains("/uploads/example.jpg"));
+        assert!(html.contains("pet-user-photo-optional"));
     }
 
     #[test]

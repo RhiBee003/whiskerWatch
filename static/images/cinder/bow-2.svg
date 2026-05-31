@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Cinder play bow low">
+  <ellipse cx="64" cy="104" rx="38" ry="8" fill="#1a1218" opacity="0.15"/>
+  <path d="M32 80 Q24 100 36 110 Q54 114 64 110 Q74 114 92 110 Q104 100 96 80 Z" fill="#1f151c"/>
+  <path d="M50 74 Q64 66 78 74 L76 84 Q64 90 52 84 Z" fill="#2a1f28" transform="rotate(28 64 78)"/>
+  <path d="M44 68 L38 50 L52 60 Z" fill="#2a1f28" transform="rotate(32 46 60)"/>
+  <path d="M84 68 L90 50 L76 60 Z" fill="#2a1f28" transform="rotate(-32 82 60)"/>
+  <path d="M50 82 Q54 86 58 82" stroke="#1a1218" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M70 82 Q74 86 78 82" stroke="#1a1218" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M26 96 L18 112" stroke="#1f151c" stroke-width="7" stroke-linecap="round"/>
+  <path d="M102 96 L110 112" stroke="#1f151c" stroke-width="7" stroke-linecap="round"/>
+  <path d="M58 94 Q64 104 70 112" stroke="#1f151c" stroke-width="7" fill="none" stroke-linecap="round"/>
+</svg>
