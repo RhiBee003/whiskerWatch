@@ -1713,8 +1713,12 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
       <fieldset class="pet-photo-fieldset">
         <legend>Cat profile photo</legend>
         <p class="field-hint">Add a photo of your cat for the My Pet tab. JPEG, PNG, or WebP up to 5MB.</p>
-        <label for="pet_photo" class="pet-photo-file-label">Choose photo</label>
-        <input id="pet_photo" name="pet_photo" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
+        <div class="pet-photo-upload">
+          <input id="pet_photo" name="pet_photo" type="file" class="pet-photo-input" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
+          <label for="pet_photo" class="pet-photo-paw-btn" aria-label="Choose cat profile photo">
+            <span class="pet-photo-paw-icon" aria-hidden="true">🐾</span>
+          </label>
+        </div>
         <div id="pet-photo-preview" class="pet-photo-preview" hidden aria-live="polite"></div>
         <label class="checkbox-pill skip-photo-option">
           <input type="checkbox" id="skip_photo" name="skip_photo" value="on" />
