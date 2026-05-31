@@ -10,6 +10,8 @@ pub enum StorageError {
     Json(serde_json::Error),
     Io(std::io::Error),
     PasswordHash(bcrypt::BcryptError),
+    EmailTaken,
+    UsernameTaken,
 }
 
 impl std::fmt::Display for StorageError {
@@ -19,6 +21,8 @@ impl std::fmt::Display for StorageError {
             Self::Json(error) => write!(f, "json error: {error}"),
             Self::Io(error) => write!(f, "io error: {error}"),
             Self::PasswordHash(error) => write!(f, "password hash error: {error}"),
+            Self::EmailTaken => write!(f, "email already registered"),
+            Self::UsernameTaken => write!(f, "username already taken"),
         }
     }
 }
@@ -64,7 +68,7 @@ fn find_project_root(mut start: PathBuf) -> Option<PathBuf> {
     }
 }
 
-fn default_data_dir() -> PathBuf {
+fn project_root_from_candidates() -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd);
@@ -77,16 +81,28 @@ fn default_data_dir() -> PathBuf {
 
     for start in candidates {
         if let Some(root) = find_project_root(start) {
-            return root.join("data");
+            return Some(root);
         }
     }
-
-    PathBuf::from("data")
+    None
 }
 
-fn resolve_data_dir(dir: PathBuf) -> PathBuf {
-    if dir.is_absolute() {
-        dir
+fn default_data_dir() -> PathBuf {
+    if let Some(root) = project_root_from_candidates() {
+        return root.join("data");
+    }
+
+    eprintln!(
+        "warning: could not find project root (Cargo.toml); using ./data under the current directory"
+    );
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("data")
+}
+
+fn resolve_relative_data_dir(dir: PathBuf) -> PathBuf {
+    if let Some(root) = project_root_from_candidates() {
+        root.join(dir)
     } else {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
@@ -95,10 +111,27 @@ fn resolve_data_dir(dir: PathBuf) -> PathBuf {
 }
 
 pub fn data_dir_from_env() -> PathBuf {
-    let dir = std::env::var("DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| default_data_dir());
-    resolve_data_dir(dir)
+    match std::env::var("DATA_DIR") {
+        Ok(path) if !path.trim().is_empty() => {
+            let dir = PathBuf::from(path.trim());
+            if dir.is_absolute() {
+                dir
+            } else {
+                resolve_relative_data_dir(dir)
+            }
+        }
+        _ => default_data_dir(),
+    }
+}
+
+fn is_unique_constraint(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(code, _) => {
+            code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                || code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT
+        }
+        _ => false,
+    }
 }
 
 fn is_bcrypt_hash(password: &str) -> bool {
@@ -361,13 +394,20 @@ impl Storage {
     }
 
     pub fn save_user(&self, user: &User) -> Result<(), StorageError> {
+        if self.user_exists(&user.email)? {
+            return Err(StorageError::EmailTaken);
+        }
+        if self.username_exists(&user.username)? {
+            return Err(StorageError::UsernameTaken);
+        }
+
         let stored_password = if is_bcrypt_hash(&user.password) {
             user.password.clone()
         } else {
             hash_password(&user.password)?
         };
         let conn = self.conn.lock().expect("storage lock");
-        conn.execute(
+        match conn.execute(
             "INSERT INTO users (email, username, first_name, last_name, password, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
@@ -378,8 +418,22 @@ impl Storage {
                 stored_password,
                 user.created_at as i64
             ],
-        )?;
-        Ok(())
+        ) {
+            Ok(_) => Ok(()),
+            Err(error) if is_unique_constraint(&error) => {
+                let email_taken: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM users WHERE email = ?1 COLLATE NOCASE",
+                    params![user.email],
+                    |row| row.get(0),
+                )?;
+                if email_taken > 0 {
+                    Err(StorageError::EmailTaken)
+                } else {
+                    Err(StorageError::UsernameTaken)
+                }
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn username_exists(&self, username: &str) -> Result<bool, StorageError> {
@@ -775,18 +829,49 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_email_returns_email_taken() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let email = "dup@test.local";
+
+        storage
+            .save_user(&test_user(email, "pass1"))
+            .expect("first save");
+        let err = storage
+            .save_user(&test_user(email, "pass2"))
+            .expect_err("duplicate email");
+        assert!(matches!(err, StorageError::EmailTaken));
+    }
+
+    #[test]
+    fn relative_data_dir_anchors_to_project_root() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let nested = manifest_dir.join("target").join("storage-data-dir-test");
+        fs::create_dir_all(&nested).expect("create nested dir");
+
+        std::env::set_var("DATA_DIR", "data");
+        std::env::set_current_dir(&nested).expect("chdir nested");
+
+        let data_dir = data_dir_from_env();
+        assert_eq!(data_dir, manifest_dir.join("data"));
+
+        std::env::remove_var("DATA_DIR");
+        let _ = fs::remove_dir(nested);
+        std::env::set_current_dir(&manifest_dir).expect("restore cwd");
+    }
+
+    #[test]
     fn default_data_dir_finds_project_root() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let nested = manifest_dir.join("target").join("storage-test-nested");
         fs::create_dir_all(&nested).expect("create nested dir");
 
-        let original = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(&nested).expect("chdir nested");
 
         let data_dir = default_data_dir();
         assert_eq!(data_dir, manifest_dir.join("data"));
 
-        std::env::set_current_dir(original).expect("restore cwd");
         let _ = fs::remove_dir(nested);
+        std::env::set_current_dir(&manifest_dir).expect("restore cwd");
     }
 }

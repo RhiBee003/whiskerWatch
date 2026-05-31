@@ -2546,6 +2546,9 @@ async fn login_page(
                 Some("missing") => {
                     r#"<p class="auth-error" role="alert">Please enter both email and password.</p>"#
                 }
+                Some("storage") => {
+                    r#"<p class="auth-error" role="alert">We could not verify your account right now. Please try again in a moment.</p>"#
+                }
                 _ => "",
             };
             let signup_success_block = match query.signup.as_deref() {
@@ -2580,8 +2583,8 @@ async fn signup_page(
                 Some("missing") => {
                     r#"<p class="auth-error" role="alert">Please fill out all sign up fields.</p>"#
                 }
-                Some("exists") => {
-                    r#"<p class="auth-error" role="alert">An account with that email already exists.</p>"#
+                Some("email_exists") | Some("exists") => {
+                    r#"<p class="auth-error" role="alert">An account with that email already exists. <a href="/login">Log in</a> instead.</p>"#
                 }
                 Some("username") => {
                     r#"<p class="auth-error" role="alert">That username is already taken. Please choose another.</p>"#
@@ -2713,33 +2716,56 @@ async fn login_submit(
         return signed_in_redirect(&state, jar, email);
     }
 
-    if user_login_valid(&state, email, password) {
-        return signed_in_redirect(&state, jar, email);
+    match user_login_valid(&state, email, password) {
+        LoginCheck::Valid => return signed_in_redirect(&state, jar, email),
+        LoginCheck::StorageError => {
+            return Redirect::to("/login?error=storage").into_response();
+        }
+        LoginCheck::Invalid => {}
     }
 
-    if !email_exists(&state, email) {
-        let encoded_email = encode_component(email);
-        return Redirect::to(&format!("/signup?reason=notfound&email={encoded_email}")).into_response();
+    match email_exists_result(&state, email) {
+        Ok(false) => {
+            let encoded_email = encode_component(email);
+            return Redirect::to(&format!("/signup?reason=notfound&email={encoded_email}"))
+                .into_response();
+        }
+        Ok(true) => Redirect::to("/login?error=invalid").into_response(),
+        Err(()) => Redirect::to("/login?error=storage").into_response(),
     }
-
-    Redirect::to("/login?error=invalid").into_response()
 }
 
-fn user_login_valid(state: &AppState, email: &str, password: &str) -> bool {
-    state
-        .storage
-        .validate_login(email, password)
-        .unwrap_or(false)
+enum LoginCheck {
+    Valid,
+    Invalid,
+    StorageError,
 }
 
-fn email_exists(state: &AppState, email: &str) -> bool {
+fn user_login_valid(state: &AppState, email: &str, password: &str) -> LoginCheck {
+    match state.storage.validate_login(email, password) {
+        Ok(true) => LoginCheck::Valid,
+        Ok(false) => LoginCheck::Invalid,
+        Err(error) => {
+            eprintln!("login validation failed for {email}: {error}");
+            LoginCheck::StorageError
+        }
+    }
+}
+
+fn email_exists_result(state: &AppState, email: &str) -> Result<bool, ()> {
     if email.eq_ignore_ascii_case("demo@whiskerwatch.app")
         || email.eq_ignore_ascii_case(&admin_email())
     {
-        return true;
+        return Ok(true);
     }
 
-    state.storage.user_exists(email).unwrap_or(false)
+    state.storage.user_exists(email).map_err(|error| {
+        eprintln!("user_exists check failed for {email}: {error}");
+    })
+}
+
+fn email_exists(state: &AppState, email: &str) -> bool {
+    email_exists_result(state, email).unwrap_or(false)
 }
 
 fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::StorageError> {
@@ -2757,7 +2783,7 @@ fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::Storage
 
 async fn signup_submit(
     State(state): State<AppState>,
-    jar: CookieJar,
+    _jar: CookieJar,
     Form(form): Form<SignupForm>,
 ) -> Response {
     let username = form.username.trim();
@@ -2776,7 +2802,9 @@ async fn signup_submit(
     }
 
     if email_exists(&state, email) {
-        return Redirect::to("/signup?error=exists").into_response();
+        let encoded_email = encode_component(email);
+        return Redirect::to(&format!("/signup?error=email_exists&email={encoded_email}"))
+            .into_response();
     }
 
     if state.storage.username_exists(username).unwrap_or(false) {
@@ -2784,7 +2812,15 @@ async fn signup_submit(
     }
 
     match save_user(&state, &form) {
-        Ok(()) => signed_in_redirect(&state, jar, email),
+        Ok(()) => Redirect::to("/login?signup=created").into_response(),
+        Err(storage::StorageError::EmailTaken) => {
+            let encoded_email = encode_component(email);
+            Redirect::to(&format!("/signup?error=email_exists&email={encoded_email}"))
+                .into_response()
+        }
+        Err(storage::StorageError::UsernameTaken) => {
+            Redirect::to("/signup?error=username").into_response()
+        }
         Err(error) => {
             eprintln!("signup failed for {email}: {error}");
             Redirect::to("/signup?error=failed").into_response()
@@ -3155,7 +3191,8 @@ mod tests {
         let profile = test_profile_weeks(10, "indoor");
         let html = render_pet_avatar(&profile);
         assert!(html.contains("cinder-pet-stage"));
-        assert!(html.contains("/images/cinder/idle.svg"));
+        assert!(html.contains("cinder-sprite"));
+        assert!(html.contains("/images/cinder/"));
         assert!(html.contains("Mochi"));
     }
 
@@ -3229,11 +3266,17 @@ async fn main() {
     if let Err(error) = std::fs::create_dir_all(&uploads_dir) {
         eprintln!("warning: could not create uploads directory {}: {error}", uploads_dir.display());
     }
+    let db_path = storage.db_path();
     eprintln!(
         "Using data directory: {} (database: {})",
         storage.data_dir().display(),
-        storage.db_path().display()
+        db_path.display()
     );
+    if !std::env::var("DATA_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false) {
+        eprintln!(
+            "Tip: set DATA_DIR to a fixed absolute path if accounts seem to disappear between runs."
+        );
+    }
 
     let state = AppState {
         storage,

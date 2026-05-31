@@ -68,7 +68,7 @@ Accounts and passwords are stored in **`$DATA_DIR/whiskerwatch.db`** (SQLite). P
 
 | Environment | `DATA_DIR` | Notes |
 |-------------|------------|-------|
-| Local (`cargo run`) | Auto-detected project `data/` folder | Walks up from the working directory to find `Cargo.toml`, so the same database is used even if you run the binary from another directory. Override with `DATA_DIR=/path/to/data`. |
+| Local (`cargo run`) | Auto-detected project `data/` folder | Walks up from cwd and the binary path to find `Cargo.toml`, so the same database is used even if you run from another directory. Relative `DATA_DIR=data` is also anchored to the project root when found. Override with an absolute path (e.g. `DATA_DIR=/path/to/data`) if needed. |
 | Render (see `render.yaml`) | `/data` | Requires the **persistent disk** mounted at `/data`. Without it, accounts are wiped on every deploy or restart. |
 
 ### Verify persistence locally
