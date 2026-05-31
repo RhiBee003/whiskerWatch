@@ -1,15 +1,17 @@
 # WhiskerWatch Render Blueprint — Rust web service (NOT a static React site).
 #
-# If https://whiskerwatch.onrender.com still shows a React SPA (<div id="root">),
-# the existing Render resource is a Static Site from March 2025. Runtime cannot be
-# changed after creation — delete that Static Site, then sync this Blueprint to
-# create a Web Service named "whiskerwatch" (same .onrender.com URL).
+# Live URL target: https://whiskerwatch.onrender.com
 #
-# GitHub default branch should be "main" (Settings → Branches) so auto-deploy
-# matches this file. Repo: https://github.com/RhiBee003/whiskerWatch.git
+# If that URL still shows a React SPA (<div id="root">), the existing Render
+# resource is a Static Site from March 2025. Runtime cannot be changed after
+# creation — delete that Static Site, then sync this Blueprint to create a Web
+# Service named "whiskerwatch" (same .onrender.com subdomain).
 #
-# SQLite lives at $DATA_DIR/whiskerwatch.db. Attach the disk below (Starter plan+)
-# so user accounts survive redeploys.
+# GitHub default branch MUST be "main" (not cursor/rust-website-bootstrap) so
+# auto-deploy tracks this file. See RENDER_SETUP.md.
+#
+# SQLite lives at $DATA_DIR/whiskerwatch.db. The persistent disk below (Starter+)
+# keeps user accounts across redeploys.
 services:
   - type: web
     name: whiskerwatch
@@ -21,7 +23,7 @@ services:
     buildCommand: cargo build --release
     startCommand: ./target/release/whiskerWatchWeb
     healthCheckPath: /
-    autoDeploy: true
+    autoDeployTrigger: commit
     disk:
       name: whiskerwatch-data
       mountPath: /data
@@ -29,6 +31,8 @@ services:
     envVars:
       - key: DATA_DIR
         value: /data
+      - key: PUBLIC_APP_URL
+        value: https://whiskerwatch.onrender.com
       - key: ADMIN_EMAIL
         value: rhibee003@gmail.com
       - key: ADMIN_PASSWORD

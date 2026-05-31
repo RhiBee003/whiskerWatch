@@ -1,5 +1,18 @@
 # WhiskerWatch deployment
 
+## Render (production)
+
+**Full click-by-click setup:** see [`RENDER_SETUP.md`](RENDER_SETUP.md).
+
+Quick facts:
+
+- Deploy as a **Web Service** (Rust) via `render.yaml`, **not** a Static Site.
+- GitHub branch: **`main`** (set as default branch on GitHub).
+- Persistent disk: `/data` → `$DATA_DIR/whiskerwatch.db`.
+- Live URL: https://whiskerwatch.onrender.com
+
+Verify after deploy: `./scripts/verify-render.sh`
+
 ## Stripe payments (PCI DSS / SAQ A)
 
 Card numbers and CVV are **never** sent to WhiskerWatch. Checkout uses [Stripe Checkout](https://stripe.com/docs/payments/checkout) (hosted payment page). Saved cards live in **Stripe** (Customer + PaymentMethod objects). This app stores only each user's Stripe Customer id (`cus_...`) in their profile JSON in SQLite—never PAN, CVV, or magnetic-stripe data. Paw points are credited via webhooks or the success redirect using Stripe session ids.
