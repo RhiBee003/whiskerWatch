@@ -63,14 +63,18 @@ struct FeedbackQuery {
 
 #[derive(Deserialize)]
 struct SignupForm {
-    name: String,
+    username: String,
+    first_name: String,
+    last_name: String,
     email: String,
     password: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct User {
-    name: String,
+    username: String,
+    first_name: String,
+    last_name: String,
     email: String,
     password: String,
     created_at: u64,
@@ -167,6 +171,9 @@ struct UserProfile {
     tasks: Vec<UserTask>,
     calendar_events: Vec<CalendarEvent>,
     activity: Vec<ProfileActivity>,
+    /// Stripe Customer id (`cus_...`) only—never PAN/CVV. Card data stays at Stripe.
+    #[serde(default)]
+    stripe_customer_id: Option<String>,
 }
 
 struct OutfitCatalogItem {
@@ -483,13 +490,23 @@ fn auth_nav_link_html(state: &AppState, jar: &CookieJar) -> &'static str {
     }
 }
 
-fn user_name_for_email(state: &AppState, email: &str) -> Option<String> {
+fn user_for_email(state: &AppState, email: &str) -> Option<User> {
     state
         .storage
         .find_user_by_email(email)
         .ok()
         .flatten()
-        .map(|user| user.name)
+}
+
+fn contact_name_for_email(state: &AppState, email: &str) -> Option<String> {
+    user_for_email(state, email).map(|user| {
+        let full = format!("{} {}", user.first_name.trim(), user.last_name.trim()).trim().to_string();
+        if full.is_empty() {
+            user.username
+        } else {
+            full
+        }
+    })
 }
 
 async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
@@ -498,7 +515,7 @@ async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
     };
 
     let form_email = escape_html_attr(&email);
-    let form_name = user_name_for_email(state, &email)
+    let form_name = contact_name_for_email(state, &email)
         .map(|name| escape_html_attr(&name))
         .unwrap_or_default();
     (form_name, form_email)
@@ -1867,7 +1884,19 @@ async fn dashboard_page(
     let profile = get_or_create_profile(&state, &email).await;
     let show_vet_followup = profile.vet_followup_pending
         || query.vet_followup.as_deref().is_some_and(|value| value == "1");
-    let user_name = user_name_for_email(&state, &email).unwrap_or_else(|| "Parent".to_string());
+    let user = user_for_email(&state, &email);
+    let username = user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| "Parent".to_string());
+    let first_name = user
+        .as_ref()
+        .map(|u| u.first_name.clone())
+        .unwrap_or_default();
+    let last_name = user
+        .as_ref()
+        .map(|u| u.last_name.clone())
+        .unwrap_or_default();
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
     let calendar_month = current_calendar_month();
     let calendar_year = current_calendar_year();
@@ -1884,7 +1913,10 @@ async fn dashboard_page(
     };
 
     let body = template
-        .replace("{{USER_NAME}}", &escape_html(&user_name))
+        .replace("{{USER_NAME}}", &escape_html(&username))
+        .replace("{{USER_FIRST_NAME}}", &escape_html(&first_name))
+        .replace("{{USER_LAST_NAME}}", &escape_html(&last_name))
+        .replace("{{USER_USERNAME}}", &escape_html(&username))
         .replace("{{USER_EMAIL}}", &escape_html(&email))
         .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&state, &email).await))
         .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
@@ -1920,7 +1952,11 @@ async fn dashboard_page(
             "{{CALENDAR_MONTH_LABEL}}",
             &calendar_month_label(calendar_month, calendar_year),
         )
-        .replace("{{BUY_POINTS_SECTION}}", &stripe_payments::render_buy_points_section());
+        .replace("{{BUY_POINTS_SECTION}}", &stripe_payments::render_buy_points_section())
+        .replace(
+            "{{SAVED_PAYMENT_METHODS}}",
+            &stripe_payments::render_saved_payment_methods(&state, &profile).await,
+        );
 
     Html(body).into_response()
 }
@@ -2204,7 +2240,7 @@ async fn paw_points_checkout(
         None => return Redirect::to("/home?tab=account&status=points_invalid"),
     };
 
-    match stripe_payments::create_checkout_session(&email, package).await {
+    match stripe_payments::create_checkout_session(&state, &email, package).await {
         Ok(url) => Redirect::temporary(&url),
         Err(CheckoutError::NotConfigured) => {
             Redirect::to("/home?tab=account&status=payments_unconfigured")
@@ -2297,6 +2333,9 @@ async fn signup_page(
                 }
                 Some("exists") => {
                     r#"<p class="auth-error" role="alert">An account with that email already exists.</p>"#
+                }
+                Some("username") => {
+                    r#"<p class="auth-error" role="alert">That username is already taken. Please choose another.</p>"#
                 }
                 Some("failed") => {
                     r#"<p class="auth-error" role="alert">We could not create your account. Please try again.</p>"#
@@ -2456,7 +2495,9 @@ fn email_exists(state: &AppState, email: &str) -> bool {
 
 fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::StorageError> {
     let user = User {
-        name: form.name.trim().to_string(),
+        username: form.username.trim().to_string(),
+        first_name: form.first_name.trim().to_string(),
+        last_name: form.last_name.trim().to_string(),
         email: form.email.trim().to_string(),
         password: form.password.trim().to_string(),
         created_at: timestamp_now(),
@@ -2470,16 +2511,27 @@ async fn signup_submit(
     jar: CookieJar,
     Form(form): Form<SignupForm>,
 ) -> Response {
-    let name = form.name.trim();
+    let username = form.username.trim();
+    let first_name = form.first_name.trim();
+    let last_name = form.last_name.trim();
     let email = form.email.trim();
     let password = form.password.trim();
 
-    if name.is_empty() || email.is_empty() || password.is_empty() {
+    if username.is_empty()
+        || first_name.is_empty()
+        || last_name.is_empty()
+        || email.is_empty()
+        || password.is_empty()
+    {
         return Redirect::to("/signup?error=missing").into_response();
     }
 
     if email_exists(&state, email) {
         return Redirect::to("/signup?error=exists").into_response();
+    }
+
+    if state.storage.username_exists(username).unwrap_or(false) {
+        return Redirect::to("/signup?error=username").into_response();
     }
 
     match save_user(&state, &form) {

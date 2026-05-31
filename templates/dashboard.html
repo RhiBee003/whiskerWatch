@@ -100,13 +100,21 @@
             <article class="dashboard-card">
               <h2>Profile</h2>
               <dl class="account-dl">
-                <dt>Name</dt>
-                <dd>{{USER_NAME}}</dd>
+                <dt>First name</dt>
+                <dd>{{USER_FIRST_NAME}}</dd>
+                <dt>Last name</dt>
+                <dd>{{USER_LAST_NAME}}</dd>
+                <dt>Username</dt>
+                <dd>{{USER_USERNAME}}</dd>
                 <dt>Email</dt>
                 <dd>{{USER_EMAIL}}</dd>
                 <dt>Member since</dt>
                 <dd>{{MEMBER_SINCE}}</dd>
               </dl>
+            </article>
+            <article class="dashboard-card">
+              <h2>Saved payment methods</h2>
+              {{SAVED_PAYMENT_METHODS}}
             </article>
             <article class="dashboard-card">
               <h2>Buy Paw Points</h2>

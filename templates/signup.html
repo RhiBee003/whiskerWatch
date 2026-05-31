@@ -28,8 +28,35 @@
         {{SIGNUP_ERROR_BLOCK}}
 
         <form class="login-form" action="/signup" method="post">
-          <label for="signup-name">Name</label>
-          <input id="signup-name" name="name" type="text" placeholder="Your name" required />
+          <label for="signup-username">Username</label>
+          <input
+            id="signup-username"
+            name="username"
+            type="text"
+            placeholder="Shown on your dashboard"
+            required
+            autocomplete="username"
+          />
+
+          <label for="signup-first-name">First name</label>
+          <input
+            id="signup-first-name"
+            name="first_name"
+            type="text"
+            placeholder="First name"
+            required
+            autocomplete="given-name"
+          />
+
+          <label for="signup-last-name">Last name</label>
+          <input
+            id="signup-last-name"
+            name="last_name"
+            type="text"
+            placeholder="Last name"
+            required
+            autocomplete="family-name"
+          />
 
           <label for="signup-email">Email</label>
           <input

@@ -18,6 +18,8 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 urlencoding = "2"
+bcrypt = "0.16"
 
 [dev-dependencies]
 serde_urlencoded = "0.7"
+tempfile = "3"

@@ -40,3 +40,35 @@ If `STRIPE_SECRET_KEY` is missing, the Account tab shows **Payments not configur
 | 5,000 | $50.00 |
 
 Test cards: [Stripe test cards](https://stripe.com/docs/testing#cards) (e.g. `4242 4242 4242 4242`).
+
+## User accounts and SQLite persistence
+
+Accounts and passwords are stored in **`$DATA_DIR/whiskerwatch.db`** (SQLite). Passwords are hashed with bcrypt before storage.
+
+| Environment | `DATA_DIR` | Notes |
+|-------------|------------|-------|
+| Local (`cargo run`) | Auto-detected project `data/` folder | Walks up from the working directory to find `Cargo.toml`, so the same database is used even if you run the binary from another directory. Override with `DATA_DIR=/path/to/data`. |
+| Render (see `render.yaml`) | `/data` | Requires the **persistent disk** mounted at `/data`. Without it, accounts are wiped on every deploy or restart. |
+
+### Verify persistence locally
+
+```bash
+cd whiskerWatch
+cargo run
+# Sign up at http://127.0.0.1:3000/signup, then stop the server (Ctrl+C) and run cargo run again.
+# Log in with the same email and password — it should succeed.
+sqlite3 data/whiskerwatch.db "SELECT email FROM users;"
+```
+
+On startup the server logs the resolved database path, for example:
+
+`Using data directory: /path/to/whiskerWatch/data (database: .../whiskerwatch.db)`
+
+If login fails after a restart, confirm you are hitting the same database file shown in that log line.
+
+### Render checklist
+
+1. Deploy as a **Web Service** (Rust), not a Static Site — see comments in `render.yaml`.
+2. Attach the persistent disk (`whiskerwatch-data` → `/data`) on Starter plan or higher.
+3. Set `DATA_DIR=/data` (already in `render.yaml`).
+4. After changing disk settings, redeploy once so the mount is active before creating accounts.
