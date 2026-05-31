@@ -128,7 +128,6 @@ impl Storage {
                  password TEXT NOT NULL,
                  created_at INTEGER NOT NULL
              );
-             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
              CREATE TABLE IF NOT EXISTS user_profiles (
                  email TEXT PRIMARY KEY COLLATE NOCASE,
                  profile_json TEXT NOT NULL
@@ -180,8 +179,7 @@ impl Storage {
                  last_name TEXT NOT NULL,
                  password TEXT NOT NULL,
                  created_at INTEGER NOT NULL
-             );
-             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);",
+             );",
         )?;
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -189,6 +187,13 @@ impl Storage {
         };
         storage.migrate_user_columns()?;
         Ok(storage)
+    }
+
+    fn ensure_username_index(conn: &Connection) -> Result<(), StorageError> {
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);",
+        )?;
+        Ok(())
     }
 
     fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, StorageError> {
@@ -225,6 +230,35 @@ impl Storage {
             suffix += 1;
             candidate = format!("{base}{suffix}");
         }
+    }
+
+    fn drop_legacy_name_column(conn: &Connection) -> Result<(), StorageError> {
+        if !Self::table_has_column(conn, "users", "name")? {
+            return Ok(());
+        }
+
+        conn.execute_batch(
+            "CREATE TABLE users_new (
+                 email TEXT PRIMARY KEY COLLATE NOCASE,
+                 username TEXT NOT NULL COLLATE NOCASE,
+                 first_name TEXT NOT NULL,
+                 last_name TEXT NOT NULL,
+                 password TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             INSERT INTO users_new (email, username, first_name, last_name, password, created_at)
+             SELECT email,
+                    COALESCE(NULLIF(TRIM(username), ''), 'user'),
+                    COALESCE(NULLIF(TRIM(first_name), ''), ''),
+                    COALESCE(last_name, ''),
+                    password,
+                    created_at
+             FROM users;
+             DROP TABLE users;
+             ALTER TABLE users_new RENAME TO users;
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);",
+        )?;
+        Ok(())
     }
 
     fn migrate_user_columns(&self) -> Result<(), StorageError> {
@@ -288,7 +322,11 @@ impl Storage {
             conn.execute_batch(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);",
             )?;
+        } else {
+            Self::ensure_username_index(&conn)?;
         }
+
+        Self::drop_legacy_name_column(&conn)?;
 
         Ok(())
     }
@@ -697,6 +735,43 @@ mod tests {
             .expect("find")
             .expect("user");
         assert!(is_bcrypt_hash(&user.password));
+    }
+
+    #[test]
+    fn legacy_name_column_migrates_and_allows_new_signups() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path().to_path_buf();
+        {
+            let db_path = data_dir.join("whiskerwatch.db");
+            let conn = Connection::open(db_path).expect("open legacy db");
+            conn.execute_batch(
+                "CREATE TABLE users (
+                     email TEXT PRIMARY KEY COLLATE NOCASE,
+                     name TEXT NOT NULL,
+                     password TEXT NOT NULL,
+                     created_at INTEGER NOT NULL
+                 );",
+            )
+            .expect("create legacy table");
+            conn.execute(
+                "INSERT INTO users (email, name, password, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params!["legacy@test.local", "Legacy Name", "plainpass", 1_i64],
+            )
+            .expect("seed legacy user");
+        }
+
+        let storage = Storage::open_at(data_dir.clone()).expect("open migrated storage");
+        storage
+            .save_user(&test_user("new@test.local", "NewPass1!"))
+            .expect("save after legacy migration");
+
+        let conn = Connection::open(data_dir.join("whiskerwatch.db")).expect("inspect db");
+        assert!(
+            !Storage::table_has_column(&conn, "users", "name").expect("check name column"),
+            "legacy name column should be removed"
+        );
+        assert!(storage.user_exists("new@test.local").expect("new user exists"));
+        assert!(storage.validate_login("legacy@test.local", "plainpass").expect("legacy login"));
     }
 
     #[test]
