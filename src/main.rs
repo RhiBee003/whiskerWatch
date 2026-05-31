@@ -229,12 +229,27 @@ fn form_vec(fields: &HashMap<String, Vec<String>>, key: &str) -> Vec<String> {
     fields.get(key).cloned().unwrap_or_default()
 }
 
+fn form_optional_scalar(fields: &HashMap<String, Vec<String>>, key: &str) -> String {
+    fields
+        .get(key)
+        .and_then(|values| values.first())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn form_checkbox(fields: &HashMap<String, Vec<String>>, key: &str) -> bool {
+    fields
+        .get(key)
+        .is_some_and(|values| values.iter().any(|value| matches!(value.as_str(), "on" | "true" | "1")))
+}
+
 struct OnboardingForm {
     cat_name: String,
     age_value: String,
     age_unit: String,
     pet_indoor_outdoor: String,
     last_vet_date: String,
+    never_been_to_vet: bool,
     conditions: String,
     medications: String,
     vaccine_names: Vec<String>,
@@ -254,7 +269,8 @@ impl<'de> Deserialize<'de> for OnboardingForm {
             age_value: form_scalar(&fields, "age_value")?,
             age_unit: form_scalar(&fields, "age_unit")?,
             pet_indoor_outdoor: form_scalar(&fields, "pet_indoor_outdoor")?,
-            last_vet_date: form_scalar(&fields, "last_vet_date")?,
+            last_vet_date: form_optional_scalar(&fields, "last_vet_date"),
+            never_been_to_vet: form_checkbox(&fields, "never_been_to_vet"),
             conditions: form_scalar(&fields, "conditions")?,
             medications: form_scalar(&fields, "medications")?,
             vaccine_names: form_vec(&fields, "vaccine_names"),
@@ -998,7 +1014,7 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
         .last_vet_date
         .as_deref()
         .map(|date| escape_html(date))
-        .unwrap_or_else(|| "Not recorded".to_string());
+        .unwrap_or_else(|| "Never".to_string());
 
     let conditions = if profile.pet_conditions.trim().is_empty() {
         "None noted".to_string()
@@ -1079,9 +1095,15 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
       </fieldset>
       <p class="field-hint">Outdoor cats need FeLV vaccines yearly; indoor cats every 3 years after the first year.</p>
 
-      <label for="last_vet_date">Last vet appointment</label>
-      <input id="last_vet_date" name="last_vet_date" type="date" />
-      <p class="field-hint">Optional — leave blank if this is their first visit. We will start reminders from today.</p>
+      <fieldset class="last-vet-fieldset">
+        <label for="last_vet_date">Last vet appointment</label>
+        <input id="last_vet_date" name="last_vet_date" type="date" value="" />
+        <label class="checkbox-pill never-vet-option">
+          <input type="checkbox" id="never_been_to_vet" name="never_been_to_vet" value="on" />
+          Never been to the vet
+        </label>
+      </fieldset>
+      <p class="field-hint">Pick a date if you remember their last visit, or check the box if they have never been. Future vet reminders start from today.</p>
 
       <fieldset class="vaccine-history-fieldset">
         <legend>Vaccine history</legend>
@@ -1523,7 +1545,9 @@ async fn onboarding_submit(
 
     let vaccine_history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
 
-    let last_vet_date = {
+    let last_vet_date = if form.never_been_to_vet {
+        None
+    } else {
         let trimmed = form.last_vet_date.trim();
         if trimmed.is_empty() {
             None
@@ -2294,6 +2318,37 @@ mod tests {
         assert_eq!(form.vaccine_dates, vec!["2024-01-15", "2024-02-20"]);
         let history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
         assert_eq!(history.len(), 2);
+    }
+
+    #[test]
+    fn onboarding_form_deserializes_never_been_to_vet_without_date() {
+        let form: OnboardingForm = serde_urlencoded::from_str(&onboarding_form_body(
+            "&never_been_to_vet=on&vaccine_names=&vaccine_dates=",
+        ))
+        .expect("form");
+        assert!(form.never_been_to_vet);
+        assert!(form.last_vet_date.is_empty());
+    }
+
+    #[test]
+    fn vet_calendar_skips_last_visit_when_never_been() {
+        let profile = test_profile_weeks(52, "indoor");
+        let mut profile = profile;
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        profile.last_vet_date = None;
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        let events = generate_vet_calendar_events(&profile, today);
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.title.contains("Last vet visit"))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.title.contains("Vet checkup reminder"))
+        );
     }
 }
 

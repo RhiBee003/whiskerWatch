@@ -207,4 +207,31 @@
       bindVaccineRow(row);
     });
   }
+
+  const lastVetDateInput = document.getElementById("last_vet_date");
+  const neverBeenToVetCheckbox = document.getElementById("never_been_to_vet");
+
+  function syncLastVetDateField() {
+    if (!lastVetDateInput || !neverBeenToVetCheckbox) {
+      return;
+    }
+
+    const never = neverBeenToVetCheckbox.checked;
+    lastVetDateInput.disabled = never;
+    lastVetDateInput.setAttribute("aria-disabled", never ? "true" : "false");
+    if (never) {
+      lastVetDateInput.value = "";
+    }
+  }
+
+  if (neverBeenToVetCheckbox && lastVetDateInput) {
+    neverBeenToVetCheckbox.addEventListener("change", syncLastVetDateField);
+    lastVetDateInput.addEventListener("input", () => {
+      if (lastVetDateInput.value && neverBeenToVetCheckbox.checked) {
+        neverBeenToVetCheckbox.checked = false;
+        lastVetDateInput.disabled = false;
+        lastVetDateInput.setAttribute("aria-disabled", "false");
+      }
+    });
+  }
 })();

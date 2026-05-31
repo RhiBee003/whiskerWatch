@@ -1406,6 +1406,49 @@ footer p {
   accent-color: var(--pink-accent);
 }
 
+.last-vet-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.last-vet-fieldset label[for="last_vet_date"] {
+  margin-bottom: 0;
+}
+
+.checkbox-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.checkbox-pill input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--pink-accent);
+}
+
+.never-vet-option {
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  background: var(--pink-input);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  width: fit-content;
+}
+
+.onboarding-form input[type="date"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--pink-surface-soft);
+}
+
 @media (max-width: 480px) {
   .indoor-outdoor-fieldset {
     grid-template-columns: 1fr;
