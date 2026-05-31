@@ -1,7 +1,8 @@
 use axum::{
     Form, Router,
+    body::Bytes,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -22,7 +23,9 @@ use tower_http::services::ServeDir;
 use uuid::Uuid;
 
 mod storage;
+mod stripe_payments;
 use storage::Storage;
+use stripe_payments::CheckoutError;
 
 const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
 const USER_SESSION_COOKIE: &str = "ww_user_session";
@@ -189,6 +192,7 @@ const OUTFIT_CATALOG: [OutfitCatalogItem; 4] = [
 #[derive(Deserialize, Default)]
 struct DashboardQuery {
     status: Option<String>,
+    session_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -280,12 +284,8 @@ impl<'de> Deserialize<'de> for OnboardingForm {
 }
 
 #[derive(Deserialize)]
-struct PawPointsBuyForm {
+struct PawPointsCheckoutForm {
     package: String,
-    card_name: String,
-    card_number: String,
-    card_expiry: String,
-    card_cvv: String,
 }
 
 #[derive(Deserialize)]
@@ -610,7 +610,7 @@ async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
     profile
 }
 
-fn push_activity(profile: &mut UserProfile, message: &str) {
+pub(crate) fn push_activity(profile: &mut UserProfile, message: &str) {
     profile.activity.push(ProfileActivity {
         message: message.to_string(),
         timestamp: timestamp_now(),
@@ -1225,10 +1225,19 @@ fn dashboard_status_block(status: Option<&str>) -> String {
             r#"<p class="auth-error" role="alert">That outfit is not available.</p>"#
         }
         Some("points_bought") => {
-            r#"<p class="auth-success" role="status">Paw points added! Thanks for your purchase.</p>"#
+            r#"<p class="auth-success" role="status">Payment received! Paw points have been added to your account.</p>"#
+        }
+        Some("points_cancelled") => {
+            r#"<p class="auth-error" role="alert">Checkout was cancelled. No charge was made.</p>"#
+        }
+        Some("points_checkout_failed") => {
+            r#"<p class="auth-error" role="alert">Could not start checkout. Try again or contact support.</p>"#
         }
         Some("points_invalid") => {
-            r#"<p class="auth-error" role="alert">Please fill out all card fields to purchase points.</p>"#
+            r#"<p class="auth-error" role="alert">That point package is not available.</p>"#
+        }
+        Some("payments_unconfigured") => {
+            r#"<p class="auth-error" role="alert">Payments are not configured on this server yet.</p>"#
         }
         Some("task_done") => {
             r#"<p class="auth-success" role="status">Task completed! Paw points and XP added.</p>"#
@@ -1484,6 +1493,12 @@ async fn dashboard_page(
         Err(redirect) => return redirect.into_response(),
     };
 
+    if let Some(session_id) = query.session_id.as_deref() {
+        if !session_id.is_empty() {
+            let _ = stripe_payments::fulfill_checkout_session(&state, session_id).await;
+        }
+    }
+
     let profile = get_or_create_profile(&state, &email).await;
     let user_name = user_name_for_email(&state, &email).unwrap_or_else(|| "Parent".to_string());
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
@@ -1532,7 +1547,8 @@ async fn dashboard_page(
         .replace(
             "{{CALENDAR_MONTH_LABEL}}",
             &calendar_month_label(calendar_month, calendar_year),
-        );
+        )
+        .replace("{{BUY_POINTS_SECTION}}", &stripe_payments::render_buy_points_section());
 
     Html(body).into_response()
 }
@@ -1728,45 +1744,56 @@ async fn task_toggle(
     }
 }
 
-async fn paw_points_buy(
+async fn paw_points_checkout(
     State(state): State<AppState>,
     jar: CookieJar,
-    Form(form): Form<PawPointsBuyForm>,
+    Form(form): Form<PawPointsCheckoutForm>,
 ) -> impl IntoResponse {
     let email = match user_redirect_if_missing(&state, &jar) {
         Ok(email) => email,
         Err(redirect) => return redirect,
     };
 
-    let card_name = form.card_name.trim();
-    let card_number = form.card_number.trim();
-    let card_expiry = form.card_expiry.trim();
-    let card_cvv = form.card_cvv.trim();
-
-    if card_name.is_empty() || card_number.is_empty() || card_expiry.is_empty() || card_cvv.is_empty()
-    {
-        return Redirect::to("/home?tab=account&status=points_invalid");
+    if !stripe_payments::stripe_checkout_enabled() {
+        return Redirect::to("/home?tab=account&status=payments_unconfigured");
     }
 
-    let points: u32 = match form.package.trim() {
-        "100" => 100,
-        "250" => 250,
-        "500" => 500,
-        "1000" => 1000,
-        "5000" => 5000,
-        _ => return Redirect::to("/home?tab=account&status=points_invalid"),
+    let package = match stripe_payments::package_by_id(form.package.trim()) {
+        Some(package) => package,
+        None => return Redirect::to("/home?tab=account&status=points_invalid"),
     };
 
-    let mut profile = get_or_create_profile(&state, &email).await;
-    profile.paw_points += points;
-    push_activity(
-        &mut profile,
-        &format!("Purchased {points} paw points with card ending {}.", &card_number[card_number.len().saturating_sub(4)..]),
-    );
+    match stripe_payments::create_checkout_session(&email, package).await {
+        Ok(url) => Redirect::temporary(&url),
+        Err(CheckoutError::NotConfigured) => {
+            Redirect::to("/home?tab=account&status=payments_unconfigured")
+        }
+        Err(_) => Redirect::to("/home?tab=account&status=points_checkout_failed"),
+    }
+}
 
-    match save_profile(&state, &profile).await {
-        Ok(()) => Redirect::to("/home?tab=account&status=points_bought"),
-        Err(_) => Redirect::to("/home?tab=account&status=points_invalid"),
+async fn stripe_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    let secret = match stripe_payments::stripe_webhook_secret() {
+        Some(secret) => secret,
+        None => return StatusCode::SERVICE_UNAVAILABLE,
+    };
+
+    let signature = match headers.get("stripe-signature").and_then(|v| v.to_str().ok()) {
+        Some(sig) => sig,
+        None => return StatusCode::BAD_REQUEST,
+    };
+
+    if !stripe_payments::verify_webhook_signature(&body, signature, &secret) {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    match stripe_payments::handle_webhook_payload(&state, &body).await {
+        Ok(()) => StatusCode::OK,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -2395,7 +2422,8 @@ async fn main() {
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
-        .route("/home/paw-points/buy", post(paw_points_buy))
+        .route("/home/paw-points/checkout", post(paw_points_checkout))
+        .route("/webhooks/stripe", post(stripe_webhook))
         .route("/logout", post(user_logout))
         .route("/login", get(login_page).post(login_submit))
         .route("/signup", get(signup_page).post(signup_submit))

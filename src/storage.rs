@@ -74,6 +74,12 @@ impl Storage {
                  category TEXT NOT NULL,
                  message TEXT NOT NULL,
                  submitted_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS stripe_fulfilled_sessions (
+                 session_id TEXT PRIMARY KEY,
+                 user_email TEXT NOT NULL,
+                 paw_points INTEGER NOT NULL,
+                 fulfilled_at INTEGER NOT NULL
              );",
         )?;
 
@@ -249,6 +255,26 @@ impl Storage {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(feedback)
+    }
+
+    /// Returns true if this session was newly recorded (caller should credit points).
+    pub fn try_record_stripe_fulfillment(
+        &self,
+        session_id: &str,
+        user_email: &str,
+        paw_points: u32,
+    ) -> Result<bool, StorageError> {
+        let fulfilled_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let conn = self.conn.lock().expect("storage lock");
+        let rows = conn.execute(
+            "INSERT OR IGNORE INTO stripe_fulfilled_sessions (session_id, user_email, paw_points, fulfilled_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![session_id, user_email, paw_points as i64, fulfilled_at],
+        )?;
+        Ok(rows > 0)
     }
 
     fn migrate_from_jsonl(&self) -> Result<(), StorageError> {

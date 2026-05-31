@@ -33,3 +33,9 @@ services:
         value: rhibee003@gmail.com
       - key: ADMIN_PASSWORD
         generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
