@@ -1214,6 +1214,45 @@ footer p {
   font-size: 0.9rem;
 }
 
+.saved-payment-methods {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.saved-payment-methods li {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.saved-payment-methods li:last-child {
+  border-bottom: none;
+}
+
+.saved-card-brand {
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.saved-card-last4 {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.saved-card-exp {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.saved-cards-note {
+  margin-top: 0.75rem;
+  font-size: 0.88rem;
+}
+
 .buy-points-packages {
   display: flex;
   flex-direction: column;

@@ -652,6 +652,7 @@ fn default_profile(email: &str) -> UserProfile {
         tasks: default_starter_tasks(),
         calendar_events: vec![],
         activity: vec![],
+        stripe_customer_id: None,
     }
 }
 

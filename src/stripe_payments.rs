@@ -1,7 +1,10 @@
 //! PCI DSS: card data is collected only on Stripe's hosted Checkout page (SAQ A eligible).
-//! This server never receives, stores, or logs PAN, CVV, or magnetic-stripe data—only session IDs and webhooks.
+//! This server never receives, stores, or logs PAN, CVV, or magnetic-stripe data—only
+//! Stripe customer ids (`cus_...`), session ids, and safe card metadata (brand, last4, exp)
+//! fetched from the Stripe API for display.
 
 use crate::AppState;
+use crate::UserProfile;
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::Deserialize;
@@ -107,7 +110,7 @@ pub fn render_buy_points_section() -> String {
     }
 
     let mut html = String::from(
-        r#"<p>Pay with card via Stripe Checkout—your card details never touch our servers.</p><div class="buy-points-packages">"#,
+        r#"<p>Pay with card via Stripe Checkout—your card details never touch our servers. You can save your card for faster checkout next time.</p><div class="buy-points-packages">"#,
     );
     for package in PAW_POINT_PACKAGES {
         html.push_str(&format!(
@@ -124,6 +127,58 @@ pub fn render_buy_points_section() -> String {
     html
 }
 
+/// Account tab: saved cards from Stripe (brand, last4, exp only).
+pub async fn render_saved_payment_methods(_state: &AppState, profile: &UserProfile) -> String {
+    if !stripe_checkout_enabled() {
+        return r#"<p class="muted">Saved cards appear here when Stripe payments are configured.</p>"#
+            .to_string();
+    }
+
+    let customer_id = match profile.stripe_customer_id.as_deref() {
+        Some(id) if id.starts_with("cus_") => id.to_string(),
+        _ => {
+            return r#"<p class="muted">No saved cards yet. Complete a paw points purchase and choose to save your card at checkout.</p>"#
+                .to_string();
+        }
+    };
+
+    match list_card_payment_methods(&customer_id).await {
+        Ok(methods) if methods.is_empty() => {
+            r#"<p class="muted">No saved cards yet. On your next purchase, Stripe Checkout will offer to save your card for faster checkout.</p>"#
+                .to_string()
+        }
+        Ok(methods) => render_payment_method_list(&methods),
+        Err(_) => {
+            r#"<p class="auth-error" role="alert">Could not load saved cards. Try again later.</p>"#
+                .to_string()
+        }
+    }
+}
+
+fn render_payment_method_list(methods: &[SavedCardDisplay]) -> String {
+    let mut html =
+        String::from(r#"<ul class="saved-payment-methods" aria-label="Saved payment methods">"#);
+    for card in methods {
+        html.push_str(&format!(
+            r#"<li><span class="saved-card-brand">{brand}</span> <span class="saved-card-last4">•••• {last4}</span> <span class="saved-card-exp">Exp {exp}</span></li>"#,
+            brand = crate::escape_html(&card.brand_label),
+            last4 = crate::escape_html(&card.last4),
+            exp = crate::escape_html(&card.exp),
+        ));
+    }
+    html.push_str("</ul>");
+    html.push_str(
+        r#"<p class="muted saved-cards-note">Cards are stored securely by Stripe. WhiskerWatch never sees your full card number or CVV.</p>"#,
+    );
+    html
+}
+
+struct SavedCardDisplay {
+    brand_label: String,
+    last4: String,
+    exp: String,
+}
+
 #[derive(Debug)]
 pub enum CheckoutError {
     NotConfigured,
@@ -131,11 +186,204 @@ pub enum CheckoutError {
     MissingUrl,
 }
 
+/// Link user to a Stripe Customer (stored as `cus_...` on profile only).
+pub async fn ensure_stripe_customer(
+    state: &AppState,
+    profile: &mut UserProfile,
+) -> Result<String, CheckoutError> {
+    if let Some(id) = profile.stripe_customer_id.as_ref() {
+        let trimmed = id.trim();
+        if trimmed.starts_with("cus_") {
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let email = profile.email.trim();
+    let customer_id = if let Some(existing) = find_customer_by_email(email).await? {
+        existing
+    } else {
+        create_stripe_customer(email).await?
+    };
+
+    profile.stripe_customer_id = Some(customer_id.clone());
+    state
+        .storage
+        .save_profile(profile)
+        .map_err(|e| CheckoutError::StripeApi(format!("{e:?}")))?;
+
+    Ok(customer_id)
+}
+
+async fn find_customer_by_email(email: &str) -> Result<Option<String>, CheckoutError> {
+    let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let client = Client::new();
+    let response = client
+        .get("https://api.stripe.com/v1/customers")
+        .basic_auth(&secret, None::<&str>)
+        .query(&[("email", email), ("limit", "1")])
+        .send()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    if !status.is_success() {
+        return Err(CheckoutError::StripeApi(body));
+    }
+
+    #[derive(Deserialize)]
+    struct CustomerList {
+        data: Vec<CustomerRow>,
+    }
+
+    #[derive(Deserialize)]
+    struct CustomerRow {
+        id: String,
+    }
+
+    let parsed: CustomerList =
+        serde_json::from_str(&body).map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    Ok(parsed.data.into_iter().next().map(|c| c.id))
+}
+
+async fn create_stripe_customer(email: &str) -> Result<String, CheckoutError> {
+    let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let client = Client::new();
+    let response = client
+        .post("https://api.stripe.com/v1/customers")
+        .basic_auth(&secret, None::<&str>)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "email={email}&metadata[user_email]={email}",
+            email = urlencoding::encode(email),
+        ))
+        .send()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    if !status.is_success() {
+        return Err(CheckoutError::StripeApi(body));
+    }
+
+    #[derive(Deserialize)]
+    struct CustomerResponse {
+        id: String,
+    }
+
+    let parsed: CustomerResponse =
+        serde_json::from_str(&body).map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    Ok(parsed.id)
+}
+
+async fn list_card_payment_methods(
+    customer_id: &str,
+) -> Result<Vec<SavedCardDisplay>, CheckoutError> {
+    let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let client = Client::new();
+    let response = client
+        .get("https://api.stripe.com/v1/payment_methods")
+        .basic_auth(&secret, None::<&str>)
+        .query(&[("customer", customer_id), ("type", "card")])
+        .send()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    if !status.is_success() {
+        return Err(CheckoutError::StripeApi(body));
+    }
+
+    #[derive(Deserialize)]
+    struct PaymentMethodList {
+        data: Vec<PaymentMethodRow>,
+    }
+
+    #[derive(Deserialize)]
+    struct PaymentMethodRow {
+        card: Option<CardDetails>,
+    }
+
+    #[derive(Deserialize)]
+    struct CardDetails {
+        brand: Option<String>,
+        last4: Option<String>,
+        exp_month: Option<u32>,
+        exp_year: Option<u32>,
+    }
+
+    let parsed: PaymentMethodList =
+        serde_json::from_str(&body).map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let mut cards = Vec::new();
+    for pm in parsed.data {
+        let Some(card) = pm.card else {
+            continue;
+        };
+        let brand = card.brand.unwrap_or_else(|| "card".to_string());
+        let last4 = card.last4.unwrap_or_else(|| "????".to_string());
+        let exp_month = card.exp_month.unwrap_or(0);
+        let exp_year = card.exp_year.unwrap_or(0);
+        let exp = if exp_month > 0 && exp_year > 0 {
+            let yy = exp_year % 100;
+            format!("{exp_month:02}/{yy:02}")
+        } else {
+            "—".to_string()
+        };
+        cards.push(SavedCardDisplay {
+            brand_label: format_card_brand(&brand),
+            last4,
+            exp,
+        });
+    }
+
+    Ok(cards)
+}
+
+fn format_card_brand(brand: &str) -> String {
+    match brand.to_lowercase().as_str() {
+        "visa" => "Visa".to_string(),
+        "mastercard" => "Mastercard".to_string(),
+        "amex" => "American Express".to_string(),
+        "discover" => "Discover".to_string(),
+        "diners" => "Diners Club".to_string(),
+        "jcb" => "JCB".to_string(),
+        "unionpay" => "UnionPay".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                None => "Card".to_string(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        }
+    }
+}
+
 pub async fn create_checkout_session(
+    state: &AppState,
     user_email: &str,
     package: &PawPointPackage,
 ) -> Result<String, CheckoutError> {
     let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let mut profile = crate::get_or_create_profile(state, user_email).await;
+    let customer_id = ensure_stripe_customer(state, &mut profile).await?;
+
     let base = public_app_url();
     let success_url = format!(
         "{base}/home?tab=account&status=points_bought&session_id={{CHECKOUT_SESSION_ID}}"
@@ -150,17 +398,20 @@ pub async fn create_checkout_session(
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "mode=payment\
-&customer_email={email}\
+&customer={customer}\
 &client_reference_id={email}\
 &success_url={success}\
 &cancel_url={cancel}\
 &metadata[user_email]={email}\
 &metadata[paw_points]={points}\
 &metadata[package_id]={package_id}\
+&payment_intent_data[setup_future_usage]=off_session\
+&saved_payment_method_options[payment_method_save]=enabled\
 &line_items[0][quantity]=1\
 &line_items[0][price_data][currency]=usd\
 &line_items[0][price_data][unit_amount]={cents}\
 &line_items[0][price_data][product_data][name]={name}",
+            customer = urlencoding::encode(&customer_id),
             email = urlencoding::encode(user_email),
             success = urlencoding::encode(&success_url),
             cancel = urlencoding::encode(&cancel_url),
@@ -310,6 +561,12 @@ pub async fn credit_points_if_new(
     }
 
     let mut profile = crate::get_or_create_profile(state, email).await;
+    if profile.stripe_customer_id.is_none() && stripe_checkout_enabled() {
+        let _ = ensure_stripe_customer(state, &mut profile)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+    }
+
     profile.paw_points = profile.paw_points.saturating_add(points);
     crate::push_activity(
         &mut profile,

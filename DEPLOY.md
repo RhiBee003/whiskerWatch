@@ -2,7 +2,7 @@
 
 ## Stripe payments (PCI DSS / SAQ A)
 
-Card numbers and CVV are **never** sent to WhiskerWatch. Checkout uses [Stripe Checkout](https://stripe.com/docs/payments/checkout) (hosted payment page). This app only stores Stripe session IDs after payment and credits paw points via webhooks or the success redirect.
+Card numbers and CVV are **never** sent to WhiskerWatch. Checkout uses [Stripe Checkout](https://stripe.com/docs/payments/checkout) (hosted payment page). Saved cards live in **Stripe** (Customer + PaymentMethod objects). This app stores only each user's Stripe Customer id (`cus_...`) in their profile JSON in SQLite—never PAN, CVV, or magnetic-stripe data. Paw points are credited via webhooks or the success redirect using Stripe session ids.
 
 Funds settle to **your bank** when you connect a payout account in the [Stripe Dashboard](https://dashboard.stripe.com/settings/payouts).
 
@@ -40,6 +40,14 @@ If `STRIPE_SECRET_KEY` is missing, the Account tab shows **Payments not configur
 | 5,000 | $50.00 |
 
 Test cards: [Stripe test cards](https://stripe.com/docs/testing#cards) (e.g. `4242 4242 4242 4242`).
+
+### Saved payment methods
+
+- On first paw points checkout, the server creates or links a **Stripe Customer** for the account email and saves `stripe_customer_id` on the user profile.
+- Checkout is created with `customer`, `payment_intent_data[setup_future_usage]=off_session`, and `saved_payment_method_options[payment_method_save]=enabled` so Stripe prompts to save the card and attaches it to the Customer.
+- Return visits use the same Customer; Checkout shows **saved cards** for one-click payment when available.
+- The Account tab lists saved cards by calling Stripe's Payment Methods API—displaying **brand, last4, and expiration** only.
+- To remove or manage cards in production, use the [Stripe Customer Portal](https://stripe.com/docs/customer-management/customer-portal) or Dashboard; this app does not store card numbers locally.
 
 ## User accounts and SQLite persistence
 
