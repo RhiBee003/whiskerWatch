@@ -848,6 +848,18 @@ footer p {
   color: #2a1f28;
 }
 
+.dashboard-greeting-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(42, 31, 40, 0.35);
+  text-underline-offset: 2px;
+}
+
+.dashboard-greeting-link:hover,
+.dashboard-greeting-link:focus-visible {
+  text-decoration-color: #2a1f28;
+}
+
 .dashboard-nav {
   display: flex;
   gap: 1.2rem;
