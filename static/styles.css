@@ -17,12 +17,14 @@
 html {
   background: var(--pink-bg);
   min-height: 100%;
+  min-height: -webkit-fill-available;
   min-height: 100dvh;
 }
 
 body {
   margin: 0;
   min-height: 100%;
+  min-height: -webkit-fill-available;
   min-height: 100dvh;
   font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   background: var(--pink-bg);
@@ -30,7 +32,11 @@ body {
 }
 
 html:has(.dashboard-body) {
-  background: linear-gradient(165deg, #f0b0cc 0%, #fac8dd 45%, #fde4ef 100%);
+  background-color: #fac8dd;
+  background-image: linear-gradient(165deg, #f0b0cc 0%, #fac8dd 45%, #fde4ef 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .topbar {
@@ -806,9 +812,21 @@ footer p {
 
 /* Logged-in dashboard */
 .dashboard-body {
-  background: linear-gradient(165deg, #f0b0cc 0%, #fac8dd 45%, #fde4ef 100%);
+  display: flex;
+  flex-direction: column;
   min-height: 100%;
+  min-height: -webkit-fill-available;
   min-height: 100dvh;
+  min-height: 100svh;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  background-color: #fac8dd;
+  background-image: linear-gradient(165deg, #f0b0cc 0%, #fac8dd 45%, #fde4ef 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .dashboard-topbar {
@@ -844,7 +862,16 @@ footer p {
 }
 
 .dashboard-shell {
-  padding: 1.5rem 0 3rem;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0 max(3rem, env(safe-area-inset-bottom, 0px));
+}
+
+.dashboard-panels {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .dashboard-stats {
@@ -913,7 +940,9 @@ footer p {
 }
 
 .dashboard-panel.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
 }
 
 .dashboard-panel h1 {
