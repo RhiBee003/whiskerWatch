@@ -949,6 +949,15 @@ footer p {
   border-radius: 50%;
 }
 
+.pet-avatar-photo {
+  display: block;
+  object-fit: cover;
+}
+
+.pet-avatar-placeholder {
+  flex-shrink: 0;
+}
+
 .pet-details h1 {
   margin: 0 0 0.35rem;
 }
@@ -1514,6 +1523,58 @@ footer p {
   opacity: 0.55;
   cursor: not-allowed;
   background: var(--pink-surface-soft);
+}
+
+.pet-photo-fieldset {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 14px;
+  padding: 0.85rem 0.95rem 0.95rem;
+  margin: 0 0 0.85rem;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.pet-photo-fieldset legend {
+  font-weight: 800;
+  padding: 0 0.35rem;
+}
+
+.pet-photo-file-label {
+  display: inline-block;
+  margin: 0.35rem 0 0.5rem;
+  font-weight: 700;
+}
+
+.onboarding-form input[type="file"] {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px dashed rgba(232, 53, 122, 0.45);
+  background: var(--pink-input);
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  color: var(--text);
+}
+
+.onboarding-form input[type="file"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pet-photo-preview {
+  margin-top: 0.75rem;
+}
+
+.pet-photo-preview img {
+  width: 5rem;
+  height: 5rem;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.14);
+  background: var(--pink-card);
+}
+
+.skip-photo-option {
+  margin-top: 0.75rem;
 }
 
 @media (max-width: 480px) {

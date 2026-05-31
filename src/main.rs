@@ -1,7 +1,7 @@
 use axum::{
     Form, Router,
     body::Bytes,
-    extract::{Query, State},
+    extract::{Multipart, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -20,6 +20,7 @@ use std::{
 };
 use tokio::{fs, net::TcpListener};
 use tower_http::services::ServeDir;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 mod storage;
@@ -127,6 +128,7 @@ struct VeterinaryNote {
 }
 
 const VET_APPOINTMENT_TASK_ID: &str = "vet_appointment_asap";
+const MAX_PET_PHOTO_BYTES: usize = 5 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ProfileActivity {
@@ -142,6 +144,8 @@ struct UserProfile {
     parent_xp: u32,
     pet_name: String,
     pet_breed: String,
+    #[serde(default)]
+    pet_color: String,
     pet_mood: String,
     pet_emoji: String,
     equipped_outfit: String,
@@ -174,6 +178,8 @@ struct UserProfile {
     /// Stripe Customer id (`cus_...`) only—never PAN/CVV. Card data stays at Stripe.
     #[serde(default)]
     stripe_customer_id: Option<String>,
+    #[serde(default)]
+    pet_photo_url: Option<String>,
 }
 
 struct OutfitCatalogItem {
@@ -271,6 +277,8 @@ fn form_checkbox(fields: &HashMap<String, Vec<String>>, key: &str) -> bool {
 
 struct OnboardingForm {
     cat_name: String,
+    pet_breed: String,
+    pet_color: String,
     age_value: String,
     age_unit: String,
     pet_indoor_outdoor: String,
@@ -280,6 +288,27 @@ struct OnboardingForm {
     medications: String,
     vaccine_names: Vec<String>,
     vaccine_dates: Vec<String>,
+    skip_photo: bool,
+}
+
+impl OnboardingForm {
+    fn from_fields<E: DeError>(fields: &HashMap<String, Vec<String>>) -> Result<Self, E> {
+        Ok(OnboardingForm {
+            cat_name: form_scalar(fields, "cat_name")?,
+            pet_breed: form_scalar(fields, "pet_breed")?,
+            pet_color: form_optional_scalar(fields, "pet_color"),
+            age_value: form_scalar(fields, "age_value")?,
+            age_unit: form_scalar(fields, "age_unit")?,
+            pet_indoor_outdoor: form_scalar(fields, "pet_indoor_outdoor")?,
+            last_vet_date: form_optional_scalar(fields, "last_vet_date"),
+            never_been_to_vet: form_checkbox(fields, "never_been_to_vet"),
+            conditions: form_scalar(fields, "conditions")?,
+            medications: form_scalar(fields, "medications")?,
+            vaccine_names: form_vec(fields, "vaccine_names"),
+            vaccine_dates: form_vec(fields, "vaccine_dates"),
+            skip_photo: form_checkbox(fields, "skip_photo"),
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for OnboardingForm {
@@ -289,19 +318,7 @@ impl<'de> Deserialize<'de> for OnboardingForm {
     {
         let pairs = Vec::<(String, String)>::deserialize(deserializer)?;
         let fields = group_form_fields(pairs);
-
-        Ok(OnboardingForm {
-            cat_name: form_scalar(&fields, "cat_name")?,
-            age_value: form_scalar(&fields, "age_value")?,
-            age_unit: form_scalar(&fields, "age_unit")?,
-            pet_indoor_outdoor: form_scalar(&fields, "pet_indoor_outdoor")?,
-            last_vet_date: form_optional_scalar(&fields, "last_vet_date"),
-            never_been_to_vet: form_checkbox(&fields, "never_been_to_vet"),
-            conditions: form_scalar(&fields, "conditions")?,
-            medications: form_scalar(&fields, "medications")?,
-            vaccine_names: form_vec(&fields, "vaccine_names"),
-            vaccine_dates: form_vec(&fields, "vaccine_dates"),
-        })
+        Self::from_fields(&fields)
     }
 }
 
@@ -634,6 +651,7 @@ fn default_profile(email: &str) -> UserProfile {
         parent_xp: 0,
         pet_name: "Your cat".to_string(),
         pet_breed: "Add your cat's details".to_string(),
+        pet_color: String::new(),
         pet_mood: "Waiting to meet you".to_string(),
         pet_emoji: "🐱".to_string(),
         equipped_outfit: "Classic Collar".to_string(),
@@ -653,6 +671,84 @@ fn default_profile(email: &str) -> UserProfile {
         calendar_events: vec![],
         activity: vec![],
         stripe_customer_id: None,
+        pet_photo_url: None,
+    }
+}
+
+fn email_upload_basename(email: &str) -> String {
+    let hash = Sha256::digest(email.trim().to_lowercase().as_bytes());
+    hex::encode(hash)
+}
+
+fn pet_uploads_dir(state: &AppState) -> std::path::PathBuf {
+    state.storage.data_dir().join("uploads")
+}
+
+fn detect_image_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.len() >= 3 && bytes[0..3] == [0xFF, 0xD8, 0xFF] {
+        return Some("jpg");
+    }
+    if bytes.len() >= 8 && bytes[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Some("png");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    None
+}
+
+fn allowed_pet_photo_content_type(content_type: &str) -> bool {
+    matches!(
+        content_type,
+        "image/jpeg" | "image/jpg" | "image/png" | "image/webp"
+    )
+}
+
+fn validate_pet_photo(content_type: Option<&str>, bytes: &[u8]) -> Result<&'static str, ()> {
+    if bytes.is_empty() {
+        return Err(());
+    }
+    if bytes.len() > MAX_PET_PHOTO_BYTES {
+        return Err(());
+    }
+    let ext = detect_image_ext(bytes).ok_or(())?;
+    if let Some(content_type) = content_type {
+        if !allowed_pet_photo_content_type(content_type) {
+            return Err(());
+        }
+    }
+    Ok(ext)
+}
+
+async fn save_pet_photo(
+    state: &AppState,
+    email: &str,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<String, storage::StorageError> {
+    let uploads_dir = pet_uploads_dir(state);
+    fs::create_dir_all(&uploads_dir).await?;
+
+    let basename = email_upload_basename(email);
+    let filename = format!("{basename}.{ext}");
+    let disk_path = uploads_dir.join(&filename);
+    fs::write(&disk_path, bytes).await?;
+
+    Ok(format!("/uploads/{filename}"))
+}
+
+fn render_pet_avatar(profile: &UserProfile) -> String {
+    if let Some(url) = profile.pet_photo_url.as_deref().filter(|value| !value.is_empty()) {
+        format!(
+            r#"<img class="pet-avatar pet-avatar-photo" src="{url}" alt="Photo of {name}" />"#,
+            url = escape_html_attr(url),
+            name = escape_html(&profile.pet_name),
+        )
+    } else {
+        format!(
+            r#"<div class="pet-avatar pet-avatar-placeholder" aria-hidden="true">{emoji}</div>"#,
+            emoji = profile.pet_emoji,
+        )
     }
 }
 
@@ -874,6 +970,29 @@ fn age_display(profile: &UserProfile) -> String {
         return format!("{years} years old");
     }
     "Age not set".to_string()
+}
+
+fn pet_trait_display(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "Not specified".to_string()
+    } else {
+        escape_html(trimmed)
+    }
+}
+
+fn render_pet_meta(profile: &UserProfile) -> String {
+    let breed = pet_trait_display(&profile.pet_breed);
+    let color = profile.pet_color.trim();
+    let color_part = if color.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", escape_html(color))
+    };
+    format!(
+        "{breed}{color_part} · Mood: {}",
+        escape_html(&profile.pet_mood)
+    )
 }
 
 fn vet_reminder_interval(profile: &UserProfile) -> Duration {
@@ -1281,7 +1400,9 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
     };
 
     format!(
-        r#"<dl class="pet-health-dl"><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl><p class="field-hint">See the <strong>Health</strong> tab for full veterinary notes and records.</p>"#,
+        r#"<dl class="pet-health-dl"><dt>Breed</dt><dd>{breed}</dd><dt>Color</dt><dd>{color}</dd><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl><p class="field-hint">See the <strong>Health</strong> tab for full veterinary notes and records.</p>"#,
+        breed = pet_trait_display(&profile.pet_breed),
+        color = pet_trait_display(&profile.pet_color),
         age = escape_html(&age_display(profile)),
         lifestyle = lifestyle,
         last_vet = last_vet,
@@ -1429,6 +1550,8 @@ fn render_health_tab(profile: &UserProfile) -> String {
   <article class="dashboard-card">
     <h2>Overview</h2>
     <dl class="pet-health-dl">
+      <dt>Breed</dt><dd>{breed}</dd>
+      <dt>Color</dt><dd>{color}</dd>
       <dt>Age</dt><dd>{age}</dd>
       <dt>Lifestyle</dt><dd>{lifestyle}</dd>
       <dt>Last vet appointment</dt><dd>{last_vet}</dd>
@@ -1446,6 +1569,8 @@ fn render_health_tab(profile: &UserProfile) -> String {
   </article>
 </div>"#,
         pet_name = escape_html(&profile.pet_name),
+        breed = pet_trait_display(&profile.pet_breed),
+        color = pet_trait_display(&profile.pet_color),
         age = escape_html(&age_display(profile)),
         lifestyle = lifestyle,
         last_vet = last_vet,
@@ -1465,9 +1590,35 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
   <div class="onboarding-modal">
     <h2 id="onboarding-title">Tell us about your cat 🐾</h2>
     <p class="onboarding-intro">We will personalize your pet tab and schedule vet and vaccine reminders on your calendar.</p>
-    <form class="onboarding-form login-form" action="/home/onboarding" method="post">
+    <form class="onboarding-form login-form" action="/home/onboarding" method="post" enctype="multipart/form-data">
       <label for="cat_name">Cat's name</label>
       <input id="cat_name" name="cat_name" type="text" placeholder="Mochi" required />
+
+      <label for="pet_breed">Cat breed</label>
+      <input id="pet_breed" name="pet_breed" type="text" list="cat-breeds" placeholder="e.g. Domestic Shorthair" required />
+      <datalist id="cat-breeds">
+        <option value="Domestic Shorthair" />
+        <option value="Domestic Longhair" />
+        <option value="Siamese" />
+        <option value="Maine Coon" />
+        <option value="Persian" />
+        <option value="Ragdoll" />
+        <option value="Bengal" />
+        <option value="Mixed" />
+      </datalist>
+
+      <label for="pet_color">Cat color / markings</label>
+      <input id="pet_color" name="pet_color" type="text" list="cat-colors" placeholder="e.g. tabby, black and white" />
+      <datalist id="cat-colors">
+        <option value="Black" />
+        <option value="White" />
+        <option value="Gray" />
+        <option value="Orange" />
+        <option value="Tabby" />
+        <option value="Calico" />
+        <option value="Tortoiseshell" />
+        <option value="Black and white" />
+      </datalist>
 
       <div class="age-row">
         <div>
@@ -1525,6 +1676,18 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
 
       <label for="medications">Medications</label>
       <textarea id="medications" name="medications" rows="2" placeholder="e.g. flea prevention monthly"></textarea>
+
+      <fieldset class="pet-photo-fieldset">
+        <legend>Cat profile photo</legend>
+        <p class="field-hint">Add a photo of your cat for the My Pet tab. JPEG, PNG, or WebP up to 5MB.</p>
+        <label for="pet_photo" class="pet-photo-file-label">Choose photo</label>
+        <input id="pet_photo" name="pet_photo" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
+        <div id="pet-photo-preview" class="pet-photo-preview" hidden aria-live="polite"></div>
+        <label class="checkbox-pill skip-photo-option">
+          <input type="checkbox" id="skip_photo" name="skip_photo" value="on" />
+          Skip photo for now
+        </label>
+      </fieldset>
 
       <button type="submit" class="download-btn login-submit">Save &amp; continue</button>
     </form>
@@ -1629,7 +1792,10 @@ fn dashboard_status_block(status: Option<&str>) -> String {
             r#"<p class="auth-success" role="status">Welcome! Your cat profile is saved with vet and vaccine reminders on your calendar.</p>"#
         }
         Some("onboarding_invalid") => {
-            r#"<p class="auth-error" role="alert">Please enter your cat's name, a valid age, and whether they are indoor or outdoor.</p>"#
+            r#"<p class="auth-error" role="alert">Please enter your cat's name, breed, a valid age, and whether they are indoor or outdoor.</p>"#
+        }
+        Some("onboarding_photo_invalid") => {
+            r#"<p class="auth-error" role="alert">That photo could not be saved. Use a JPEG, PNG, or WebP image under 5MB, or skip the photo.</p>"#
         }
         Some("vet_visit_done") => {
             r#"<p class="auth-success" role="status">Vet visit saved! Vaccines and health notes updated.</p>"#
@@ -1925,9 +2091,8 @@ async fn dashboard_page(
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
         .replace("{{PET_NAME}}", &escape_html(&profile.pet_name))
-        .replace("{{PET_BREED}}", &escape_html(&profile.pet_breed))
-        .replace("{{PET_MOOD}}", &escape_html(&profile.pet_mood))
-        .replace("{{PET_EMOJI}}", &profile.pet_emoji)
+        .replace("{{PET_META}}", &render_pet_meta(&profile))
+        .replace("{{PET_AVATAR}}", &render_pet_avatar(&profile))
         .replace("{{PET_HEALTH_INFO}}", &render_pet_health_info(&profile))
         .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
         .replace(
@@ -1965,15 +2130,47 @@ async fn dashboard_page(
 async fn onboarding_submit(
     State(state): State<AppState>,
     jar: CookieJar,
-    Form(form): Form<OnboardingForm>,
+    mut multipart: Multipart,
 ) -> impl IntoResponse {
     let email = match user_redirect_if_missing(&state, &jar) {
         Ok(email) => email,
         Err(redirect) => return redirect,
     };
 
+    let mut fields: HashMap<String, Vec<String>> = HashMap::new();
+    let mut photo_bytes: Option<Vec<u8>> = None;
+    let mut photo_content_type: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "pet_photo" {
+            photo_content_type = field.content_type().map(str::to_string);
+            match field.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => photo_bytes = Some(bytes.to_vec()),
+                Ok(_) => {}
+                Err(_) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+            }
+            continue;
+        }
+
+        match field.text().await {
+            Ok(text) => fields.entry(name).or_default().push(text),
+            Err(_) => return Redirect::to("/home?status=onboarding_invalid"),
+        }
+    }
+
+    let form = match OnboardingForm::from_fields::<serde::de::value::Error>(&fields) {
+        Ok(form) => form,
+        Err(_) => return Redirect::to("/home?status=onboarding_invalid"),
+    };
+
     let cat_name = form.cat_name.trim();
     if cat_name.is_empty() {
+        return Redirect::to("/home?status=onboarding_invalid");
+    }
+
+    let pet_breed = form.pet_breed.trim();
+    if pet_breed.is_empty() {
         return Redirect::to("/home?status=onboarding_invalid");
     }
 
@@ -2006,7 +2203,8 @@ async fn onboarding_submit(
     let signup_date = Local::now().date_naive();
 
     profile.pet_name = cat_name.to_string();
-    profile.pet_breed = "Your companion".to_string();
+    profile.pet_breed = pet_breed.to_string();
+    profile.pet_color = form.pet_color.trim().to_string();
     profile.pet_mood = "Happy".to_string();
     profile.pet_age_weeks = pet_age_weeks;
     profile.pet_age_years = pet_age_years;
@@ -2019,6 +2217,19 @@ async fn onboarding_submit(
     profile.onboarding_completed = true;
     profile.calendar_events = merge_calendar_events(&profile, signup_date);
     let _ = refresh_profile_tasks(&mut profile);
+
+    if !form.skip_photo {
+        if let Some(bytes) = photo_bytes {
+            let ext = match validate_pet_photo(photo_content_type.as_deref(), &bytes) {
+                Ok(ext) => ext,
+                Err(()) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+            };
+            match save_pet_photo(&state, &email, &bytes, ext).await {
+                Ok(url) => profile.pet_photo_url = Some(url),
+                Err(_) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+            }
+        }
+    }
 
     let pet_name = profile.pet_name.clone();
     push_activity(
@@ -2769,6 +2980,7 @@ mod tests {
             parent_xp: 0,
             pet_name: "Mochi".to_string(),
             pet_breed: String::new(),
+            pet_color: String::new(),
             pet_mood: String::new(),
             pet_emoji: "🐱".to_string(),
             equipped_outfit: String::new(),
@@ -2787,6 +2999,8 @@ mod tests {
             tasks: vec![],
             calendar_events: vec![],
             activity: vec![],
+            stripe_customer_id: None,
+            pet_photo_url: None,
         }
     }
 
@@ -2831,7 +3045,7 @@ mod tests {
 
     fn onboarding_form_body(extra: &str) -> String {
         format!(
-            "cat_name=Mochi&age_value=2&age_unit=years&pet_indoor_outdoor=indoor&last_vet_date=&conditions=&medications={extra}"
+            "cat_name=Mochi&pet_breed=Domestic+Shorthair&pet_color=Tabby&age_value=2&age_unit=years&pet_indoor_outdoor=indoor&last_vet_date=&conditions=&medications={extra}"
         )
     }
 
@@ -2876,6 +3090,44 @@ mod tests {
         .expect("form");
         assert!(form.never_been_to_vet);
         assert!(form.last_vet_date.is_empty());
+    }
+
+    #[test]
+    fn validate_pet_photo_accepts_png_magic_bytes() {
+        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+        assert_eq!(
+            validate_pet_photo(Some("image/png"), &png),
+            Ok("png")
+        );
+    }
+
+    #[test]
+    fn validate_pet_photo_rejects_oversized_file() {
+        let bytes = vec![0xFF; MAX_PET_PHOTO_BYTES + 1];
+        assert!(validate_pet_photo(Some("image/jpeg"), &bytes).is_err());
+    }
+
+    #[test]
+    fn validate_pet_photo_rejects_bad_content_type() {
+        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+        assert!(validate_pet_photo(Some("application/pdf"), &png).is_err());
+    }
+
+    #[test]
+    fn render_pet_avatar_uses_photo_when_present() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        profile.pet_photo_url = Some("/uploads/example.jpg".to_string());
+        let html = render_pet_avatar(&profile);
+        assert!(html.contains("pet-avatar-photo"));
+        assert!(html.contains("/uploads/example.jpg"));
+    }
+
+    #[test]
+    fn render_pet_avatar_falls_back_to_emoji() {
+        let profile = test_profile_weeks(10, "indoor");
+        let html = render_pet_avatar(&profile);
+        assert!(html.contains("pet-avatar-placeholder"));
+        assert!(html.contains("🐱"));
     }
 
     #[test]
@@ -2934,6 +3186,10 @@ async fn main() {
     let storage = Storage::open().unwrap_or_else(|error| {
         panic!("failed to open storage: {error:?}");
     });
+    let uploads_dir = storage.data_dir().join("uploads");
+    if let Err(error) = std::fs::create_dir_all(&uploads_dir) {
+        eprintln!("warning: could not create uploads directory {}: {error}", uploads_dir.display());
+    }
     eprintln!(
         "Using data directory: {} (database: {})",
         storage.data_dir().display(),
@@ -2968,6 +3224,7 @@ async fn main() {
         .route("/signup.html", get(|| async { Redirect::permanent("/signup") }))
         .route("/contact.html", get(|| async { Redirect::permanent("/contact") }))
         .route("/feedback.html", get(|| async { Redirect::permanent("/feedback") }))
+        .nest_service("/uploads", ServeDir::new(uploads_dir))
         .nest_service("/images", ServeDir::new("static/images"))
         .fallback_service(ServeDir::new("static"))
         .with_state(state);

@@ -265,4 +265,48 @@
       }
     });
   }
+
+  const petPhotoInput = document.getElementById("pet_photo");
+  const skipPhotoCheckbox = document.getElementById("skip_photo");
+  const petPhotoPreview = document.getElementById("pet-photo-preview");
+
+  function syncPetPhotoField() {
+    if (!petPhotoInput || !skipPhotoCheckbox) {
+      return;
+    }
+
+    const skip = skipPhotoCheckbox.checked;
+    petPhotoInput.disabled = skip;
+    petPhotoInput.setAttribute("aria-disabled", skip ? "true" : "false");
+    if (skip) {
+      petPhotoInput.value = "";
+      if (petPhotoPreview) {
+        petPhotoPreview.hidden = true;
+        petPhotoPreview.innerHTML = "";
+      }
+    }
+  }
+
+  if (skipPhotoCheckbox) {
+    skipPhotoCheckbox.addEventListener("change", syncPetPhotoField);
+  }
+
+  if (petPhotoInput && petPhotoPreview) {
+    petPhotoInput.addEventListener("change", () => {
+      if (skipPhotoCheckbox && skipPhotoCheckbox.checked) {
+        return;
+      }
+
+      const file = petPhotoInput.files && petPhotoInput.files[0];
+      if (!file) {
+        petPhotoPreview.hidden = true;
+        petPhotoPreview.innerHTML = "";
+        return;
+      }
+
+      const previewUrl = URL.createObjectURL(file);
+      petPhotoPreview.hidden = false;
+      petPhotoPreview.innerHTML = `<img src="${previewUrl}" alt="Preview of your cat photo" />`;
+    });
+  }
 })();

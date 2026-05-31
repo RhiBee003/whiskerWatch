@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.8.6"
+axum = { version = "0.8.6", features = ["multipart"] }
 axum-extra = { version = "0.10.1", features = ["cookie"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
