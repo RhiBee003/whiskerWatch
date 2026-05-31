@@ -162,6 +162,25 @@
               </ul>
             </article>
           </div>
+
+          <article class="dashboard-card" style="margin-top: 1.5rem;">
+            <h2>Add a Care Event</h2>
+            <p>Adding an event automatically creates a care task with paw points.</p>
+            <form class="login-form" action="/home/calendar/add" method="post">
+              <label for="cal-title">Event title</label>
+              <input id="cal-title" name="title" type="text" placeholder="Vet appointment" required />
+
+              <label for="cal-day">Day of month</label>
+              <input id="cal-day" name="day" type="number" min="1" max="31" placeholder="15" required />
+
+              <label for="cal-time">When (displayed label)</label>
+              <input id="cal-time" name="time_label" type="text" placeholder="Jun 15 · 2:00 PM" required />
+
+              <p class="auth-hint">Completing this event's task awards <strong>15 paw points</strong>.</p>
+
+              <button type="submit" class="download-btn login-submit">Add event &amp; task</button>
+            </form>
+          </article>
         </section>
       </main>
     </div>

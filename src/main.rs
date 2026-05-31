@@ -1,3 +1,9 @@
+use dotenvy::dotenv;
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+};
+use rand::rngs::OsRng;
 use axum::{
     Form, Router,
     extract::{Query, State},
@@ -7,12 +13,14 @@ use axum::{
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::{
     collections::{HashMap, HashSet},
     env,
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
+use subtle::ConstantTimeEq;
 use tokio::{fs, io::AsyncWriteExt, net::TcpListener};
 use tower_http::services::ServeDir;
 use uuid::Uuid;
@@ -22,6 +30,7 @@ const USER_SESSION_COOKIE: &str = "ww_user_session";
 
 #[derive(Clone)]
 struct AppState {
+    db: SqlitePool,
     admin_sessions: Arc<Mutex<HashSet<String>>>,
     user_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
@@ -58,14 +67,6 @@ struct SignupForm {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct User {
-    name: String,
-    email: String,
-    password: String,
-    created_at: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
 struct UserTask {
     id: String,
     title: String,
@@ -95,7 +96,8 @@ struct UserProfile {
     parent_xp: u32,
     pet_name: String,
     pet_breed: String,
-    pet_mood: String,
+    #[serde(default)]
+    last_task_completed_at: u64,
     pet_emoji: String,
     equipped_outfit: String,
     owned_outfits: Vec<String>,
@@ -159,6 +161,15 @@ struct TaskToggleForm {
 }
 
 #[derive(Deserialize)]
+struct CalendarAddForm {
+    title: String,
+    day: u32,
+    time_label: String,
+}
+
+const CALENDAR_TASK_REWARD: u32 = 15;
+
+#[derive(Deserialize)]
 struct PawPointsBuyForm {
     package: String,
     card_name: String,
@@ -211,7 +222,7 @@ fn admin_email() -> String {
 }
 
 fn admin_password() -> String {
-    env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "WhiskerAdmin2026!".to_string())
+    env::var("ADMIN_PASSWORD").expect("ADMIN_PASSWORD env var must be set")
 }
 
 fn listen_address() -> String {
@@ -250,6 +261,20 @@ fn timestamp_now() -> u64 {
         .unwrap_or(0)
 }
 
+fn compute_pet_mood(last_task_completed_at: u64) -> &'static str {
+    if last_task_completed_at == 0 {
+        return "Sad";
+    }
+    let elapsed = timestamp_now().saturating_sub(last_task_completed_at);
+    match elapsed {
+        0..=86_399 => "Playful",
+        86_400..=172_799 => "Content",
+        172_800..=259_199 => "Sleepy",
+        259_200..=431_999 => "Lonely",
+        _ => "Sad",
+    }
+}
+
 fn format_timestamp(timestamp: u64) -> String {
     if timestamp == 0 {
         return "Unknown".to_string();
@@ -263,7 +288,129 @@ fn format_timestamp(timestamp: u64) -> String {
 }
 
 fn is_admin_credentials(email: &str, password: &str) -> bool {
-    email.eq_ignore_ascii_case(&admin_email()) && password == admin_password()
+    if !email.eq_ignore_ascii_case(&admin_email()) {
+        return false;
+    }
+    let correct = admin_password();
+    let a = correct.as_bytes();
+    let b = password.as_bytes();
+    // Constant-time compare; leaks length parity, which is acceptable for admin
+    if a.len() != b.len() {
+        return false;
+    }
+    bool::from(a.ct_eq(b))
+}
+
+fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
+    let salt = SaltString::generate(&mut OsRng);
+    Ok(Argon2::default()
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string())
+}
+
+fn verify_password(password: &str, hash: &str) -> bool {
+    let Ok(parsed) = PasswordHash::new(hash) else {
+        return false;
+    };
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok()
+}
+
+async fn init_db(pool: &SqlitePool) {
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT    NOT NULL,
+            email        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash TEXT   NOT NULL,
+            created_at   INTEGER NOT NULL
+        )",
+    )
+    .execute(pool)
+    .await
+    .expect("failed to initialize users table");
+}
+
+async fn db_user_login_valid(pool: &SqlitePool, email: &str, password: &str) -> bool {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT password_hash FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+
+    let Some((hash,)) = row else {
+        return false;
+    };
+    let password = password.to_string();
+    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
+        .await
+        .unwrap_or(false)
+}
+
+async fn db_email_exists(pool: &SqlitePool, email: &str) -> bool {
+    if email.eq_ignore_ascii_case(&admin_email()) {
+        return true;
+    }
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.is_some()
+}
+
+async fn db_save_user(
+    pool: &SqlitePool,
+    name: &str,
+    email: &str,
+    password: &str,
+) -> Result<(), String> {
+    let password = password.to_string();
+    let hash = tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        "INSERT INTO users (name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(name)
+    .bind(email)
+    .bind(&hash)
+    .bind(timestamp_now() as i64)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+async fn db_user_name_for_email(pool: &SqlitePool, email: &str) -> Option<String> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(name,)| name)
+}
+
+async fn db_member_since(pool: &SqlitePool, email: &str) -> String {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT created_at FROM users WHERE email = ?")
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    row.map(|(ts,)| format_timestamp(ts as u64))
+        .unwrap_or_else(|| "Recently joined".to_string())
 }
 
 fn admin_session_valid(state: &AppState, jar: &CookieJar) -> bool {
@@ -315,21 +462,13 @@ fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
         .cloned()
 }
 
-async fn user_name_for_email(email: &str) -> Option<String> {
-    load_users()
-        .await
-        .into_iter()
-        .find(|user| user.email.eq_ignore_ascii_case(email))
-        .map(|user| user.name)
-}
-
 async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
     let Some(email) = user_session_email(state, jar) else {
         return (String::new(), String::new());
     };
 
     let form_email = escape_html_attr(&email);
-    let form_name = user_name_for_email(&email)
+    let form_name = db_user_name_for_email(&state.db, &email)
         .await
         .map(|name| escape_html_attr(&name))
         .unwrap_or_default();
@@ -356,11 +495,11 @@ fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
         paw_points: 150,
-        parent_level: 2,
-        parent_xp: 40,
+        parent_level: 1,
+        parent_xp: 0,
         pet_name: "Mochi".to_string(),
         pet_breed: "Tabby companion".to_string(),
-        pet_mood: "Playful".to_string(),
+        last_task_completed_at: 0,
         pet_emoji: "🐱".to_string(),
         equipped_outfit: "Classic Collar".to_string(),
         owned_outfits: vec!["classic_collar".to_string()],
@@ -382,8 +521,8 @@ fn default_profile(email: &str) -> UserProfile {
             UserTask {
                 id: "litter_check".to_string(),
                 title: "Refresh litter box".to_string(),
-                completed: true,
-                due_label: "Yesterday".to_string(),
+                completed: false,
+                due_label: "Today · anytime".to_string(),
                 reward: 10,
             },
             UserTask {
@@ -556,6 +695,12 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("task_invalid") => {
             r#"<p class="auth-error" role="alert">That task could not be updated.</p>"#
         }
+        Some("event_added") => {
+            r#"<p class="auth-success" role="status">Event added and a care task has been created for it.</p>"#
+        }
+        Some("event_invalid") => {
+            r#"<p class="auth-error" role="alert">Please fill out all event fields correctly.</p>"#
+        }
         _ => "",
     }
     .to_string()
@@ -622,19 +767,21 @@ fn render_task_list(profile: &UserProfile) -> String {
         .iter()
         .map(|task| {
             let completed_class = if task.completed { " completed" } else { "" };
-            let button_label = if task.completed {
-                "Mark incomplete"
+            let action = if task.completed {
+                r#"<span class="task-done-badge">✓ Done</span>"#.to_string()
             } else {
-                "Complete"
+                format!(
+                    r#"<form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="{id}" /><button type="submit" class="download-btn task-toggle-btn">Complete</button></form>"#,
+                    id = escape_html_attr(&task.id),
+                )
             };
             format!(
-                r#"<li class="task-item{completed_class}"><div><p class="task-title">{title}</p><p class="task-due">{due} · +{reward} pts</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="{id}" /><button type="submit" class="download-btn task-toggle-btn">{button_label}</button></form></li>"#,
+                r#"<li class="task-item{completed_class}"><div><p class="task-title">{title}</p><p class="task-due">{due} · +{reward} pts</p></div>{action}</li>"#,
                 completed_class = completed_class,
                 title = escape_html(&task.title),
                 due = escape_html(&task.due_label),
                 reward = task.reward,
-                id = escape_html_attr(&task.id),
-                button_label = button_label,
+                action = action,
             )
         })
         .collect()
@@ -694,15 +841,6 @@ fn render_event_list(profile: &UserProfile) -> String {
         .collect()
 }
 
-async fn member_since_label(email: &str) -> String {
-    load_users()
-        .await
-        .into_iter()
-        .find(|user| user.email.eq_ignore_ascii_case(email))
-        .map(|user| format_timestamp(user.created_at))
-        .unwrap_or_else(|| "Recently joined".to_string())
-}
-
 async fn dashboard_page(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -714,10 +852,11 @@ async fn dashboard_page(
     };
 
     let profile = get_or_create_profile(&email).await;
-    let user_name = user_name_for_email(&email)
+    let user_name = db_user_name_for_email(&state.db, &email)
         .await
         .unwrap_or_else(|| "Parent".to_string());
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
+    let member_since = db_member_since(&state.db, &email).await;
 
     let template = match fs::read_to_string("templates/dashboard.html").await {
         Ok(contents) => contents,
@@ -733,14 +872,14 @@ async fn dashboard_page(
     let body = template
         .replace("{{USER_NAME}}", &escape_html(&user_name))
         .replace("{{USER_EMAIL}}", &escape_html(&email))
-        .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&email).await))
+        .replace("{{MEMBER_SINCE}}", &escape_html(&member_since))
         .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
         .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
         .replace("{{PET_NAME}}", &escape_html(&profile.pet_name))
         .replace("{{PET_BREED}}", &escape_html(&profile.pet_breed))
-        .replace("{{PET_MOOD}}", &escape_html(&profile.pet_mood))
+        .replace("{{PET_MOOD}}", compute_pet_mood(profile.last_task_completed_at))
         .replace("{{PET_EMOJI}}", &profile.pet_emoji)
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
         .replace("{{STATUS_BLOCK}}", &dashboard_status_block(query.status.as_deref()))
@@ -843,18 +982,13 @@ async fn task_toggle(
     };
 
     if profile.tasks[index].completed {
-        let title = profile.tasks[index].title.clone();
-        profile.tasks[index].completed = false;
-        push_activity(&mut profile, &format!("Reopened task: {title}."));
-        return match save_profile(&profile).await {
-            Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened"),
-            Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
-        };
+        return Redirect::to("/home?tab=tasks&status=task_invalid");
     }
 
     let reward = profile.tasks[index].reward;
     let title = profile.tasks[index].title.clone();
     profile.tasks[index].completed = true;
+    profile.last_task_completed_at = timestamp_now();
     profile.paw_points += reward;
     profile.parent_xp += reward / 2;
     if profile.parent_xp >= 100 {
@@ -874,6 +1008,50 @@ async fn task_toggle(
     match save_profile(&profile).await {
         Ok(()) => Redirect::to("/home?tab=tasks&status=task_done"),
         Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+    }
+}
+
+async fn calendar_add(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<CalendarAddForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let title = form.title.trim().to_string();
+    let time_label = form.time_label.trim().to_string();
+    let day = form.day;
+    let reward = CALENDAR_TASK_REWARD;
+
+    if title.is_empty() || time_label.is_empty() || day == 0 || day > 31 {
+        return Redirect::to("/home?tab=calendar&status=event_invalid");
+    }
+
+    let mut profile = get_or_create_profile(&email).await;
+
+    profile.calendar_events.push(CalendarEvent {
+        day,
+        title: title.clone(),
+        time_label: time_label.clone(),
+    });
+
+    let task_id = Uuid::new_v4().to_string();
+    profile.tasks.push(UserTask {
+        id: task_id,
+        title: title.clone(),
+        completed: false,
+        due_label: time_label.clone(),
+        reward,
+    });
+
+    push_activity(&mut profile, &format!("Added calendar event: {title} (+{reward} pts on completion)."));
+
+    match save_profile(&profile).await {
+        Ok(()) => Redirect::to("/home?tab=calendar&status=event_added"),
+        Err(_) => Redirect::to("/home?tab=calendar&status=event_invalid"),
     }
 }
 
@@ -1098,65 +1276,16 @@ async fn login_submit(
         return (jar, Redirect::to("/admin")).into_response();
     }
 
-    if email.eq_ignore_ascii_case("demo@whiskerwatch.app") && password == "meow123" {
+    if db_user_login_valid(&state.db, email, password).await {
         return signed_in_redirect(&state, jar, email);
     }
 
-    if user_login_valid(email, password).await {
-        return signed_in_redirect(&state, jar, email);
-    }
-
-    if !email_exists(email).await {
+    if !db_email_exists(&state.db, email).await {
         let encoded_email = encode_component(email);
         return Redirect::to(&format!("/signup?reason=notfound&email={encoded_email}")).into_response();
     }
 
     Redirect::to("/login?error=invalid").into_response()
-}
-
-async fn load_users() -> Vec<User> {
-    let contents = match fs::read_to_string("data/users.jsonl").await {
-        Ok(contents) => contents,
-        Err(_) => return Vec::new(),
-    };
-
-    contents
-        .lines()
-        .filter_map(|line| serde_json::from_str::<User>(line).ok())
-        .collect()
-}
-
-async fn user_login_valid(email: &str, password: &str) -> bool {
-    load_users()
-        .await
-        .into_iter()
-        .any(|user| user.email.eq_ignore_ascii_case(email) && user.password == password)
-}
-
-async fn email_exists(email: &str) -> bool {
-    if email.eq_ignore_ascii_case("demo@whiskerwatch.app")
-        || email.eq_ignore_ascii_case(&admin_email())
-    {
-        return true;
-    }
-
-    load_users()
-        .await
-        .into_iter()
-        .any(|user| user.email.eq_ignore_ascii_case(email))
-}
-
-async fn save_user(form: &SignupForm) -> Result<(), std::io::Error> {
-    fs::create_dir_all("data").await?;
-
-    let user = User {
-        name: form.name.trim().to_string(),
-        email: form.email.trim().to_string(),
-        password: form.password.trim().to_string(),
-        created_at: timestamp_now(),
-    };
-
-    append_json_line("data/users.jsonl", &user).await
 }
 
 async fn signup_submit(
@@ -1172,11 +1301,11 @@ async fn signup_submit(
         return Redirect::to("/signup?error=missing").into_response();
     }
 
-    if email_exists(email).await {
+    if db_email_exists(&state.db, email).await {
         return Redirect::to("/signup?error=exists").into_response();
     }
 
-    match save_user(&form).await {
+    match db_save_user(&state.db, name, email, password).await {
         Ok(()) => signed_in_redirect(&state, jar, email),
         Err(_) => Redirect::to("/signup?error=failed").into_response(),
     }
@@ -1409,7 +1538,21 @@ async fn admin_logout(State(state): State<AppState>, jar: CookieJar) -> impl Int
 
 #[tokio::main]
 async fn main() {
+    // Load .env if present, then verify ADMIN_PASSWORD is set
+    dotenv().ok();
+    let _ = admin_password();
+
+    std::fs::create_dir_all("data").expect("failed to create data directory");
+    let db = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect("sqlite:data/whiskerwatch.db?mode=rwc")
+        .await
+        .expect("failed to open database");
+
+    init_db(&db).await;
+
     let state = AppState {
+        db,
         admin_sessions: Arc::new(Mutex::new(HashSet::new())),
         user_sessions: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -1420,6 +1563,7 @@ async fn main() {
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
+        .route("/home/calendar/add", post(calendar_add))
         .route("/home/paw-points/buy", post(paw_points_buy))
         .route("/logout", post(user_logout))
         .route("/login", get(login_page).post(login_submit))
@@ -1442,7 +1586,7 @@ async fn main() {
         .unwrap_or_else(|error| panic!("failed to bind to {address}: {error}"));
 
     println!("WhiskerWatch running at http://{address}");
-    println!("Admin login: {} / (see ADMIN_PASSWORD env var)", admin_email());
+    println!("Admin login: {} / (set via ADMIN_PASSWORD env var)", admin_email());
     axum::serve(listener, app)
         .await
         .expect("server failed unexpectedly");
