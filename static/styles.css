@@ -168,11 +168,24 @@ img {
 }
 
 .home-hero {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
-  align-items: center;
+  align-items: start;
   padding: 2rem 0 3rem;
+}
+
+.home-hero-art {
+  justify-self: end;
+  align-self: start;
+  width: min(100%, 440px);
+}
+
+.home-hero-tat-girl {
+  width: 100%;
+  height: auto;
+  display: block;
 }
 
 .home-hero-copy h1 {
@@ -1353,6 +1366,9 @@ footer p {
 
   .home-hero-art {
     order: -1;
+    justify-self: center;
+    width: min(88vw, 360px);
+    margin: 0 auto;
   }
 
   .home-feature-feed .home-feature-art {
