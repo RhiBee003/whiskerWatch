@@ -55,6 +55,9 @@ struct SignupQuery {
     error: Option<String>,
     reason: Option<String>,
     email: Option<String>,
+    username: Option<String>,
+    first_name: Option<String>,
+    last_name: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -69,6 +72,7 @@ struct SignupForm {
     last_name: String,
     email: String,
     password: String,
+    confirm_password: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -413,6 +417,23 @@ fn encode_component(value: &str) -> String {
             _ => format!("%{byte:02X}"),
         })
         .collect()
+}
+
+fn signup_redirect_with_fields(
+    error: &str,
+    username: &str,
+    first_name: &str,
+    last_name: &str,
+    email: &str,
+) -> Redirect {
+    Redirect::to(&format!(
+        "/signup?error={}&username={}&first_name={}&last_name={}&email={}",
+        encode_component(error),
+        encode_component(username),
+        encode_component(first_name),
+        encode_component(last_name),
+        encode_component(email),
+    ))
 }
 
 fn escape_html(value: &str) -> String {
@@ -2592,6 +2613,9 @@ async fn signup_page(
                 Some("password") => {
                     r#"<p class="auth-error" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
                 }
+                Some("password_mismatch") => {
+                    r#"<p class="auth-error" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
+                }
                 Some("failed") => {
                     r#"<p class="auth-error" role="alert">We could not create your account. Please try again.</p>"#
                 }
@@ -2604,10 +2628,16 @@ async fn signup_page(
                 _ => "",
             };
             let signup_email = escape_html_attr(query.email.as_deref().unwrap_or(""));
+            let signup_username = escape_html_attr(query.username.as_deref().unwrap_or(""));
+            let signup_first_name = escape_html_attr(query.first_name.as_deref().unwrap_or(""));
+            let signup_last_name = escape_html_attr(query.last_name.as_deref().unwrap_or(""));
             let body = contents
                 .replace("{{SIGNUP_INFO_BLOCK}}", signup_info_block)
                 .replace("{{SIGNUP_ERROR_BLOCK}}", signup_error_block)
-                .replace("{{SIGNUP_EMAIL}}", &signup_email);
+                .replace("{{SIGNUP_EMAIL}}", &signup_email)
+                .replace("{{SIGNUP_USERNAME}}", &signup_username)
+                .replace("{{SIGNUP_FIRST_NAME}}", &signup_first_name)
+                .replace("{{SIGNUP_LAST_NAME}}", &signup_last_name);
             Html(body).into_response()
         }
         Err(_) => (
@@ -2780,6 +2810,10 @@ fn password_meets_signup_requirements(password: &str) -> bool {
     has_digit && has_special
 }
 
+fn signup_passwords_match(password: &str, confirm_password: &str) -> bool {
+    password == confirm_password
+}
+
 fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::StorageError> {
     let user = User {
         username: form.username.trim().to_string(),
@@ -2803,19 +2837,25 @@ async fn signup_submit(
     let last_name = form.last_name.trim();
     let email = form.email.trim();
     let password = form.password.trim();
+    let confirm_password = form.confirm_password.trim();
 
     if username.is_empty()
         || first_name.is_empty()
         || last_name.is_empty()
         || email.is_empty()
         || password.is_empty()
+        || confirm_password.is_empty()
     {
         return Redirect::to("/signup?error=missing").into_response();
     }
 
+    if !signup_passwords_match(password, confirm_password) {
+        return signup_redirect_with_fields("password_mismatch", username, first_name, last_name, email)
+            .into_response();
+    }
+
     if !password_meets_signup_requirements(password) {
-        let encoded_email = encode_component(email);
-        return Redirect::to(&format!("/signup?error=password&email={encoded_email}"))
+        return signup_redirect_with_fields("password", username, first_name, last_name, email)
             .into_response();
     }
 
@@ -3111,6 +3151,12 @@ mod tests {
     fn signup_password_requires_special_character() {
         assert!(!password_meets_signup_requirements("abcde1"));
         assert!(password_meets_signup_requirements("abcde1!"));
+    }
+
+    #[test]
+    fn signup_passwords_must_match() {
+        assert!(signup_passwords_match("abcde1!", "abcde1!"));
+        assert!(!signup_passwords_match("abcde1!", "abcde1?"));
     }
 
     #[test]

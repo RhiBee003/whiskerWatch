@@ -653,6 +653,13 @@ img {
   color: var(--pink-accent);
 }
 
+.password-confirm-error {
+  margin: 0.15rem 0 0;
+  color: #e8357a;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
 .login-submit:disabled {
   opacity: 0.55;
   cursor: not-allowed;

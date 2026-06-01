@@ -34,6 +34,7 @@
             name="username"
             type="text"
             placeholder="Shown on your dashboard"
+            value="{{SIGNUP_USERNAME}}"
             required
             autocomplete="username"
           />
@@ -44,6 +45,7 @@
             name="first_name"
             type="text"
             placeholder="First name"
+            value="{{SIGNUP_FIRST_NAME}}"
             required
             autocomplete="given-name"
           />
@@ -54,6 +56,7 @@
             name="last_name"
             type="text"
             placeholder="Last name"
+            value="{{SIGNUP_LAST_NAME}}"
             required
             autocomplete="family-name"
           />
@@ -76,6 +79,7 @@
               type="password"
               placeholder="Choose a password"
               required
+              autocomplete="new-password"
             />
             <button
               type="button"
@@ -117,6 +121,45 @@
             </li>
           </ul>
 
+          <label for="signup-confirm-password">Confirm password</label>
+          <div class="password-field">
+            <input
+              id="signup-confirm-password"
+              name="confirm_password"
+              type="password"
+              placeholder="Re-enter your password"
+              required
+              autocomplete="new-password"
+            />
+            <button
+              type="button"
+              class="password-toggle password-toggle--hidden"
+              data-password-toggle
+              aria-label="Show password"
+              aria-pressed="false"
+            >
+              <span class="password-toggle-icon password-toggle-icon--show" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </span>
+              <span class="password-toggle-icon password-toggle-icon--hide" aria-hidden="true" hidden>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22" />
+                </svg>
+              </span>
+            </button>
+          </div>
+          <p
+            class="password-confirm-error"
+            id="signup-password-confirm-error"
+            role="alert"
+            hidden
+          >
+            Passwords do not match.
+          </p>
+
           <button
             type="submit"
             class="download-btn login-submit"
@@ -136,6 +179,8 @@
       (function () {
         var form = document.querySelector(".login-form");
         var passwordInput = document.getElementById("signup-password");
+        var confirmPasswordInput = document.getElementById("signup-confirm-password");
+        var confirmError = document.getElementById("signup-password-confirm-error");
         var submitBtn = document.getElementById("signup-submit");
         var reqLength = document.getElementById("pw-req-length");
         var reqDigit = document.getElementById("pw-req-digit");
@@ -155,29 +200,48 @@
           item.setAttribute("aria-checked", met ? "true" : "false");
         }
 
-        function updatePasswordRequirements() {
+        function passwordsMatch() {
+          var confirmValue = confirmPasswordInput.value;
+          if (!confirmValue) {
+            confirmError.hidden = true;
+            return true;
+          }
+          var match = passwordInput.value === confirmValue;
+          confirmError.hidden = match;
+          return match;
+        }
+
+        function updateFormValidity() {
           var value = passwordInput.value;
           var checks = passwordChecks(value);
           setRequirementState(reqLength, checks.length);
           setRequirementState(reqDigit, checks.digit);
           setRequirementState(reqSpecial, checks.special);
-          var valid =
+          var requirementsMet =
             checks.length && checks.digit && checks.special;
+          var match = passwordsMatch();
+          var valid = requirementsMet && match;
           submitBtn.disabled = !valid;
           return valid;
         }
 
-        passwordInput.addEventListener("input", updatePasswordRequirements);
-        passwordInput.addEventListener("blur", updatePasswordRequirements);
+        passwordInput.addEventListener("input", updateFormValidity);
+        passwordInput.addEventListener("blur", updateFormValidity);
+        confirmPasswordInput.addEventListener("input", updateFormValidity);
+        confirmPasswordInput.addEventListener("blur", updateFormValidity);
 
         form.addEventListener("submit", function (event) {
-          if (!updatePasswordRequirements()) {
+          if (!updateFormValidity()) {
             event.preventDefault();
-            passwordInput.focus();
+            if (!passwordsMatch()) {
+              confirmPasswordInput.focus();
+            } else {
+              passwordInput.focus();
+            }
           }
         });
 
-        updatePasswordRequirements();
+        updateFormValidity();
       })();
 
       if (window.location.search) {
