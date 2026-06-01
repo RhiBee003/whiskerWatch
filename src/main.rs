@@ -612,6 +612,49 @@ fn clear_admin_session(state: &AppState, jar: CookieJar) -> CookieJar {
     jar.remove(Cookie::from(ADMIN_SESSION_COOKIE))
 }
 
+fn ensure_admin_user_account(state: &AppState) -> Result<(), storage::StorageError> {
+    let email = admin_email();
+    if state.storage.user_exists(&email)? {
+        return Ok(());
+    }
+
+    let user = User {
+        username: "Admin".to_string(),
+        first_name: "WhiskerWatch".to_string(),
+        last_name: "Admin".to_string(),
+        email,
+        password: admin_password(),
+        created_at: timestamp_now(),
+    };
+
+    state.storage.save_user(&user)
+}
+
+fn ensure_dashboard_session(state: &AppState, jar: CookieJar) -> Result<(CookieJar, String), Redirect> {
+    if let Some(email) = user_session_email(state, &jar) {
+        return Ok((jar, email));
+    }
+
+    if admin_session_valid(state, &jar) {
+        let email = admin_email();
+        if let Err(error) = ensure_admin_user_account(state) {
+            eprintln!("admin user bootstrap failed: {error}");
+        }
+        let jar = create_user_session(state, jar, &email);
+        return Ok((jar, email));
+    }
+
+    Err(Redirect::to("/login"))
+}
+
+fn admin_dashboard_nav_link(state: &AppState, jar: &CookieJar) -> &'static str {
+    if admin_session_valid(state, jar) {
+        r#"<a href="/admin">ADMIN</a>"#
+    } else {
+        ""
+    }
+}
+
 fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
     let cookie = jar.get(USER_SESSION_COOKIE)?;
     state
@@ -1906,7 +1949,7 @@ fn signed_in_redirect(state: &AppState, jar: CookieJar, email: &str) -> Response
 }
 
 async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
-    if user_session_email(&state, &jar).is_some() {
+    if user_session_email(&state, &jar).is_some() || admin_session_valid(&state, &jar) {
         return Redirect::to("/home").into_response();
     }
 
@@ -2271,8 +2314,8 @@ async fn dashboard_page(
     jar: CookieJar,
     Query(query): Query<DashboardQuery>,
 ) -> impl IntoResponse {
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
+    let (jar, email) = match ensure_dashboard_session(&state, jar) {
+        Ok(pair) => pair,
         Err(redirect) => return redirect.into_response(),
     };
 
@@ -2361,9 +2404,10 @@ async fn dashboard_page(
         .replace(
             "{{FEEDBACK_TAB_CONTENT}}",
             &render_dashboard_feedback_tab(&form_name, &form_email),
-        );
+        )
+        .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar));
 
-    Html(body).into_response()
+    (jar, Html(body)).into_response()
 }
 
 async fn onboarding_submit(
@@ -2735,6 +2779,11 @@ async fn stripe_webhook(
 
 async fn user_logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let jar = clear_user_session(&state, jar);
+    let jar = if admin_session_valid(&state, &jar) {
+        clear_admin_session(&state, jar)
+    } else {
+        jar
+    };
     (jar, Redirect::to("/")).into_response()
 }
 
@@ -2743,7 +2792,7 @@ async fn login_page(
     jar: CookieJar,
     Query(query): Query<LoginQuery>,
 ) -> impl IntoResponse {
-    if user_session_email(&state, &jar).is_some() {
+    if user_session_email(&state, &jar).is_some() || admin_session_valid(&state, &jar) {
         return Redirect::to("/home").into_response();
     }
 
@@ -3153,8 +3202,12 @@ async fn login_submit(
     }
 
     if is_admin_credentials(email, password) {
+        if let Err(error) = ensure_admin_user_account(&state) {
+            eprintln!("admin user bootstrap failed: {error}");
+        }
         let jar = create_admin_session(&state, jar);
-        return (jar, Redirect::to("/admin")).into_response();
+        let jar = create_user_session(&state, jar, &admin_email());
+        return (jar, Redirect::to("/home")).into_response();
     }
 
     if email.eq_ignore_ascii_case("demo@whiskerwatch.app") && password == "meow123" {
@@ -3467,8 +3520,8 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
       </div>
       <nav>
-        <a href="/">HOME</a>
-        <a href="/feedback">FEEDBACK</a>
+        <a href="/home">HOME</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
         <form class="admin-logout-form" action="/admin/logout" method="post">
           <button type="submit" class="admin-logout-btn">LOG OUT</button>
         </form>
@@ -3820,6 +3873,35 @@ mod tests {
         profile.last_vet_date = Some("2025-01-01".to_string());
         assert!(vaccines_due_or_overdue(&profile, today));
         assert!(needs_vet_appointment_asap(&profile, today));
+    }
+
+    #[test]
+    fn admin_credentials_match_configured_email_and_password() {
+        assert!(is_admin_credentials(
+            &admin_email(),
+            &admin_password()
+        ));
+        assert!(!is_admin_credentials(&admin_email(), "wrong-password"));
+        assert!(!is_admin_credentials("other@example.com", &admin_password()));
+    }
+
+    #[test]
+    fn admin_dashboard_nav_link_only_when_admin_session() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-nav-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let jar = CookieJar::new();
+        assert_eq!(admin_dashboard_nav_link(&state, &jar), "");
+
+        let jar = create_admin_session(&state, jar);
+        assert!(admin_dashboard_nav_link(&state, &jar).contains("/admin"));
     }
 }
 

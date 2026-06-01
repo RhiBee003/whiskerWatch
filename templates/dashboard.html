@@ -15,6 +15,7 @@
       <nav class="dashboard-nav">
         <a href="/home">HOME</a>
         <a href="/home?tab=feedback">FEEDBACK</a>
+        {{ADMIN_NAV_LINK}}
         <a href="/contact">CONTACT</a>
         <form class="admin-logout-form" action="/logout" method="post">
           <button type="submit" class="admin-logout-btn">LOG OUT</button>
@@ -137,6 +138,10 @@
           {{HEALTH_TAB_CONTENT}}
         </section>
 
+        <section id="panel-feedback" class="dashboard-panel" role="tabpanel" hidden>
+          {{FEEDBACK_TAB_CONTENT}}
+        </section>
+
         <section id="panel-calendar" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Calendar</h1>
           <p class="panel-intro">{{CALENDAR_MONTH_LABEL}}</p>
@@ -155,10 +160,6 @@
               </ul>
             </article>
           </div>
-        </section>
-
-        <section id="panel-feedback" class="dashboard-panel" role="tabpanel" hidden>
-          {{FEEDBACK_TAB_CONTENT}}
         </section>
       </main>
     </div>
