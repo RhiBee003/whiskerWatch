@@ -200,6 +200,8 @@ struct UserProfile {
     pet_indoor_outdoor: Option<String>,
     #[serde(default)]
     vaccine_history: Vec<VaccineRecord>,
+    #[serde(default)]
+    pet_vaccines_unknown: bool,
     tasks: Vec<UserTask>,
     calendar_events: Vec<CalendarEvent>,
     activity: Vec<ProfileActivity>,
@@ -316,6 +318,7 @@ struct OnboardingForm {
     medications: String,
     vaccine_names: Vec<String>,
     vaccine_dates: Vec<String>,
+    pet_vaccines_unknown: bool,
     skip_photo: bool,
 }
 
@@ -334,6 +337,7 @@ impl OnboardingForm {
             medications: form_scalar(fields, "medications")?,
             vaccine_names: form_vec(fields, "vaccine_names"),
             vaccine_dates: form_vec(fields, "vaccine_dates"),
+            pet_vaccines_unknown: form_checkbox(fields, "pet_vaccines_unknown"),
             skip_photo: form_checkbox(fields, "skip_photo"),
         })
     }
@@ -732,6 +736,7 @@ fn default_profile(email: &str) -> UserProfile {
         pet_medications: String::new(),
         pet_indoor_outdoor: None,
         vaccine_history: vec![],
+        pet_vaccines_unknown: false,
         tasks: default_starter_tasks(),
         calendar_events: vec![],
         activity: vec![],
@@ -964,6 +969,10 @@ fn needs_vet_appointment_asap(profile: &UserProfile, today: NaiveDate) -> bool {
     }
 
     if profile.never_been_to_vet {
+        return true;
+    }
+
+    if profile.pet_vaccines_unknown {
         return true;
     }
 
@@ -1480,7 +1489,9 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
         profile.pet_indoor_outdoor.as_deref(),
     ));
 
-    let vaccine_list = if profile.vaccine_history.is_empty() {
+    let vaccine_list = if profile.pet_vaccines_unknown {
+        "Unknown — we recommend a vet visit soon to get vaccines up to date".to_string()
+    } else if profile.vaccine_history.is_empty() {
         "None recorded".to_string()
     } else {
         let items: String = profile
@@ -1609,7 +1620,9 @@ fn render_health_tab(profile: &UserProfile) -> String {
         profile.pet_indoor_outdoor.as_deref(),
     ));
 
-    let vaccine_list = if profile.vaccine_history.is_empty() {
+    let vaccine_list = if profile.pet_vaccines_unknown {
+        "<li>Vaccine history unknown — we recommend taking your cat to the vet soon to get their vaccines up to date.</li>".to_string()
+    } else if profile.vaccine_history.is_empty() {
         "<li>No vaccines recorded yet.</li>".to_string()
     } else {
         profile
@@ -1767,6 +1780,13 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
           </div>
         </div>
         <button type="button" class="download-btn vaccine-add-btn" id="add-vaccine-row">+ Add vaccine</button>
+        <label class="checkbox-pill vaccine-unknown-option">
+          <input type="checkbox" id="pet_vaccines_unknown" name="pet_vaccines_unknown" value="on" />
+          I don't know my cat's vaccine history
+        </label>
+        <p id="vaccine-unknown-alert" class="vaccine-unknown-alert" role="alert" hidden>
+          We recommend taking your cat to the vet soon to get their vaccines up to date.
+        </p>
       </fieldset>
 
       <label for="conditions">Health conditions</label>
@@ -1917,6 +1937,18 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         _ => "",
     }
     .to_string()
+}
+
+fn render_vaccines_unknown_banner() -> String {
+    r#"<p class="vaccine-unknown-alert dashboard-vaccine-alert" role="alert">We recommend taking your cat to the vet soon to get their vaccines up to date.</p>"#.to_string()
+}
+
+fn render_dashboard_status_area(profile: &UserProfile, status: Option<&str>) -> String {
+    let mut html = dashboard_status_block(status);
+    if profile.pet_vaccines_unknown {
+        html.push_str(&render_vaccines_unknown_banner());
+    }
+    html
 }
 
 fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
@@ -2250,7 +2282,7 @@ async fn dashboard_page(
         )
         .replace("{{HEALTH_TAB_CONTENT}}", &render_health_tab(&profile))
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
-        .replace("{{STATUS_BLOCK}}", &dashboard_status_block(query.status.as_deref()))
+        .replace("{{STATUS_BLOCK}}", &render_dashboard_status_area(&profile, query.status.as_deref()))
         .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
         .replace("{{OUTFIT_CARDS}}", &render_outfit_cards(&profile))
         .replace("{{TASK_LIST}}", &render_task_list(&profile))
@@ -2337,7 +2369,11 @@ async fn onboarding_submit(
         return Redirect::to("/home?status=onboarding_invalid");
     }
 
-    let vaccine_history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
+    let vaccine_history = if form.pet_vaccines_unknown {
+        vec![]
+    } else {
+        parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates)
+    };
 
     let last_vet_date = if form.never_been_to_vet {
         None
@@ -2367,6 +2403,7 @@ async fn onboarding_submit(
     profile.pet_medications = form.medications.trim().to_string();
     profile.pet_indoor_outdoor = Some(indoor_outdoor);
     profile.vaccine_history = vaccine_history;
+    profile.pet_vaccines_unknown = form.pet_vaccines_unknown;
     profile.onboarding_completed = true;
     profile.calendar_events = merge_calendar_events(&profile, signup_date);
     let _ = refresh_profile_tasks(&mut profile);
@@ -2564,6 +2601,9 @@ async fn vet_visit_submit(
     }
 
     profile.vaccine_history = vaccine_history;
+    if !profile.vaccine_history.is_empty() {
+        profile.pet_vaccines_unknown = false;
+    }
     if last_vet_date.is_some() {
         profile.last_vet_date = last_vet_date;
         profile.never_been_to_vet = false;
@@ -3453,6 +3493,7 @@ mod tests {
             pet_medications: String::new(),
             pet_indoor_outdoor: Some(indoor.to_string()),
             vaccine_history: vec![],
+            pet_vaccines_unknown: false,
             tasks: vec![],
             calendar_events: vec![],
             activity: vec![],
@@ -3642,6 +3683,36 @@ mod tests {
         profile.pet_age_years = Some(2);
         profile.never_been_to_vet = true;
         profile.last_vet_date = None;
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        assert!(needs_vet_appointment_asap(&profile, today));
+        profile.tasks.clear();
+        assert!(refresh_profile_tasks(&mut profile));
+        assert!(
+            profile
+                .tasks
+                .iter()
+                .any(|task| task.id == VET_APPOINTMENT_TASK_ID)
+        );
+    }
+
+    #[test]
+    fn onboarding_form_deserializes_pet_vaccines_unknown() {
+        let form: OnboardingForm = serde_urlencoded::from_str(&onboarding_form_body(
+            "&pet_vaccines_unknown=on&vaccine_names=&vaccine_dates=",
+        ))
+        .expect("form");
+        assert!(form.pet_vaccines_unknown);
+        assert!(parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates).is_empty());
+    }
+
+    #[test]
+    fn unknown_vaccines_triggers_asap_task() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        profile.pet_vaccines_unknown = true;
+        profile.last_vet_date = Some("2025-01-01".to_string());
+        profile.never_been_to_vet = false;
         let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
         assert!(needs_vet_appointment_asap(&profile, today));
         profile.tasks.clear();

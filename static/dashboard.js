@@ -239,6 +239,65 @@
     });
   }
 
+  const vaccinesUnknownCheckbox = document.getElementById("pet_vaccines_unknown");
+  const vaccineUnknownAlert = document.getElementById("vaccine-unknown-alert");
+  const vaccineHistoryFieldset = document.querySelector(".vaccine-history-fieldset");
+
+  function syncVaccinesUnknownField() {
+    if (!vaccinesUnknownCheckbox) {
+      return;
+    }
+
+    const unknown = vaccinesUnknownCheckbox.checked;
+
+    if (vaccineUnknownAlert) {
+      vaccineUnknownAlert.hidden = !unknown;
+    }
+
+    if (vaccineHistoryFieldset) {
+      vaccineHistoryFieldset.classList.toggle("is-unknown", unknown);
+    }
+
+    if (vaccineRows) {
+      vaccineRows.querySelectorAll(".vaccine-row").forEach((row) => {
+        row.querySelectorAll("select, input").forEach((field) => {
+          field.disabled = unknown;
+          if (unknown) {
+            field.value = "";
+          }
+        });
+        const removeBtn = row.querySelector(".vaccine-remove-btn");
+        if (removeBtn) {
+          removeBtn.disabled = unknown;
+        }
+      });
+    }
+
+    if (addVaccineRowBtn) {
+      addVaccineRowBtn.disabled = unknown;
+    }
+  }
+
+  if (vaccinesUnknownCheckbox) {
+    vaccinesUnknownCheckbox.addEventListener("change", syncVaccinesUnknownField);
+  }
+
+  if (vaccineRows && vaccinesUnknownCheckbox) {
+    vaccineRows.addEventListener("change", (event) => {
+      if (!vaccinesUnknownCheckbox.checked) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof HTMLSelectElement || target instanceof HTMLInputElement)) {
+        return;
+      }
+      if (target.value) {
+        vaccinesUnknownCheckbox.checked = false;
+        syncVaccinesUnknownField();
+      }
+    });
+  }
+
   const lastVetDateInput = document.getElementById("last_vet_date");
   const neverBeenToVetCheckbox = document.getElementById("never_been_to_vet");
 

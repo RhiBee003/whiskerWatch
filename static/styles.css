@@ -1017,6 +1017,7 @@ footer p {
   flex-wrap: wrap;
   gap: 0.45rem;
   margin-bottom: 1.2rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dashboard-tab {
@@ -1561,10 +1562,32 @@ footer p {
 }
 
 @media (max-width: 900px) {
+  .dashboard-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.35rem;
+    margin-right: -0.5rem;
+    margin-left: -0.5rem;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    scrollbar-width: thin;
+  }
+
+  .dashboard-tab {
+    flex: 0 0 auto;
+  }
+
   .dashboard-topbar {
     flex-direction: column;
     gap: 0.7rem;
     padding: 1rem 1.2rem;
+  }
+
+  .dashboard-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.5rem;
   }
 
   .pet-showcase {
@@ -1785,6 +1808,42 @@ footer p {
   background: var(--pink-input);
   border: 1px solid rgba(0, 0, 0, 0.14);
   width: fit-content;
+}
+
+.vaccine-unknown-option {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  background: var(--pink-input);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  width: fit-content;
+}
+
+.vaccine-unknown-alert {
+  margin: 0.65rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  background: var(--pink-surface-soft);
+  border: 1px solid var(--pink-accent);
+  color: var(--pink-accent);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.dashboard-vaccine-alert {
+  margin: 0 0 1rem;
+}
+
+.vaccine-history-fieldset.is-unknown .vaccine-rows,
+.vaccine-history-fieldset.is-unknown .vaccine-add-btn {
+  opacity: 0.55;
+}
+
+.vaccine-history-fieldset.is-unknown .vaccine-row select,
+.vaccine-history-fieldset.is-unknown .vaccine-row input[type="date"],
+.vaccine-history-fieldset.is-unknown .vaccine-remove-btn,
+.vaccine-history-fieldset.is-unknown .vaccine-add-btn {
+  cursor: not-allowed;
 }
 
 .onboarding-form input[type="date"]:disabled {
