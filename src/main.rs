@@ -78,7 +78,6 @@ struct ResetPasswordForm {
 #[derive(Deserialize, Default)]
 struct SignupQuery {
     error: Option<String>,
-    reason: Option<String>,
     email: Option<String>,
     username: Option<String>,
     first_name: Option<String>,
@@ -2872,17 +2871,15 @@ async fn signup_page(
                 Some("password_mismatch") => {
                     r#"<p class="auth-error" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
                 }
+                Some("no_account") => {
+                    r#"<p class="auth-error" role="alert">You don't have an account yet. Create one below.</p>"#
+                }
                 Some("failed") => {
                     r#"<p class="auth-error" role="alert">We could not create your account. Please try again.</p>"#
                 }
                 _ => "",
             };
-            let signup_info_block = match query.reason.as_deref() {
-                Some("notfound") => {
-                    r#"<p class="auth-success" role="status">No account found with that email. Create one below.</p>"#
-                }
-                _ => "",
-            };
+            let signup_info_block = "";
             let signup_email = escape_html_attr(query.email.as_deref().unwrap_or(""));
             let signup_username = escape_html_attr(query.username.as_deref().unwrap_or(""));
             let signup_first_name = escape_html_attr(query.first_name.as_deref().unwrap_or(""));
@@ -3016,7 +3013,7 @@ async fn login_submit(
     match email_exists_result(&state, email) {
         Ok(false) => {
             let encoded_email = encode_component(email);
-            return Redirect::to(&format!("/signup?reason=notfound&email={encoded_email}"))
+            return Redirect::to(&format!("/signup?error=no_account&email={encoded_email}"))
                 .into_response();
         }
         Ok(true) => Redirect::to("/login?error=invalid").into_response(),
