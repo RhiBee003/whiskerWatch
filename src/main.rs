@@ -432,12 +432,20 @@ struct ContactQuery {
     status: Option<String>,
 }
 
+fn env_or_default(key: &str, default: &str) -> String {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
 fn admin_email() -> String {
-    env::var("ADMIN_EMAIL").unwrap_or_else(|_| "rhibee003@gmail.com".to_string())
+    env_or_default("ADMIN_EMAIL", "rhibee003@gmail.com")
 }
 
 fn admin_password() -> String {
-    env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "WhiskerAdmin2026!".to_string())
+    env_or_default("ADMIN_PASSWORD", "WhiskerAdmin2026!")
 }
 
 fn is_admin_account(email: &str) -> bool {
@@ -1991,8 +1999,26 @@ fn create_user_session(state: &AppState, jar: CookieJar, email: &str) -> CookieJ
     jar.add(cookie)
 }
 
+fn complete_sign_in(state: &AppState, jar: CookieJar, email: &str) -> CookieJar {
+    let email = if is_admin_account(email) {
+        admin_email()
+    } else {
+        email.to_string()
+    };
+
+    if is_admin_account(&email) {
+        if let Err(error) = ensure_admin_user_account(state) {
+            eprintln!("admin user bootstrap failed: {error}");
+        }
+        let jar = create_admin_session(state, jar);
+        create_user_session(state, jar, &email)
+    } else {
+        create_user_session(state, jar, &email)
+    }
+}
+
 fn signed_in_redirect(state: &AppState, jar: CookieJar, email: &str) -> Response {
-    let jar = create_user_session(state, jar, email);
+    let jar = complete_sign_in(state, jar, email);
     (jar, Redirect::to("/home")).into_response()
 }
 
@@ -2847,6 +2873,9 @@ async fn login_page(
     match fs::read_to_string("templates/login.html").await {
         Ok(contents) => {
             let login_error_block = match query.error.as_deref() {
+                Some("admin_invalid") => {
+                    r#"<p class="auth-error" role="alert">Incorrect password for the admin account. Use the <code>ADMIN_PASSWORD</code> from your server environment (Render → Environment tab in production). Locally, the default is <code>WhiskerAdmin2026!</code> unless you set <code>ADMIN_PASSWORD</code>.</p>"#
+                }
                 Some("invalid") => {
                     r#"<p class="auth-error" role="alert">Incorrect password. Please try again.</p>"#
                 }
@@ -3253,9 +3282,13 @@ async fn login_submit(
         if let Err(error) = ensure_admin_user_account(&state) {
             eprintln!("admin user bootstrap failed: {error}");
         }
-        let jar = create_admin_session(&state, jar);
-        let jar = create_user_session(&state, jar, &admin_email());
-        return (jar, Redirect::to("/home")).into_response();
+        if let Err(error) = state
+            .storage
+            .set_user_password(&admin_email(), &admin_password())
+        {
+            eprintln!("admin password sync failed: {error}");
+        }
+        return signed_in_redirect(&state, jar, &admin_email());
     }
 
     if email.eq_ignore_ascii_case("demo@whiskerwatch.app") && password == "meow123" {
@@ -3276,7 +3309,13 @@ async fn login_submit(
             return Redirect::to(&format!("/signup?error=no_account&email={encoded_email}"))
                 .into_response();
         }
-        Ok(true) => Redirect::to("/login?error=invalid").into_response(),
+        Ok(true) => {
+            if is_admin_account(email) {
+                Redirect::to("/login?error=admin_invalid").into_response()
+            } else {
+                Redirect::to("/login?error=invalid").into_response()
+            }
+        }
         Err(()) => Redirect::to("/login?error=storage").into_response(),
     }
 }
@@ -3931,6 +3970,72 @@ mod tests {
         ));
         assert!(!is_admin_credentials(&admin_email(), "wrong-password"));
         assert!(!is_admin_credentials("other@example.com", &admin_password()));
+    }
+
+    #[test]
+    fn complete_sign_in_grants_admin_session_for_admin_email() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-login-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        storage
+            .save_user(&User {
+                username: "AdminUser".to_string(),
+                first_name: "WhiskerWatch".to_string(),
+                last_name: "Admin".to_string(),
+                email: admin_email(),
+                password: "CustomSignup1!".to_string(),
+                created_at: 1,
+            })
+            .expect("save admin user");
+
+        let state = AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let jar = complete_sign_in(&state, CookieJar::new(), &admin_email());
+        assert!(admin_session_valid(&state, &jar));
+        assert_eq!(
+            user_session_email(&state, &jar).as_deref(),
+            Some(admin_email().as_str())
+        );
+    }
+
+    #[test]
+    fn admin_env_password_syncs_database_hash() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-sync-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        storage
+            .save_user(&User {
+                username: "AdminUser".to_string(),
+                first_name: "WhiskerWatch".to_string(),
+                last_name: "Admin".to_string(),
+                email: admin_email(),
+                password: "OldSignup1!".to_string(),
+                created_at: 1,
+            })
+            .expect("save admin user");
+
+        storage
+            .set_user_password(&admin_email(), &admin_password())
+            .expect("sync admin password");
+
+        assert!(
+            stateless_validate_admin_password(&storage),
+            "admin env password should match database after sync"
+        );
+    }
+
+    fn stateless_validate_admin_password(storage: &Storage) -> bool {
+        storage
+            .validate_login(&admin_email(), &admin_password())
+            .unwrap_or(false)
     }
 
     #[test]

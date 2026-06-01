@@ -488,6 +488,11 @@ impl Storage {
         Ok(count > 0)
     }
 
+    pub fn set_user_password(&self, email: &str, new_password: &str) -> Result<(), StorageError> {
+        let hashed = hash_password(new_password)?;
+        self.update_password_hash(email, &hashed)
+    }
+
     fn update_password_hash(&self, email: &str, password_hash: &str) -> Result<(), StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let updated = conn.execute(
