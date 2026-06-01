@@ -21,6 +21,7 @@ use std::{
 use tokio::{fs, net::TcpListener};
 use tower_http::services::ServeDir;
 use sha2::{Digest, Sha256};
+use time::Duration as CookieDuration;
 use uuid::Uuid;
 
 mod storage;
@@ -30,6 +31,8 @@ use stripe_payments::CheckoutError;
 
 const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
 const USER_SESSION_COOKIE: &str = "ww_user_session";
+const LOGIN_PREFILL_COOKIE: &str = "ww_login_prefill";
+const LOGIN_PREFILL_MAX_AGE_SECS: i64 = 120;
 
 #[derive(Clone)]
 struct AppState {
@@ -49,6 +52,13 @@ struct LoginQuery {
     error: Option<String>,
     signup: Option<String>,
     reset: Option<String>,
+    exists: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LoginPrefillPayload {
+    email: String,
+    password: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -465,6 +475,50 @@ fn encode_component(value: &str) -> String {
             _ => format!("%{byte:02X}"),
         })
         .collect()
+}
+
+fn encode_login_prefill_cookie_value(email: &str, password: &str) -> String {
+    let payload = LoginPrefillPayload {
+        email: email.to_string(),
+        password: password.to_string(),
+    };
+    urlencoding::encode(
+        &serde_json::to_string(&payload).expect("login prefill json should serialize"),
+    )
+    .into_owned()
+}
+
+fn decode_login_prefill_cookie_value(value: &str) -> Option<LoginPrefillPayload> {
+    let decoded = urlencoding::decode(value).ok()?.into_owned();
+    serde_json::from_str(&decoded).ok()
+}
+
+fn set_login_prefill_cookie(jar: CookieJar, email: &str, password: &str) -> CookieJar {
+    let mut cookie = Cookie::new(
+        LOGIN_PREFILL_COOKIE,
+        encode_login_prefill_cookie_value(email, password),
+    );
+    cookie.set_http_only(true);
+    cookie.set_path("/");
+    cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(Some(CookieDuration::seconds(
+        LOGIN_PREFILL_MAX_AGE_SECS,
+    )));
+    jar.add(cookie)
+}
+
+fn take_login_prefill(jar: CookieJar) -> (CookieJar, Option<LoginPrefillPayload>) {
+    let Some(cookie) = jar.get(LOGIN_PREFILL_COOKIE) else {
+        return (jar, None);
+    };
+    let payload = decode_login_prefill_cookie_value(cookie.value());
+    let jar = jar.remove(Cookie::from(LOGIN_PREFILL_COOKIE));
+    (jar, payload)
+}
+
+fn redirect_to_login_existing_account(jar: CookieJar, email: &str, password: &str) -> Response {
+    let jar = set_login_prefill_cookie(jar, email, password);
+    (jar, Redirect::to("/login?exists=1")).into_response()
 }
 
 fn signup_redirect_with_fields(
@@ -2717,11 +2771,25 @@ async fn login_page(
                 }
                 _ => "",
             };
+            let (jar, prefill) = take_login_prefill(jar);
+            let (prefill_email, prefill_password) = prefill
+                .map(|payload| (payload.email, payload.password))
+                .unwrap_or_default();
+            let account_exists_block = if query.exists.as_deref() == Some("1")
+                || !prefill_email.is_empty()
+            {
+                r#"<p class="auth-success" role="status">An account with this email already exists. Log in below.</p>"#
+            } else {
+                ""
+            };
             let body = contents
                 .replace("{{LOGIN_ERROR_BLOCK}}", login_error_block)
                 .replace("{{SIGNUP_SUCCESS_BLOCK}}", signup_success_block)
-                .replace("{{RESET_SUCCESS_BLOCK}}", reset_success_block);
-            Html(body).into_response()
+                .replace("{{RESET_SUCCESS_BLOCK}}", reset_success_block)
+                .replace("{{ACCOUNT_EXISTS_BLOCK}}", account_exists_block)
+                .replace("{{LOGIN_EMAIL}}", &escape_html_attr(&prefill_email))
+                .replace("{{LOGIN_PASSWORD}}", &escape_html_attr(&prefill_password));
+            (jar, Html(body)).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -3173,7 +3241,7 @@ fn save_user(state: &AppState, form: &SignupForm) -> Result<(), storage::Storage
 
 async fn signup_submit(
     State(state): State<AppState>,
-    _jar: CookieJar,
+    jar: CookieJar,
     Form(form): Form<SignupForm>,
 ) -> Response {
     let username = form.username.trim();
@@ -3204,24 +3272,27 @@ async fn signup_submit(
     }
 
     if email_exists(&state, email) {
-        let encoded_email = encode_component(email);
-        return Redirect::to(&format!("/signup?error=email_exists&email={encoded_email}"))
-            .into_response();
+        return redirect_to_login_existing_account(jar, email, password);
     }
 
     if state.storage.username_exists(username).unwrap_or(false) {
+        if email_exists(&state, email) {
+            return redirect_to_login_existing_account(jar, email, password);
+        }
         return Redirect::to("/signup?error=username").into_response();
     }
 
     match save_user(&state, &form) {
         Ok(()) => Redirect::to("/login?signup=created").into_response(),
         Err(storage::StorageError::EmailTaken) => {
-            let encoded_email = encode_component(email);
-            Redirect::to(&format!("/signup?error=email_exists&email={encoded_email}"))
-                .into_response()
+            redirect_to_login_existing_account(jar, email, password)
         }
         Err(storage::StorageError::UsernameTaken) => {
-            Redirect::to("/signup?error=username").into_response()
+            if email_exists(&state, email) {
+                redirect_to_login_existing_account(jar, email, password)
+            } else {
+                Redirect::to("/signup?error=username").into_response()
+            }
         }
         Err(error) => {
             eprintln!("signup failed for {email}: {error}");
@@ -3524,6 +3595,22 @@ mod tests {
     fn signup_passwords_must_match() {
         assert!(signup_passwords_match("abcde1!", "abcde1!"));
         assert!(!signup_passwords_match("abcde1!", "abcde1?"));
+    }
+
+    #[test]
+    fn login_prefill_cookie_round_trips_special_characters() {
+        let encoded = encode_login_prefill_cookie_value(
+            "user+tag@example.com",
+            "p@ss \"word'&<>",
+        );
+        let payload = decode_login_prefill_cookie_value(&encoded).expect("decode prefill");
+        assert_eq!(payload.email, "user+tag@example.com");
+        assert_eq!(payload.password, "p@ss \"word'&<>");
+    }
+
+    #[test]
+    fn login_prefill_cookie_rejects_invalid_payload() {
+        assert!(decode_login_prefill_cookie_value("not-valid").is_none());
     }
 
     #[test]
