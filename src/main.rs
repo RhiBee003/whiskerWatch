@@ -1905,9 +1905,55 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("vet_visit_invalid") => {
             r#"<p class="auth-error" role="alert">Could not save vet visit. Check vaccine dates and try again.</p>"#
         }
+        Some("feedback_sent") => {
+            r#"<p class="auth-success" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
+        }
+        Some("feedback_missing") => {
+            r#"<p class="auth-error" role="alert">Please fill out all feedback fields.</p>"#
+        }
+        Some("feedback_failed") => {
+            r#"<p class="auth-error" role="alert">We could not save your feedback. Please try again.</p>"#
+        }
         _ => "",
     }
     .to_string()
+}
+
+fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
+    format!(
+        r#"<h1>Share Feedback</h1>
+        <p class="panel-intro">Tell us what to fix, what to improve, or share a new idea for WhiskerWatch.</p>
+        <article class="dashboard-card">
+          <form class="login-form contact-form" action="/feedback" method="post">
+            <label for="feedback-name">Name</label>
+            <input id="feedback-name" name="name" type="text" placeholder="Your name" value="{form_name}" required />
+
+            <label for="feedback-email">Email</label>
+            <input id="feedback-email" name="email" type="email" placeholder="you@example.com" value="{form_email}" required />
+
+            <label for="feedback-category">Type</label>
+            <select id="feedback-category" name="category" required>
+              <option value="">Choose one...</option>
+              <option value="fix">Something to fix</option>
+              <option value="idea">New idea</option>
+              <option value="bug">Bug report</option>
+            </select>
+
+            <label for="feedback-message">Details</label>
+            <textarea
+              id="feedback-message"
+              name="message"
+              rows="5"
+              placeholder="What should we change or add?"
+              required
+            ></textarea>
+
+            <button type="submit" class="download-btn login-submit">Send Feedback</button>
+          </form>
+        </article>"#,
+        form_name = form_name,
+        form_email = form_email,
+    )
 }
 
 fn render_activity_list(profile: &UserProfile) -> String {
@@ -2169,6 +2215,7 @@ async fn dashboard_page(
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
     let calendar_month = current_calendar_month();
     let calendar_year = current_calendar_year();
+    let (form_name, form_email) = form_prefill(&state, &jar).await;
 
     let template = match fs::read_to_string("templates/dashboard.html").await {
         Ok(contents) => contents,
@@ -2224,6 +2271,10 @@ async fn dashboard_page(
         .replace(
             "{{SAVED_PAYMENT_METHODS}}",
             &stripe_payments::render_saved_payment_methods(&state, &profile).await,
+        )
+        .replace(
+            "{{FEEDBACK_TAB_CONTENT}}",
+            &render_dashboard_feedback_tab(&form_name, &form_email),
         );
 
     Html(body).into_response()
@@ -3190,24 +3241,46 @@ async fn contact_submit(
 
 async fn feedback_submit(
     State(state): State<AppState>,
+    jar: CookieJar,
     Form(form): Form<FeedbackForm>,
 ) -> impl IntoResponse {
     let name = form.name.trim();
     let email = form.email.trim();
     let category = form.category.trim();
     let message = form.message.trim();
+    let from_dashboard = user_session_email(&state, &jar).is_some();
 
     if name.is_empty() || email.is_empty() || category.is_empty() || message.is_empty() {
-        return Redirect::to("/feedback?status=missing");
+        return if from_dashboard {
+            Redirect::to("/home?tab=feedback&status=feedback_missing")
+        } else {
+            Redirect::to("/feedback?status=missing")
+        };
     }
 
     if !matches!(category, "fix" | "idea" | "bug") {
-        return Redirect::to("/feedback?status=missing");
+        return if from_dashboard {
+            Redirect::to("/home?tab=feedback&status=feedback_missing")
+        } else {
+            Redirect::to("/feedback?status=missing")
+        };
     }
 
     match save_feedback_submission(&state, &form) {
-        Ok(()) => Redirect::to("/feedback?status=sent"),
-        Err(_) => Redirect::to("/feedback?status=failed"),
+        Ok(()) => {
+            if from_dashboard {
+                Redirect::to("/home?tab=feedback&status=feedback_sent")
+            } else {
+                Redirect::to("/feedback?status=sent")
+            }
+        }
+        Err(_) => {
+            if from_dashboard {
+                Redirect::to("/home?tab=feedback&status=feedback_failed")
+            } else {
+                Redirect::to("/feedback?status=failed")
+            }
+        }
     }
 }
 

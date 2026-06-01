@@ -22,7 +22,7 @@
 
   const params = new URLSearchParams(window.location.search);
   const requestedTab = params.get("tab");
-  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "calendar"];
+  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "calendar", "feedback"];
   if (requestedTab && validTabs.includes(requestedTab)) {
     showTab(requestedTab);
   }

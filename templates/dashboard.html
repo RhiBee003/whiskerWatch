@@ -14,7 +14,7 @@
       </div>
       <nav class="dashboard-nav">
         <a href="/home">HOME</a>
-        <a href="/feedback">FEEDBACK</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
         <a href="/contact">CONTACT</a>
         <form class="admin-logout-form" action="/logout" method="post">
           <button type="submit" class="admin-logout-btn">LOG OUT</button>
@@ -44,6 +44,7 @@
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
+        <button type="button" class="dashboard-tab" data-tab="feedback" role="tab" aria-selected="false">Feedback</button>
       </nav>
 
       <main class="dashboard-panels">
@@ -154,6 +155,10 @@
               </ul>
             </article>
           </div>
+        </section>
+
+        <section id="panel-feedback" class="dashboard-panel" role="tabpanel" hidden>
+          {{FEEDBACK_TAB_CONTENT}}
         </section>
       </main>
     </div>
