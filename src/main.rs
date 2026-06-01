@@ -681,6 +681,13 @@ fn admin_dashboard_nav_link(state: &AppState, jar: &CookieJar) -> &'static str {
     }
 }
 
+fn replace_admin_nav_link(template: &str, state: &AppState, jar: &CookieJar) -> String {
+    let link = admin_dashboard_nav_link(state, jar);
+    template
+        .replace("{{ADMIN_NAV_LINK}}", link)
+        .replace("{{admin_nav_link}}", link)
+}
+
 fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
     let cookie = jar.get(USER_SESSION_COOKIE)?;
     state
@@ -2445,8 +2452,8 @@ async fn dashboard_page(
         .replace(
             "{{FEEDBACK_TAB_CONTENT}}",
             &render_dashboard_feedback_tab(&form_name, &form_email),
-        )
-        .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar));
+        );
+    let body = replace_admin_nav_link(&body, &state, &jar);
 
     (jar, Html(body)).into_response()
 }
@@ -3956,6 +3963,32 @@ mod tests {
 
         let jar = create_admin_session(&state, jar);
         assert!(admin_dashboard_nav_link(&state, &jar).contains("/admin"));
+    }
+
+    #[test]
+    fn dashboard_admin_nav_placeholders_are_replaced() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-nav-template-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let template = "<nav>{{ADMIN_NAV_LINK}}\n{{admin_nav_link}}</nav>";
+
+        let jar = CookieJar::new();
+        let html = replace_admin_nav_link(template, &state, &jar);
+        assert!(!html.contains("{{"));
+        assert!(!html.contains("ADMIN_NAV_LINK"));
+        assert!(!html.contains("admin_nav_link"));
+
+        let jar = create_admin_session(&state, jar);
+        let html = replace_admin_nav_link(template, &state, &jar);
+        assert!(html.contains(r#"<a href="/admin">ADMIN</a>"#));
+        assert_eq!(html.matches(r#"<a href="/admin">ADMIN</a>"#).count(), 2);
     }
 }
 
