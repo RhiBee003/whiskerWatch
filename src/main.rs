@@ -48,6 +48,31 @@ struct LoginForm {
 struct LoginQuery {
     error: Option<String>,
     signup: Option<String>,
+    reset: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ForgotPasswordQuery {
+    error: Option<String>,
+    sent: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ResetPasswordQuery {
+    token: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ForgotPasswordForm {
+    email: String,
+}
+
+#[derive(Deserialize)]
+struct ResetPasswordForm {
+    token: String,
+    password: String,
+    confirm_password: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -405,6 +430,26 @@ fn admin_password() -> String {
 fn listen_address() -> String {
     let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     format!("0.0.0.0:{port}")
+}
+
+fn smtp_configured() -> bool {
+    env::var("SMTP_HOST")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn show_dev_reset_links() -> bool {
+    !smtp_configured()
+        || env::var("SHOW_RESET_LINKS")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+}
+
+fn public_base_url() -> String {
+    env::var("PUBLIC_BASE_URL").unwrap_or_else(|_| {
+        let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+        format!("http://localhost:{port}")
+    })
 }
 
 fn encode_component(value: &str) -> String {
@@ -2576,9 +2621,16 @@ async fn login_page(
                 Some("created") => r#"<p class="auth-success" role="status">Account created! You can log in with your new email and password.</p>"#,
                 _ => "",
             };
+            let reset_success_block = match query.reset.as_deref() {
+                Some("success") => {
+                    r#"<p class="auth-success" role="status">Your password was updated. You can log in with your new password.</p>"#
+                }
+                _ => "",
+            };
             let body = contents
                 .replace("{{LOGIN_ERROR_BLOCK}}", login_error_block)
-                .replace("{{SIGNUP_SUCCESS_BLOCK}}", signup_success_block);
+                .replace("{{SIGNUP_SUCCESS_BLOCK}}", signup_success_block)
+                .replace("{{RESET_SUCCESS_BLOCK}}", reset_success_block);
             Html(body).into_response()
         }
         Err(_) => (
@@ -2586,6 +2638,210 @@ async fn login_page(
             "Could not load login page".to_string(),
         )
             .into_response(),
+    }
+}
+
+async fn forgot_password_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<ForgotPasswordQuery>,
+) -> impl IntoResponse {
+    if user_session_email(&state, &jar).is_some() {
+        return Redirect::to("/home").into_response();
+    }
+
+    match fs::read_to_string("templates/forgot-password.html").await {
+        Ok(contents) => {
+            let forgot_error_block = match query.error.as_deref() {
+                Some("missing") => {
+                    r#"<p class="auth-error" role="alert">Please enter your email address.</p>"#
+                }
+                Some("failed") => {
+                    r#"<p class="auth-error" role="alert">We could not process your request right now. Please try again in a moment.</p>"#
+                }
+                _ => "",
+            };
+            let forgot_success_block = match query.sent.as_deref() {
+                Some("1") => r#"<p class="auth-success" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
+                _ => "",
+            };
+            let body = contents
+                .replace("{{FORGOT_ERROR_BLOCK}}", forgot_error_block)
+                .replace("{{FORGOT_SUCCESS_BLOCK}}", forgot_success_block)
+                .replace("{{DEV_RESET_LINK_BLOCK}}", "");
+            Html(body).into_response()
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not load forgot password page".to_string(),
+        )
+            .into_response(),
+    }
+}
+
+fn render_forgot_password_sent(dev_reset_link_block: &str) -> Response {
+    match std::fs::read_to_string("templates/forgot-password.html") {
+        Ok(contents) => {
+            let body = contents
+                .replace("{{FORGOT_ERROR_BLOCK}}", "")
+                .replace(
+                    "{{FORGOT_SUCCESS_BLOCK}}",
+                    r#"<p class="auth-success" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
+                )
+                .replace("{{DEV_RESET_LINK_BLOCK}}", dev_reset_link_block);
+            Html(body).into_response()
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not load forgot password page".to_string(),
+        )
+            .into_response(),
+    }
+}
+
+async fn forgot_password_submit(
+    State(state): State<AppState>,
+    Form(form): Form<ForgotPasswordForm>,
+) -> Response {
+    let email = form.email.trim();
+    if email.is_empty() {
+        return Redirect::to("/forgot-password?error=missing").into_response();
+    }
+
+    let mut dev_reset_link_block = String::new();
+
+    if email_exists(&state, email) {
+        match state.storage.create_password_reset_token(email) {
+            Ok(token) => {
+                let reset_path = format!("/reset-password?token={}", encode_component(&token));
+                let reset_url = format!("{}{}", public_base_url(), reset_path);
+                eprintln!("Password reset link for {email}: {reset_url}");
+
+                if smtp_configured() {
+                    // Email delivery would be wired here when SMTP is configured.
+                    eprintln!(
+                        "SMTP is configured but password reset email delivery is not implemented yet."
+                    );
+                }
+
+                if show_dev_reset_links() {
+                    dev_reset_link_block = format!(
+                        r#"<div class="dev-reset-notice" role="note">
+  <p><strong>Email not configured.</strong> Use this link to reset your password (valid for 1 hour):</p>
+  <p><a href="{path}">{url}</a></p>
+</div>"#,
+                        path = escape_html_attr(&reset_path),
+                        url = escape_html(&reset_url),
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!("password reset token creation failed for {email}: {error}");
+                return Redirect::to("/forgot-password?error=failed").into_response();
+            }
+        }
+    }
+
+    render_forgot_password_sent(&dev_reset_link_block)
+}
+
+async fn reset_password_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<ResetPasswordQuery>,
+) -> impl IntoResponse {
+    if user_session_email(&state, &jar).is_some() {
+        return Redirect::to("/home").into_response();
+    }
+
+    let token = query.token.as_deref().unwrap_or("").trim();
+    if token.is_empty() {
+        return Redirect::to("/forgot-password").into_response();
+    }
+
+    let token_valid = state
+        .storage
+        .find_valid_reset_token(token)
+        .unwrap_or(None)
+        .is_some();
+
+    if !token_valid {
+        return Redirect::to("/forgot-password?error=failed").into_response();
+    }
+
+    match fs::read_to_string("templates/reset-password.html").await {
+        Ok(contents) => {
+            let reset_error_block = match query.error.as_deref() {
+                Some("missing") => {
+                    r#"<p class="auth-error" role="alert">Please enter and confirm your new password.</p>"#
+                }
+                Some("password") => {
+                    r#"<p class="auth-error" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
+                }
+                Some("password_mismatch") => {
+                    r#"<p class="auth-error" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
+                }
+                Some("failed") => {
+                    r#"<p class="auth-error" role="alert">This reset link is invalid or has expired. Please request a new one.</p>"#
+                }
+                _ => "",
+            };
+            let escaped_token = escape_html_attr(token);
+            let body = contents
+                .replace("{{RESET_ERROR_BLOCK}}", reset_error_block)
+                .replace("{{RESET_TOKEN}}", &escaped_token);
+            Html(body).into_response()
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Could not load reset password page".to_string(),
+        )
+            .into_response(),
+    }
+}
+
+async fn reset_password_submit(
+    State(state): State<AppState>,
+    Form(form): Form<ResetPasswordForm>,
+) -> Response {
+    let token = form.token.trim();
+    let password = form.password.trim();
+    let confirm_password = form.confirm_password.trim();
+
+    if token.is_empty() || password.is_empty() || confirm_password.is_empty() {
+        return Redirect::to(&format!(
+            "/reset-password?token={}&error=missing",
+            encode_component(token)
+        ))
+        .into_response();
+    }
+
+    if !signup_passwords_match(password, confirm_password) {
+        return Redirect::to(&format!(
+            "/reset-password?token={}&error=password_mismatch",
+            encode_component(token)
+        ))
+        .into_response();
+    }
+
+    if !password_meets_signup_requirements(password) {
+        return Redirect::to(&format!(
+            "/reset-password?token={}&error=password",
+            encode_component(token)
+        ))
+        .into_response();
+    }
+
+    match state.storage.reset_password_with_token(token, password) {
+        Ok(()) => Redirect::to("/login?reset=success").into_response(),
+        Err(error) => {
+            eprintln!("password reset failed: {error}");
+            Redirect::to(&format!(
+                "/reset-password?token={}&error=failed",
+                encode_component(token)
+            ))
+            .into_response()
+        }
     }
 }
 
@@ -3380,6 +3636,14 @@ async fn main() {
         .route("/logout", post(user_logout))
         .route("/login", get(login_page).post(login_submit))
         .route("/signup", get(signup_page).post(signup_submit))
+        .route(
+            "/forgot-password",
+            get(forgot_password_page).post(forgot_password_submit),
+        )
+        .route(
+            "/reset-password",
+            get(reset_password_page).post(reset_password_submit),
+        )
         .route("/contact", get(contact_page).post(contact_submit))
         .route("/feedback", get(feedback_page).post(feedback_submit))
         .route("/admin", get(admin_page))

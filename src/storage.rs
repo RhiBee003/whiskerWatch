@@ -12,6 +12,7 @@ pub enum StorageError {
     PasswordHash(bcrypt::BcryptError),
     EmailTaken,
     UsernameTaken,
+    InvalidResetToken,
 }
 
 impl std::fmt::Display for StorageError {
@@ -23,6 +24,7 @@ impl std::fmt::Display for StorageError {
             Self::PasswordHash(error) => write!(f, "password hash error: {error}"),
             Self::EmailTaken => write!(f, "email already registered"),
             Self::UsernameTaken => write!(f, "username already taken"),
+            Self::InvalidResetToken => write!(f, "invalid or expired reset token"),
         }
     }
 }
@@ -186,7 +188,14 @@ impl Storage {
                  user_email TEXT NOT NULL,
                  paw_points INTEGER NOT NULL,
                  fulfilled_at INTEGER NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                 token TEXT PRIMARY KEY,
+                 email TEXT NOT NULL COLLATE NOCASE,
+                 expires_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email
+                 ON password_reset_tokens(email);",
         )?;
 
         let storage = Self {
@@ -194,6 +203,7 @@ impl Storage {
             data_dir,
         };
         storage.migrate_user_columns()?;
+        storage.migrate_password_reset_tokens_table()?;
         storage.migrate_from_jsonl()?;
         Ok(storage)
     }
@@ -212,14 +222,36 @@ impl Storage {
                  last_name TEXT NOT NULL,
                  password TEXT NOT NULL,
                  created_at INTEGER NOT NULL
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                 token TEXT PRIMARY KEY,
+                 email TEXT NOT NULL COLLATE NOCASE,
+                 expires_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email
+                 ON password_reset_tokens(email);",
         )?;
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
             data_dir,
         };
         storage.migrate_user_columns()?;
+        storage.migrate_password_reset_tokens_table()?;
         Ok(storage)
+    }
+
+    fn migrate_password_reset_tokens_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                 token TEXT PRIMARY KEY,
+                 email TEXT NOT NULL COLLATE NOCASE,
+                 expires_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_email
+                 ON password_reset_tokens(email);",
+        )?;
+        Ok(())
     }
 
     fn ensure_username_index(conn: &Connection) -> Result<(), StorageError> {
@@ -458,9 +490,72 @@ impl Storage {
 
     fn update_password_hash(&self, email: &str, password_hash: &str) -> Result<(), StorageError> {
         let conn = self.conn.lock().expect("storage lock");
-        conn.execute(
+        let updated = conn.execute(
             "UPDATE users SET password = ?1 WHERE email = ?2 COLLATE NOCASE",
             params![password_hash, email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        }
+        Ok(())
+    }
+
+    pub fn create_password_reset_token(&self, email: &str) -> Result<String, StorageError> {
+        let expires_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+            + 3600;
+        let token = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "DELETE FROM password_reset_tokens WHERE email = ?1 COLLATE NOCASE",
+            params![email],
+        )?;
+        conn.execute(
+            "INSERT INTO password_reset_tokens (token, email, expires_at) VALUES (?1, ?2, ?3)",
+            params![token, email, expires_at],
+        )?;
+        Ok(token)
+    }
+
+    pub fn find_valid_reset_token(&self, token: &str) -> Result<Option<String>, StorageError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT email FROM password_reset_tokens WHERE token = ?1 AND expires_at > ?2",
+        )?;
+        let mut rows = stmt.query(params![token, now])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn reset_password_with_token(
+        &self,
+        token: &str,
+        new_password: &str,
+    ) -> Result<(), StorageError> {
+        let email = self
+            .find_valid_reset_token(token)?
+            .ok_or(StorageError::InvalidResetToken)?;
+        let hashed = hash_password(new_password)?;
+        let conn = self.conn.lock().expect("storage lock");
+        let updated = conn.execute(
+            "UPDATE users SET password = ?1 WHERE email = ?2 COLLATE NOCASE",
+            params![hashed, email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::InvalidResetToken);
+        }
+        conn.execute(
+            "DELETE FROM password_reset_tokens WHERE token = ?1",
+            params![token],
         )?;
         Ok(())
     }
@@ -826,6 +921,71 @@ mod tests {
         );
         assert!(storage.user_exists("new@test.local").expect("new user exists"));
         assert!(storage.validate_login("legacy@test.local", "plainpass").expect("legacy login"));
+    }
+
+    #[test]
+    fn password_reset_token_updates_password_and_is_single_use() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let email = "reset@test.local";
+        let original = "OriginalPass1!";
+
+        storage
+            .save_user(&test_user(email, original))
+            .expect("save user");
+
+        let token = storage
+            .create_password_reset_token(email)
+            .expect("create token");
+        assert!(storage
+            .find_valid_reset_token(&token)
+            .expect("lookup")
+            .is_some());
+
+        storage
+            .reset_password_with_token(&token, "NewSecure1!")
+            .expect("reset password");
+
+        assert!(storage.validate_login(email, "NewSecure1!").expect("new login"));
+        assert!(!storage.validate_login(email, original).expect("old login"));
+        assert!(storage
+            .find_valid_reset_token(&token)
+            .expect("token consumed")
+            .is_none());
+
+        let err = storage
+            .reset_password_with_token(&token, "AnotherPass1!")
+            .expect_err("reuse token");
+        assert!(matches!(err, StorageError::InvalidResetToken));
+    }
+
+    #[test]
+    fn expired_reset_token_is_rejected() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let email = "expired@test.local";
+
+        storage
+            .save_user(&test_user(email, "OldPass1!"))
+            .expect("save user");
+
+        let token = storage
+            .create_password_reset_token(email)
+            .expect("create token");
+
+        {
+            let conn = storage.conn.lock().expect("lock");
+            conn.execute(
+                "UPDATE password_reset_tokens SET expires_at = ?1 WHERE token = ?2",
+                params![1_i64, token],
+            )
+            .expect("expire token");
+        }
+
+        assert!(storage
+            .find_valid_reset_token(&token)
+            .expect("lookup")
+            .is_none());
     }
 
     #[test]

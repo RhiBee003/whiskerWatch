@@ -25,6 +25,7 @@
         <h1 id="login-title">Log In to WhiskerWatch</h1>
         <p>Track your cat's needs, earn paw points, and manage your virtual pet.</p>
         {{SIGNUP_SUCCESS_BLOCK}}
+        {{RESET_SUCCESS_BLOCK}}
         {{LOGIN_ERROR_BLOCK}}
 
         <form class="login-form" action="/login" method="post">
@@ -54,6 +55,10 @@
               </span>
             </button>
           </div>
+
+          <p class="forgot-password-link">
+            <a href="/forgot-password">Forgot password?</a>
+          </p>
 
           <button type="submit" class="download-btn login-submit">Log In</button>
         </form>

@@ -781,6 +781,46 @@ img {
   margin: 0;
 }
 
+.forgot-password-link {
+  margin: 0.15rem 0 0;
+  text-align: right;
+}
+
+.forgot-password-link a {
+  color: var(--pink-accent);
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.forgot-password-link a:hover {
+  text-decoration: underline;
+}
+
+.dev-reset-notice {
+  margin-top: 1rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 11px;
+  background: var(--pink-surface-soft);
+  border: 1px dashed rgba(208, 112, 152, 0.65);
+  font-size: 0.92rem;
+}
+
+.dev-reset-notice p {
+  margin: 0 0 0.45rem;
+  color: var(--ink);
+}
+
+.dev-reset-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.dev-reset-notice a {
+  color: var(--pink-accent);
+  font-weight: 700;
+  word-break: break-all;
+}
+
 .signup-heading {
   margin: 0 0 0.6rem;
   font-size: clamp(1.35rem, 3vw, 1.8rem);
