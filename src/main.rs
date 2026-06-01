@@ -440,6 +440,10 @@ fn admin_password() -> String {
     env::var("ADMIN_PASSWORD").unwrap_or_else(|_| "WhiskerAdmin2026!".to_string())
 }
 
+fn is_admin_account(email: &str) -> bool {
+    email.eq_ignore_ascii_case(&admin_email())
+}
+
 fn listen_address() -> String {
     let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     format!("0.0.0.0:{port}")
@@ -614,20 +618,42 @@ fn clear_admin_session(state: &AppState, jar: CookieJar) -> CookieJar {
 
 fn ensure_admin_user_account(state: &AppState) -> Result<(), storage::StorageError> {
     let email = admin_email();
-    if state.storage.user_exists(&email)? {
-        return Ok(());
+    if !state.storage.user_exists(&email)? {
+        let user = User {
+            username: "Admin".to_string(),
+            first_name: "WhiskerWatch".to_string(),
+            last_name: "Admin".to_string(),
+            email: email.clone(),
+            password: admin_password(),
+            created_at: timestamp_now(),
+        };
+        state.storage.save_user(&user)?;
     }
 
-    let user = User {
-        username: "Admin".to_string(),
-        first_name: "WhiskerWatch".to_string(),
-        last_name: "Admin".to_string(),
-        email,
-        password: admin_password(),
-        created_at: timestamp_now(),
-    };
+    match state.storage.load_profile(&email)? {
+        Some(mut profile) => {
+            let mut changed = false;
+            if !profile.onboarding_completed {
+                profile.onboarding_completed = true;
+                changed = true;
+            }
+            let before = profile.tasks.len();
+            profile
+                .tasks
+                .retain(|task| task.id != VET_APPOINTMENT_TASK_ID);
+            if profile.tasks.len() != before {
+                changed = true;
+            }
+            if changed {
+                state.storage.save_profile(&profile)?;
+            }
+        }
+        None => {
+            state.storage.save_profile(&admin_profile(&email))?;
+        }
+    }
 
-    state.storage.save_user(&user)
+    Ok(())
 }
 
 fn ensure_dashboard_session(state: &AppState, jar: CookieJar) -> Result<(CookieJar, String), Redirect> {
@@ -842,6 +868,16 @@ fn default_profile(email: &str) -> UserProfile {
     }
 }
 
+fn admin_profile(email: &str) -> UserProfile {
+    let mut profile = default_profile(email);
+    profile.onboarding_completed = true;
+    profile.tasks = vec![];
+    profile.pet_name = "No pet yet".to_string();
+    profile.pet_breed = String::new();
+    profile.pet_mood = "Admin dashboard".to_string();
+    profile
+}
+
 fn email_upload_basename(email: &str) -> String {
     let hash = Sha256::digest(email.trim().to_lowercase().as_bytes());
     hex::encode(hash)
@@ -957,9 +993,16 @@ async fn save_profile(state: &AppState, profile: &UserProfile) -> Result<(), sto
 async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
     let mut profile = if let Ok(Some(profile)) = state.storage.load_profile(email) {
         profile
+    } else if is_admin_account(email) {
+        admin_profile(email)
     } else {
         default_profile(email)
     };
+
+    if is_admin_account(email) && !profile.onboarding_completed {
+        profile.onboarding_completed = true;
+        let _ = save_profile(state, &profile).await;
+    }
 
     if refresh_profile_tasks(&mut profile) {
         let _ = save_profile(state, &profile).await;
@@ -1059,7 +1102,7 @@ fn vaccines_due_or_overdue(profile: &UserProfile, today: NaiveDate) -> bool {
 }
 
 fn needs_vet_appointment_asap(profile: &UserProfile, today: NaiveDate) -> bool {
-    if !profile.onboarding_completed {
+    if !profile.onboarding_completed || is_admin_account(&profile.email) {
         return false;
     }
 
@@ -1788,7 +1831,7 @@ fn render_health_tab(profile: &UserProfile) -> String {
 }
 
 fn render_onboarding_modal(profile: &UserProfile) -> String {
-    if profile.onboarding_completed {
+    if profile.onboarding_completed || is_admin_account(&profile.email) {
         return String::new();
     }
 
@@ -3881,6 +3924,19 @@ mod tests {
         ));
         assert!(!is_admin_credentials(&admin_email(), "wrong-password"));
         assert!(!is_admin_credentials("other@example.com", &admin_password()));
+    }
+
+    #[test]
+    fn admin_account_skips_onboarding_modal() {
+        let profile = admin_profile(&admin_email());
+        assert!(render_onboarding_modal(&profile).is_empty());
+    }
+
+    #[test]
+    fn admin_account_skips_vet_appointment_task() {
+        let profile = admin_profile(&admin_email());
+        let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
+        assert!(!needs_vet_appointment_asap(&profile, today));
     }
 
     #[test]
