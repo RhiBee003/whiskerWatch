@@ -938,10 +938,8 @@ fn render_pet_avatar(profile: &UserProfile) -> String {
     format!(
         r#"<div class="pet-cinder-stage" id="cinder-pet-stage" data-pet-name="{display_name}">
       <p class="cinder-pet-label">{display_name}</p>
-      <div class="cinder-orbit-arena" aria-hidden="true">
-        <div class="cinder-walker">
-          <img class="cinder-sprite" src="/images/cinder/idle.svg" width="96" height="96" alt="" />
-        </div>
+      <div class="cinder-pet-image-wrap">
+        <img class="cinder-pet-image" src="/cinderanimate.png" width="160" height="160" alt="{display_name} virtual pet" />
       </div>
       {user_photo}
       {photo_toggle}
@@ -3780,8 +3778,8 @@ mod tests {
         let profile = test_profile_weeks(10, "indoor");
         let html = render_pet_avatar(&profile);
         assert!(html.contains("cinder-pet-stage"));
-        assert!(html.contains("cinder-sprite"));
-        assert!(html.contains("/images/cinder/"));
+        assert!(html.contains("cinder-pet-image"));
+        assert!(html.contains("/cinderanimate.png"));
         assert!(html.contains("Mochi"));
     }
 
