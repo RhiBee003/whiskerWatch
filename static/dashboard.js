@@ -1,6 +1,28 @@
 (function () {
   const tabs = document.querySelectorAll(".dashboard-tab");
   const panels = document.querySelectorAll(".dashboard-panel");
+  const tabList = document.querySelector(".dashboard-tabs");
+
+  function scrollActiveTabIntoView(tabId) {
+    if (!tabList) {
+      return;
+    }
+    if (tabId === "pet") {
+      tabList.scrollLeft = 0;
+      return;
+    }
+    const activeTab = Array.from(tabs).find((tab) => tab.dataset.tab === tabId);
+    if (!activeTab) {
+      return;
+    }
+    const listRect = tabList.getBoundingClientRect();
+    const tabRect = activeTab.getBoundingClientRect();
+    if (tabRect.left < listRect.left) {
+      tabList.scrollLeft -= listRect.left - tabRect.left;
+    } else if (tabRect.right > listRect.right) {
+      tabList.scrollLeft += tabRect.right - listRect.right;
+    }
+  }
 
   function showTab(tabId) {
     tabs.forEach((tab) => {
@@ -14,6 +36,8 @@
       panel.classList.toggle("active", active);
       panel.hidden = !active;
     });
+
+    scrollActiveTabIntoView(tabId);
   }
 
   tabs.forEach((tab) => {
@@ -25,6 +49,8 @@
   const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "calendar", "feedback"];
   if (requestedTab && validTabs.includes(requestedTab)) {
     showTab(requestedTab);
+  } else if (tabList) {
+    tabList.scrollLeft = 0;
   }
 
   const vetFollowup = params.get("vet_followup");
