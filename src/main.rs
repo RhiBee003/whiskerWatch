@@ -201,6 +201,8 @@ struct UserProfile {
     #[serde(default)]
     veterinary_notes: Vec<VeterinaryNote>,
     #[serde(default)]
+    vet_notes: Option<String>,
+    #[serde(default)]
     vet_followup_pending: bool,
     #[serde(default)]
     pet_conditions: String,
@@ -386,6 +388,11 @@ impl<'de> Deserialize<'de> for VetVisitForm {
             vaccine_dates: form_vec(&fields, "vaccine_dates"),
         })
     }
+}
+
+#[derive(Deserialize)]
+struct VetNotesForm {
+    vet_notes: String,
 }
 
 #[derive(Deserialize)]
@@ -869,6 +876,7 @@ fn default_profile(email: &str) -> UserProfile {
         last_vet_date: None,
         never_been_to_vet: false,
         veterinary_notes: vec![],
+        vet_notes: None,
         vet_followup_pending: false,
         pet_conditions: String::new(),
         pet_medications: String::new(),
@@ -1792,7 +1800,7 @@ fn render_health_tab(profile: &UserProfile) -> String {
     };
 
     let notes_list = if profile.veterinary_notes.is_empty() {
-        "<li>No veterinary notes yet. Complete a vet appointment task to add notes.</li>".to_string()
+        String::new()
     } else {
         profile
             .veterinary_notes
@@ -1807,6 +1815,46 @@ fn render_health_tab(profile: &UserProfile) -> String {
             })
             .collect()
     };
+
+    let visit_notes_section = if notes_list.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<div class="vet-visit-notes">
+    <h3>Visit notes</h3>
+    <ul class="health-notes-list">{notes_list}</ul>
+  </div>"#
+        )
+    };
+
+    let vet_notes_value = profile
+        .vet_notes
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let (vet_notes_display, vet_notes_label, vet_notes_placeholder, submit_label) =
+        if let Some(notes) = vet_notes_value {
+            (
+                format!(
+                    r#"<div class="vet-notes-display"><p>{}</p></div>"#,
+                    escape_html(notes)
+                ),
+                "Edit vet notes",
+                "Update allergies, medications, or instructions from your vet…",
+                "Save vet notes",
+            )
+        } else {
+            (
+                r#"<p class="vet-notes-empty">No vet notes yet. Add reminders, allergies, or instructions from your vet.</p>"#
+                    .to_string(),
+                "Add vet notes",
+                "Allergies, special care instructions, follow-up reminders…",
+                "Add vet notes",
+            )
+        };
+
+    let textarea_value = vet_notes_value.unwrap_or("");
 
     format!(
         r#"<p class="panel-intro">Health records for {pet_name} — vaccines, vet visits, and notes.</p>
@@ -1828,8 +1876,14 @@ fn render_health_tab(profile: &UserProfile) -> String {
     <ul class="vaccine-history-list health-record-list">{vaccine_list}</ul>
   </article>
   <article class="dashboard-card health-notes-card">
-    <h2>Veterinary notes</h2>
-    <ul class="health-notes-list">{notes_list}</ul>
+    <h2>Vet notes</h2>
+    {vet_notes_display}
+    <form class="login-form vet-notes-form" action="/home/vet-notes" method="post">
+      <label for="vet_notes">{vet_notes_label}</label>
+      <textarea id="vet_notes" name="vet_notes" rows="5" placeholder="{vet_notes_placeholder}">{textarea_value}</textarea>
+      <button type="submit" class="download-btn login-submit">{submit_label}</button>
+    </form>
+    {visit_notes_section}
   </article>
 </div>"#,
         pet_name = escape_html(&profile.pet_name),
@@ -1841,7 +1895,12 @@ fn render_health_tab(profile: &UserProfile) -> String {
         conditions = conditions,
         medications = medications,
         vaccine_list = vaccine_list,
-        notes_list = notes_list,
+        vet_notes_display = vet_notes_display,
+        vet_notes_label = vet_notes_label,
+        vet_notes_placeholder = escape_html_attr(vet_notes_placeholder),
+        textarea_value = escape_html(textarea_value),
+        submit_label = submit_label,
+        visit_notes_section = visit_notes_section,
     )
 }
 
@@ -2095,6 +2154,12 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("vet_visit_invalid") => {
             r#"<p class="auth-error" role="alert">Could not save vet visit. Check vaccine dates and try again.</p>"#
+        }
+        Some("vet_notes_done") => {
+            r#"<p class="auth-success" role="status">Vet notes saved.</p>"#
+        }
+        Some("vet_notes_invalid") => {
+            r#"<p class="auth-error" role="alert">Could not save vet notes. Please try again.</p>"#
         }
         Some("feedback_sent") => {
             r#"<p class="auth-success" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
@@ -2795,6 +2860,40 @@ async fn vet_visit_submit(
     match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=health&status=vet_visit_done"),
         Err(_) => Redirect::to("/home?tab=health&status=vet_visit_invalid"),
+    }
+}
+
+async fn vet_notes_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<VetNotesForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile.onboarding_completed {
+        return Redirect::to("/home?tab=health&status=vet_notes_invalid");
+    }
+
+    let trimmed = form.vet_notes.trim();
+    profile.vet_notes = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
+
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Updated vet notes for {pet_name}."),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to("/home?tab=health&status=vet_notes_done"),
+        Err(_) => Redirect::to("/home?tab=health&status=vet_notes_invalid"),
     }
 }
 
@@ -3699,6 +3798,7 @@ mod tests {
             last_vet_date: None,
             never_been_to_vet: false,
             veterinary_notes: vec![],
+            vet_notes: None,
             vet_followup_pending: false,
             pet_conditions: String::new(),
             pet_medications: String::new(),
@@ -4052,6 +4152,33 @@ mod tests {
     }
 
     #[test]
+    fn vet_notes_round_trips_in_profile_json() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        profile.vet_notes = Some("Follow up on dental cleaning in 6 months.".to_string());
+        let json = serde_json::to_string(&profile).expect("serialize profile");
+        let restored: UserProfile = serde_json::from_str(&json).expect("deserialize profile");
+        assert_eq!(
+            restored.vet_notes.as_deref(),
+            Some("Follow up on dental cleaning in 6 months.")
+        );
+    }
+
+    #[test]
+    fn health_tab_shows_vet_notes_form() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        profile.vet_notes = Some("Annual bloodwork due.".to_string());
+        let html = render_health_tab(&profile);
+        assert!(html.contains("action=\"/home/vet-notes\""));
+        assert!(html.contains("Annual bloodwork due."));
+        assert!(html.contains("Save vet notes"));
+
+        profile.vet_notes = None;
+        let empty_html = render_health_tab(&profile);
+        assert!(empty_html.contains("Add vet notes"));
+        assert!(empty_html.contains("No vet notes yet"));
+    }
+
+    #[test]
     fn admin_dashboard_nav_link_only_when_admin_session() {
         let storage = Storage::open_at(std::env::temp_dir().join(format!(
             "ww-admin-nav-{}",
@@ -4130,6 +4257,7 @@ async fn main() {
         .route("/home", get(dashboard_page))
         .route("/home/onboarding", post(onboarding_submit))
         .route("/home/vet-visit", post(vet_visit_submit))
+        .route("/home/vet-notes", post(vet_notes_submit))
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))

@@ -2033,3 +2033,57 @@ footer p {
   line-height: 1.45;
   white-space: pre-wrap;
 }
+
+.vet-notes-empty {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: var(--pink-input);
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.vet-notes-display {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: var(--pink-input);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.vet-notes-display p {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.vet-notes-form textarea {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border-radius: 11px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: var(--pink-input);
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 7rem;
+}
+
+.vet-notes-form textarea:focus {
+  outline: 2px solid var(--pink-accent);
+  border-color: var(--pink-accent);
+}
+
+.vet-visit-notes {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.vet-visit-notes h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
