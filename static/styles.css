@@ -883,6 +883,10 @@ img {
   min-width: 220px;
 }
 
+.admin-feedback-table td:nth-child(5) {
+  min-width: 220px;
+}
+
 .admin-logout-form {
   margin: 0;
 }

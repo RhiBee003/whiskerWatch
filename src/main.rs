@@ -433,6 +433,8 @@ struct FeedbackSubmission {
     category: String,
     message: String,
     submitted_at: u64,
+    #[serde(default)]
+    user_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -3752,6 +3754,7 @@ fn save_contact_submission(
 fn save_feedback_submission(
     state: &AppState,
     form: &FeedbackForm,
+    user_id: Option<&str>,
 ) -> Result<(), storage::StorageError> {
     let submission = FeedbackSubmission {
         name: form.name.trim().to_string(),
@@ -3759,6 +3762,7 @@ fn save_feedback_submission(
         category: form.category.trim().to_string(),
         message: form.message.trim().to_string(),
         submitted_at: timestamp_now(),
+        user_id: user_id.map(str::to_string),
     };
 
     state.storage.save_feedback(&submission)
@@ -3810,7 +3814,8 @@ async fn feedback_submit(
         };
     }
 
-    match save_feedback_submission(&state, &form) {
+    let user_id = user_session_email(&state, &jar);
+    match save_feedback_submission(&state, &form, user_id.as_deref()) {
         Ok(()) => {
             if from_dashboard {
                 Redirect::to("/home?tab=feedback&status=feedback_sent")
@@ -3942,6 +3947,28 @@ fn render_submission_rows(
         .collect()
 }
 
+fn render_feedback_rows(feedback: &[FeedbackSubmission], empty_message: &str) -> String {
+    if feedback.is_empty() {
+        return format!(r#"<tr><td colspan="6">{empty_message}</td></tr>"#);
+    }
+
+    feedback
+        .iter()
+        .rev()
+        .map(|item| {
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                escape_html(&item.category),
+                escape_html(&item.name),
+                escape_html(&item.email),
+                escape_html(item.user_id.as_deref().unwrap_or("—")),
+                escape_html(&item.message),
+                escape_html(&format_timestamp(item.submitted_at)),
+            )
+        })
+        .collect()
+}
+
 async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     if !admin_session_valid(&state, &jar) {
         return Redirect::to("/login").into_response();
@@ -3949,19 +3976,6 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 
     let feedback = state.storage.load_feedback().unwrap_or_default();
     let contacts = state.storage.load_contacts().unwrap_or_default();
-
-    let feedback_rows: Vec<(&str, &str, &str, &str, u64)> = feedback
-        .iter()
-        .map(|item| {
-            (
-                item.category.as_str(),
-                item.name.as_str(),
-                item.email.as_str(),
-                item.message.as_str(),
-                item.submitted_at,
-            )
-        })
-        .collect();
 
     let contact_rows: Vec<(&str, &str, &str, &str, u64)> = contacts
         .iter()
@@ -4002,14 +4016,15 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
       <h1>Admin Dashboard</h1>
       <p>Review feedback, bug reports, and contact messages from testers.</p>
 
-      <section class="admin-panel">
+      <section class="admin-panel" id="feedback">
         <h2>Feedback and Ideas ({feedback_count})</h2>
-        <table class="admin-table">
+        <table class="admin-table admin-feedback-table">
           <thead>
             <tr>
               <th>Type</th>
               <th>Name</th>
               <th>Email</th>
+              <th>User ID</th>
               <th>Message</th>
               <th>Submitted</th>
             </tr>
@@ -4042,10 +4057,7 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 </html>"#,
         feedback_count = feedback.len(),
         contact_count = contacts.len(),
-        feedback_rows = render_submission_rows(
-            &feedback_rows,
-            "No feedback submissions yet."
-        ),
+        feedback_rows = render_feedback_rows(&feedback, "No feedback submissions yet."),
         contact_rows = render_submission_rows(
             &contact_rows,
             "No contact messages yet."
@@ -4562,6 +4574,52 @@ mod tests {
         let html = replace_admin_nav_link(template, &state, &jar);
         assert!(html.contains(r#"<a href="/admin">ADMIN</a>"#));
         assert_eq!(html.matches(r#"<a href="/admin">ADMIN</a>"#).count(), 2);
+    }
+
+    #[test]
+    fn admin_feedback_list_renders_submissions_with_user_id() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-feedback-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        storage
+            .save_feedback(&FeedbackSubmission {
+                name: "Cat Mom".to_string(),
+                email: "catmom@example.com".to_string(),
+                category: "idea".to_string(),
+                message: "Add a treat counter".to_string(),
+                submitted_at: 1_700_000_000,
+                user_id: Some("catmom@example.com".to_string()),
+            })
+            .expect("save feedback");
+
+        let feedback = storage.load_feedback().expect("load feedback");
+        let html = render_feedback_rows(&feedback, "No feedback submissions yet.");
+
+        assert!(html.contains("Cat Mom"));
+        assert!(html.contains("catmom@example.com"));
+        assert!(html.contains("Add a treat counter"));
+        assert!(html.contains("idea"));
+    }
+
+    #[test]
+    fn admin_page_requires_valid_session() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-admin-gate-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let jar = CookieJar::new();
+        assert!(!admin_session_valid(&state, &jar));
+
+        let jar = create_admin_session(&state, jar);
+        assert!(admin_session_valid(&state, &jar));
     }
 }
 

@@ -205,6 +205,7 @@ impl Storage {
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
         storage.migrate_forum_tables()?;
+        storage.migrate_submission_tables()?;
         storage.migrate_from_jsonl()?;
         Ok(storage)
     }
@@ -239,7 +240,39 @@ impl Storage {
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
         storage.migrate_forum_tables()?;
+        storage.migrate_submission_tables()?;
         Ok(storage)
+    }
+
+    fn migrate_submission_tables(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS user_profiles (
+                 email TEXT PRIMARY KEY COLLATE NOCASE,
+                 profile_json TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS contact_messages (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT NOT NULL,
+                 email TEXT NOT NULL,
+                 subject TEXT NOT NULL,
+                 message TEXT NOT NULL,
+                 submitted_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS feedback (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT NOT NULL,
+                 email TEXT NOT NULL,
+                 category TEXT NOT NULL,
+                 message TEXT NOT NULL,
+                 submitted_at INTEGER NOT NULL,
+                 user_id TEXT
+             );",
+        )?;
+        if !Self::table_has_column(&conn, "feedback", "user_id")? {
+            conn.execute("ALTER TABLE feedback ADD COLUMN user_id TEXT", [])?;
+        }
+        Ok(())
     }
 
     fn migrate_forum_tables(&self) -> Result<(), StorageError> {
@@ -696,14 +729,15 @@ impl Storage {
     pub fn save_feedback(&self, submission: &FeedbackSubmission) -> Result<(), StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
-            "INSERT INTO feedback (name, email, category, message, submitted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO feedback (name, email, category, message, submitted_at, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 submission.name,
                 submission.email,
                 submission.category,
                 submission.message,
                 submission.submitted_at as i64,
+                submission.user_id,
             ],
         )?;
         Ok(())
@@ -712,7 +746,7 @@ impl Storage {
     pub fn load_feedback(&self) -> Result<Vec<FeedbackSubmission>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT name, email, category, message, submitted_at
+            "SELECT name, email, category, message, submitted_at, user_id
              FROM feedback ORDER BY submitted_at ASC",
         )?;
         let feedback = stmt
@@ -723,6 +757,7 @@ impl Storage {
                     category: row.get(2)?,
                     message: row.get(3)?,
                     submitted_at: row.get::<_, i64>(4)? as u64,
+                    user_id: row.get(5)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1222,5 +1257,25 @@ mod tests {
         assert_eq!(replies[0].body, "Daily brushing helps!");
 
         assert_eq!(storage.count_forum_replies(post_id).expect("count"), 1);
+    }
+
+    #[test]
+    fn feedback_save_and_load_round_trips_with_user_id() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let submission = FeedbackSubmission {
+            name: "Tester".to_string(),
+            email: "tester@example.com".to_string(),
+            category: "bug".to_string(),
+            message: "Button does not click".to_string(),
+            submitted_at: 1_700_000_100,
+            user_id: Some("tester@example.com".to_string()),
+        };
+
+        storage.save_feedback(&submission).expect("save feedback");
+        let loaded = storage.load_feedback().expect("load feedback");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].message, "Button does not click");
+        assert_eq!(loaded[0].user_id.as_deref(), Some("tester@example.com"));
     }
 }
