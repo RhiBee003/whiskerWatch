@@ -1711,7 +1711,7 @@ fn render_pet_health_info(profile: &UserProfile) -> String {
     };
 
     format!(
-        r#"<dl class="pet-health-dl"><dt>Breed</dt><dd>{breed}</dd><dt>Color</dt><dd>{color}</dd><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl><p class="field-hint pet-health-tab-hint">See the <strong>Health</strong> tab for full veterinary notes and records.</p>"#,
+        r#"<dl class="pet-health-dl"><dt>Breed</dt><dd>{breed}</dd><dt>Color</dt><dd>{color}</dd><dt>Age</dt><dd>{age}</dd><dt>Lifestyle</dt><dd>{lifestyle}</dd><dt>Last vet appointment</dt><dd>{last_vet}</dd><dt>Conditions</dt><dd>{conditions}</dd><dt>Medications</dt><dd>{medications}</dd><dt>Vaccine history</dt><dd>{vaccine_list}</dd></dl><p class="field-hint pet-health-tab-hint">See the <a href="/home?tab=health" class="pet-health-tab-link">Health</a> tab for full veterinary notes and records.</p>"#,
         breed = pet_trait_display(&profile.pet_breed),
         color = pet_trait_display(&profile.pet_color),
         age = escape_html(&age_display(profile)),
