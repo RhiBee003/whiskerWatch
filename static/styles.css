@@ -8,7 +8,6 @@
   --ink: #1f1c22;
   --muted: #453842;
   --footer: #4a2840;
-  --paw-cursor: url('/images/paw-cursor.png') 16 26, auto;
 }
 
 * {
@@ -16,7 +15,6 @@
 }
 
 html {
-  cursor: var(--paw-cursor);
   background: var(--pink-bg);
   min-height: 100%;
   min-height: -webkit-fill-available;
@@ -31,7 +29,6 @@ body {
   font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   background: var(--pink-bg);
   color: var(--ink);
-  cursor: var(--paw-cursor);
 }
 
 a[href],
@@ -46,7 +43,7 @@ summary,
 .dashboard-tab,
 .admin-logout-btn,
 .password-toggle {
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 html:has(.dashboard-body) {
@@ -680,7 +677,7 @@ img {
 
 .login-submit:disabled {
   opacity: 0.55;
-  cursor: var(--paw-cursor);
+  cursor: not-allowed;
 }
 
 .password-field {
@@ -706,7 +703,7 @@ img {
   border-radius: 6px;
   background: transparent;
   color: var(--pink-accent);
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   transition: opacity 0.15s ease, color 0.15s ease;
 }
 
@@ -775,7 +772,7 @@ img {
 
 .login-submit {
   margin-top: 0.8rem;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 .auth-divider {
@@ -906,7 +903,7 @@ img {
   background: none;
   color: var(--ink);
   font-size: 0.95rem;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   padding: 0;
   font-family: inherit;
 }
@@ -1051,7 +1048,7 @@ footer p {
   font-family: inherit;
   font-size: 0.92rem;
   font-weight: 700;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -1202,7 +1199,7 @@ footer p {
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid rgba(208, 112, 152, 0.4);
   border-radius: 999px;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 .cinder-photo-toggle:hover {
@@ -1334,7 +1331,7 @@ footer p {
 
 .outfit-btn {
   width: 100%;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   font-size: 0.92rem;
   padding: 0.7rem 1rem;
 }
@@ -1381,7 +1378,7 @@ footer p {
 
 .task-toggle-btn {
   flex-shrink: 0;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   white-space: nowrap;
 }
 
@@ -1420,7 +1417,7 @@ footer p {
   border: none;
   font: inherit;
   color: inherit;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   padding: 0;
 }
 
@@ -1610,7 +1607,7 @@ footer p {
 
 .forum-thread-summary {
   list-style: none;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   padding: 0.9rem 1rem;
   display: flex;
   flex-direction: column;
@@ -1886,7 +1883,7 @@ footer p {
   gap: 0.5rem;
   margin: 0;
   font-weight: 700;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 .radio-pill input[type="radio"] {
@@ -1915,7 +1912,7 @@ footer p {
   gap: 0.5rem;
   margin: 0;
   font-weight: 700;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 .checkbox-pill input[type="checkbox"] {
@@ -1972,12 +1969,12 @@ footer p {
 .vaccine-history-fieldset.is-unknown .vaccine-row input[type="date"],
 .vaccine-history-fieldset.is-unknown .vaccine-remove-btn,
 .vaccine-history-fieldset.is-unknown .vaccine-add-btn {
-  cursor: var(--paw-cursor);
+  cursor: not-allowed;
 }
 
 .onboarding-form input[type="date"]:disabled {
   opacity: 0.55;
-  cursor: var(--paw-cursor);
+  cursor: not-allowed;
   background: var(--pink-surface-soft);
 }
 
@@ -2034,7 +2031,7 @@ footer p {
   border-radius: 50%;
   background: var(--pink-card);
   border: 2px dashed rgba(232, 53, 122, 0.45);
-  cursor: var(--paw-cursor);
+  cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 
@@ -2055,7 +2052,7 @@ footer p {
 
 .pet-photo-input:disabled + .pet-photo-paw-btn {
   opacity: 0.55;
-  cursor: var(--paw-cursor);
+  cursor: not-allowed;
   pointer-events: none;
 }
 
@@ -2130,7 +2127,7 @@ footer p {
   color: var(--ink);
   font-size: 1.1rem;
   line-height: 1;
-  cursor: var(--paw-cursor);
+  cursor: pointer;
 }
 
 .vaccine-add-btn {
