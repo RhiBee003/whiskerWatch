@@ -1234,6 +1234,10 @@ footer p {
   margin: 0.35rem 0 0;
 }
 
+.pet-setup-cta {
+  margin: 0.75rem 0 0;
+}
+
 .points-grid,
 .account-grid {
   display: grid;
