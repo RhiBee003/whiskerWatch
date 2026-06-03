@@ -4797,16 +4797,17 @@ mod tests {
 
     #[test]
     fn auth_templates_home_links_to_public_index() {
-        for path in [
-            "templates/login.html",
-            "templates/signup.html",
-            "templates/forgot-password.html",
-            "templates/reset-password.html",
+        for name in [
+            "login.html",
+            "signup.html",
+            "forgot-password.html",
+            "reset-password.html",
         ] {
-            let html = std::fs::read_to_string(path).unwrap_or_else(|error| {
-                panic!("could not read {path}: {error}");
+            let path = storage::path_in_project(format!("templates/{name}"));
+            let html = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("could not read {}: {error}", path.display());
             });
-            assert_public_home_nav(&html, path);
+            assert_public_home_nav(&html, name);
         }
     }
 
@@ -4908,8 +4909,11 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/contact.html", get(|| async { Redirect::permanent("/contact") }))
         .route("/feedback.html", get(|| async { Redirect::permanent("/feedback") }))
         .nest_service("/uploads", ServeDir::new(uploads_dir))
-        .nest_service("/images", ServeDir::new("static/images"))
-        .fallback_service(ServeDir::new("static"))
+        .nest_service(
+            "/images",
+            ServeDir::new(storage::path_in_project("static/images")),
+        )
+        .fallback_service(ServeDir::new(storage::path_in_project("static")))
         .with_state(state)
 }
 

@@ -112,6 +112,15 @@ fn resolve_relative_data_dir(dir: PathBuf) -> PathBuf {
     }
 }
 
+/// Resolve a path relative to the project root (directory containing `Cargo.toml`).
+pub fn path_in_project(relative: impl AsRef<Path>) -> PathBuf {
+    if let Some(root) = project_root_from_candidates() {
+        root.join(relative.as_ref())
+    } else {
+        relative.as_ref().to_path_buf()
+    }
+}
+
 pub fn data_dir_from_env() -> PathBuf {
     match std::env::var("DATA_DIR") {
         Ok(path) if !path.trim().is_empty() => {
@@ -1188,6 +1197,22 @@ mod tests {
             .save_user(&test_user(email, "pass2"))
             .expect_err("duplicate email");
         assert!(matches!(err, StorageError::EmailTaken));
+    }
+
+    #[test]
+    fn path_in_project_anchors_to_project_root() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let nested = manifest_dir.join("target").join("storage-path-test");
+        fs::create_dir_all(&nested).expect("create nested dir");
+
+        std::env::set_current_dir(&nested).expect("chdir nested");
+
+        let template = path_in_project("templates/marketing-home.html");
+        assert_eq!(template, manifest_dir.join("templates/marketing-home.html"));
+        assert!(template.is_file(), "marketing template should exist");
+
+        let _ = fs::remove_dir(nested);
+        std::env::set_current_dir(&manifest_dir).expect("restore cwd");
     }
 
     #[test]
