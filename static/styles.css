@@ -1834,6 +1834,18 @@ footer p {
   font-weight: 700;
 }
 
+.field-hint.pet-health-tab-hint {
+  margin: 1.15rem 0 0.75rem;
+  padding: 0.75rem 0.95rem;
+  background: var(--pink-surface-soft);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+}
+
+.field-hint.pet-health-tab-hint strong {
+  color: var(--pink-accent);
+}
+
 .indoor-outdoor-fieldset,
 .vaccine-history-fieldset {
   margin: 0 0 1rem;
