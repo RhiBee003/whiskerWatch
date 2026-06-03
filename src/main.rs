@@ -5092,6 +5092,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let html = response_html(response).await;
         assert_no_unreplaced_dashboard_placeholders(&html);
+        assert!(html.contains(r#"data-tab="pet""#));
+        assert!(html.contains(">My Pet</button>"));
         assert!(html.contains("No pet yet!"));
         assert!(html.contains("Create your pet"));
         assert!(html.contains("calendar-pet-setup-alert"));
@@ -5113,6 +5115,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let html = response_html(response).await;
         assert_no_unreplaced_dashboard_placeholders(&html);
+        assert!(html.contains(r#"data-tab="pet""#));
+        assert!(html.contains(">My Pet</button>"));
         assert!(html.contains(r#"<a href="/admin">ADMIN</a>"#));
     }
 

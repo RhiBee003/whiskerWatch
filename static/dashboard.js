@@ -15,10 +15,14 @@
     if (!activeTab) {
       return;
     }
-    activeTab.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
+    const listRect = tabList.getBoundingClientRect();
+    const tabRect = activeTab.getBoundingClientRect();
+    const inset = 4;
+    if (tabRect.left < listRect.left + inset) {
+      tabList.scrollLeft -= listRect.left - tabRect.left + inset;
+    } else if (tabRect.right > listRect.right - inset) {
+      tabList.scrollLeft += tabRect.right - listRect.right + inset;
+    }
   }
 
   const calendarPetSetupStorageKey = "whiskerCalendarPetSetupPrompted";
@@ -52,8 +56,8 @@
   const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "forum", "calendar", "feedback"];
   if (requestedTab && validTabs.includes(requestedTab)) {
     showTab(requestedTab);
-  } else if (tabList) {
-    tabList.scrollLeft = 0;
+  } else {
+    showTab("pet");
   }
 
   const requestedThread = params.get("thread");
