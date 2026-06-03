@@ -44,12 +44,14 @@
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
+        <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Forum</button>
         <button type="button" class="dashboard-tab" data-tab="feedback" role="tab" aria-selected="false">Feedback</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
       </nav>
 
       <main class="dashboard-panels">
         <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
+          {{PET_VET_ALERT}}
             <div class="pet-showcase">
             {{PET_AVATAR}}
             <div class="pet-details">
@@ -138,12 +140,17 @@
           {{HEALTH_TAB_CONTENT}}
         </section>
 
+        <section id="panel-forum" class="dashboard-panel" role="tabpanel" hidden>
+          {{FORUM_TAB_CONTENT}}
+        </section>
+
         <section id="panel-feedback" class="dashboard-panel" role="tabpanel" hidden>
           {{FEEDBACK_TAB_CONTENT}}
         </section>
 
         <section id="panel-calendar" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Calendar</h1>
+          {{CALENDAR_VET_ALERT}}
           <p class="panel-intro">{{CALENDAR_MONTH_LABEL}}</p>
           <div class="calendar-layout">
             <div class="calendar-grid" aria-label="Month calendar">

@@ -1,7 +1,7 @@
 use axum::{
     Form, Router,
     body::Bytes,
-    extract::{Multipart, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -263,6 +263,7 @@ struct DashboardQuery {
     status: Option<String>,
     session_id: Option<String>,
     vet_followup: Option<String>,
+    thread: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -432,6 +433,38 @@ struct FeedbackSubmission {
     category: String,
     message: String,
     submitted_at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ForumPost {
+    id: i64,
+    user_id: String,
+    author_username: String,
+    title: String,
+    body: String,
+    created_at: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ForumReply {
+    id: i64,
+    post_id: i64,
+    user_id: String,
+    author_username: String,
+    body: String,
+    created_at: u64,
+}
+
+#[derive(Deserialize)]
+struct ForumPostForm {
+    title: String,
+    body: String,
+}
+
+#[derive(Deserialize)]
+struct ForumReplyForm {
+    post_id: String,
+    body: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -2170,20 +2203,63 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("feedback_failed") => {
             r#"<p class="auth-error" role="alert">We could not save your feedback. Please try again.</p>"#
         }
+        Some("forum_post_sent") => {
+            r#"<p class="auth-success" role="status">Your question was posted to the forum.</p>"#
+        }
+        Some("forum_reply_sent") => {
+            r#"<p class="auth-success" role="status">Your reply was posted.</p>"#
+        }
+        Some("forum_missing") => {
+            r#"<p class="auth-error" role="alert">Please enter a title and question details.</p>"#
+        }
+        Some("forum_reply_missing") => {
+            r#"<p class="auth-error" role="alert">Please enter a reply.</p>"#
+        }
+        Some("forum_invalid") => {
+            r#"<p class="auth-error" role="alert">That forum thread could not be found.</p>"#
+        }
+        Some("forum_failed") => {
+            r#"<p class="auth-error" role="alert">We could not save your forum post. Please try again.</p>"#
+        }
         _ => "",
     }
     .to_string()
 }
 
-fn render_vaccines_unknown_banner() -> String {
-    r#"<p class="vaccine-unknown-alert dashboard-vaccine-alert" role="alert">We recommend taking your cat to the vet soon to get their vaccines up to date.</p>"#.to_string()
+fn vet_urgency_alert_message(profile: &UserProfile) -> &'static str {
+    if profile.pet_vaccines_unknown {
+        "We don't know your cat's vaccine history — make a vet appointment ASAP to get vaccines up to date."
+    } else if profile.never_been_to_vet {
+        "Make a vet appointment ASAP — we don't have a vet visit on record yet."
+    } else if profile.last_vet_date.is_none() {
+        "Make a vet appointment ASAP to keep your cat's health records current."
+    } else {
+        "Make a vet appointment ASAP — vaccines or checkups may be due."
+    }
+}
+
+fn render_vet_urgency_alert(profile: &UserProfile, extra_class: &str) -> String {
+    let today = Local::now().date_naive();
+    if !needs_vet_appointment_asap(profile, today) {
+        return String::new();
+    }
+
+    let class_suffix = if extra_class.is_empty() {
+        String::new()
+    } else {
+        format!(" {extra_class}")
+    };
+
+    format!(
+        r#"<p class="vaccine-unknown-alert{class_suffix}" role="alert">{message}</p>"#,
+        class_suffix = class_suffix,
+        message = vet_urgency_alert_message(profile),
+    )
 }
 
 fn render_dashboard_status_area(profile: &UserProfile, status: Option<&str>) -> String {
     let mut html = dashboard_status_block(status);
-    if profile.pet_vaccines_unknown {
-        html.push_str(&render_vaccines_unknown_banner());
-    }
+    html.push_str(&render_vet_urgency_alert(profile, "dashboard-vaccine-alert"));
     html
 }
 
@@ -2221,6 +2297,108 @@ fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
         </article>"#,
         form_name = form_name,
         form_email = form_email,
+    )
+}
+
+fn render_forum_reply(reply: &ForumReply) -> String {
+    format!(
+        r#"<li class="forum-reply">
+          <p class="forum-reply-meta"><strong>{author}</strong> · {when}</p>
+          <p class="forum-reply-body">{body}</p>
+        </li>"#,
+        author = escape_html(&reply.author_username),
+        when = escape_html(&format_timestamp(reply.created_at)),
+        body = escape_html(&reply.body),
+    )
+}
+
+fn render_forum_thread(
+    post: &ForumPost,
+    replies: &[ForumReply],
+    reply_count: u32,
+    open: bool,
+) -> String {
+    let open_attr = if open { " open" } else { "" };
+    let answer_label = if reply_count == 1 {
+        "1 answer".to_string()
+    } else {
+        format!("{reply_count} answers")
+    };
+    let replies_html: String = replies.iter().map(render_forum_reply).collect();
+    let replies_block = if replies.is_empty() {
+        r#"<p class="forum-no-replies">No answers yet — be the first to help!</p>"#.to_string()
+    } else {
+        format!(r#"<ul class="forum-replies">{replies_html}</ul>"#, replies_html = replies_html)
+    };
+
+    format!(
+        r#"<details class="forum-thread"{open_attr} data-post-id="{id}">
+          <summary class="forum-thread-summary">
+            <span class="forum-thread-title">{title}</span>
+            <span class="forum-thread-meta">by {author} · {when} · {answers}</span>
+          </summary>
+          <div class="forum-thread-body">
+            <p>{body}</p>
+            {replies_block}
+            <form class="login-form forum-reply-form" action="/home/forum/reply" method="post">
+              <input type="hidden" name="post_id" value="{id}" />
+              <label for="forum-reply-{id}">Your answer</label>
+              <textarea id="forum-reply-{id}" name="body" rows="3" placeholder="Share advice or your experience..." required></textarea>
+              <button type="submit" class="download-btn login-submit">Post reply</button>
+            </form>
+          </div>
+        </details>"#,
+        open_attr = open_attr,
+        id = post.id,
+        title = escape_html(&post.title),
+        author = escape_html(&post.author_username),
+        when = escape_html(&format_timestamp(post.created_at)),
+        answers = escape_html(&answer_label),
+        body = escape_html(&post.body),
+        replies_block = replies_block,
+    )
+}
+
+fn render_dashboard_forum_tab(state: &AppState, open_thread: Option<i64>) -> String {
+    let posts = state.storage.list_forum_posts().unwrap_or_default();
+    let mut threads = String::new();
+
+    if posts.is_empty() {
+        threads.push_str(
+            r#"<p class="forum-empty">No questions yet. Ask the community about your pet's care!</p>"#,
+        );
+    } else {
+        for post in &posts {
+            let replies = state
+                .storage
+                .list_forum_replies(post.id)
+                .unwrap_or_default();
+            let reply_count = state
+                .storage
+                .count_forum_replies(post.id)
+                .unwrap_or(replies.len() as u32);
+            let open = open_thread.is_some_and(|id| id == post.id);
+            threads.push_str(&render_forum_thread(post, &replies, reply_count, open));
+        }
+    }
+
+    format!(
+        r#"<h1>Pet Q&amp;A Forum</h1>
+        <p class="panel-intro">Ask questions and share answers about cat care with other WhiskerWatch parents.</p>
+        <article class="dashboard-card forum-ask-card">
+          <h2>Ask a question</h2>
+          <form class="login-form forum-ask-form" action="/home/forum/post" method="post">
+            <label for="forum-title">Question title</label>
+            <input id="forum-title" name="title" type="text" placeholder="e.g. How often should I brush my cat?" required maxlength="200" />
+
+            <label for="forum-body">Details</label>
+            <textarea id="forum-body" name="body" rows="4" placeholder="Tell us more about your pet and what you need help with..." required maxlength="4000"></textarea>
+
+            <button type="submit" class="download-btn login-submit">Post question</button>
+          </form>
+        </article>
+        <div class="forum-list">{threads}</div>"#,
+        threads = threads,
     )
 }
 
@@ -2511,6 +2689,14 @@ async fn dashboard_page(
         .replace("{{PET_META}}", &render_pet_meta(&profile))
         .replace("{{PET_AVATAR}}", &render_pet_avatar(&profile))
         .replace("{{PET_HEALTH_INFO}}", &render_pet_health_info(&profile))
+        .replace(
+            "{{PET_VET_ALERT}}",
+            &render_vet_urgency_alert(&profile, "pet-tab-vet-alert"),
+        )
+        .replace(
+            "{{CALENDAR_VET_ALERT}}",
+            &render_vet_urgency_alert(&profile, "calendar-tab-vet-alert"),
+        )
         .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
         .replace(
             "{{VET_FOLLOWUP_MODAL}}",
@@ -2544,6 +2730,14 @@ async fn dashboard_page(
             "{{FEEDBACK_TAB_CONTENT}}",
             &render_dashboard_feedback_tab(&form_name, &form_email),
         );
+    let open_thread = query
+        .thread
+        .as_deref()
+        .and_then(|value| value.parse::<i64>().ok());
+    let body = body.replace(
+        "{{FORUM_TAB_CONTENT}}",
+        &render_dashboard_forum_tab(&state, open_thread),
+    );
     let body = replace_admin_nav_link(&body, &state, &jar);
 
     (jar, Html(body)).into_response()
@@ -3634,6 +3828,97 @@ async fn feedback_submit(
     }
 }
 
+async fn forum_post_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ForumPostForm>,
+) -> Response {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let title = form.title.trim();
+    let body = form.body.trim();
+    if title.is_empty() || body.is_empty() {
+        return Redirect::to("/home?tab=forum&status=forum_missing").into_response();
+    }
+
+    let username = user_for_email(&state, &email)
+        .map(|user| user.username)
+        .unwrap_or_else(|| "Parent".to_string());
+
+    match state.storage.create_forum_post(
+        &email,
+        &username,
+        title,
+        body,
+        timestamp_now(),
+    ) {
+        Ok(post_id) => {
+            let url = format!("/home?tab=forum&thread={post_id}&status=forum_post_sent");
+            Redirect::temporary(&url).into_response()
+        }
+        Err(error) => {
+            eprintln!("forum post failed for {email}: {error}");
+            Redirect::to("/home?tab=forum&status=forum_failed").into_response()
+        }
+    }
+}
+
+async fn forum_reply_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ForumReplyForm>,
+) -> Response {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let body = form.body.trim();
+    let post_id: i64 = match form.post_id.trim().parse() {
+        Ok(id) if id > 0 => id,
+        _ => return Redirect::to("/home?tab=forum&status=forum_invalid").into_response(),
+    };
+
+    if body.is_empty() {
+        let url = format!("/home?tab=forum&thread={post_id}&status=forum_reply_missing");
+        return Redirect::temporary(&url).into_response();
+    }
+
+    if state.storage.get_forum_post(post_id).ok().flatten().is_none() {
+        return Redirect::to("/home?tab=forum&status=forum_invalid").into_response();
+    }
+
+    let username = user_for_email(&state, &email)
+        .map(|user| user.username)
+        .unwrap_or_else(|| "Parent".to_string());
+
+    match state.storage.create_forum_reply(
+        post_id,
+        &email,
+        &username,
+        body,
+        timestamp_now(),
+    ) {
+        Ok(()) => {
+            let url = format!("/home?tab=forum&thread={post_id}&status=forum_reply_sent");
+            Redirect::temporary(&url).into_response()
+        }
+        Err(error) => {
+            eprintln!("forum reply failed for {email}: {error}");
+            let url = format!("/home?tab=forum&thread={post_id}&status=forum_failed");
+            Redirect::temporary(&url).into_response()
+        }
+    }
+}
+
+async fn forum_thread_redirect(Path(post_id): Path<i64>) -> Response {
+    let url = format!("/home?tab=forum&thread={post_id}");
+    Redirect::temporary(&url).into_response()
+}
+
 fn render_submission_rows(
     rows: &[(&str, &str, &str, &str, u64)],
     empty_message: &str,
@@ -4053,6 +4338,31 @@ mod tests {
     }
 
     #[test]
+    fn vet_urgency_alert_shows_on_pet_and_calendar_tabs() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        profile.pet_vaccines_unknown = true;
+        profile.last_vet_date = Some("2025-01-01".to_string());
+
+        let pet_alert = render_vet_urgency_alert(&profile, "pet-tab-vet-alert");
+        assert!(pet_alert.contains("vaccine-unknown-alert"));
+        assert!(pet_alert.contains("pet-tab-vet-alert"));
+        assert!(pet_alert.contains("make a vet appointment ASAP"));
+
+        let calendar_alert = render_vet_urgency_alert(&profile, "calendar-tab-vet-alert");
+        assert!(calendar_alert.contains("calendar-tab-vet-alert"));
+        assert!(calendar_alert.contains("vaccine history"));
+    }
+
+    #[test]
+    fn vet_urgency_alert_hidden_when_not_needed() {
+        let profile = admin_profile(&admin_email());
+        assert!(render_vet_urgency_alert(&profile, "pet-tab-vet-alert").is_empty());
+        assert!(render_vet_urgency_alert(&profile, "calendar-tab-vet-alert").is_empty());
+    }
+
+    #[test]
     fn overdue_vaccine_triggers_asap_task() {
         let mut profile = test_profile_weeks(10, "indoor");
         let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
@@ -4198,6 +4508,37 @@ mod tests {
     }
 
     #[test]
+    fn forum_tab_renders_ask_form_and_threads() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-forum-tab-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let post_id = state
+            .storage
+            .create_forum_post(
+                "user@test.local",
+                "catmom",
+                "Best brush for longhair?",
+                "My cat hates brushing.",
+                1_700_000_000,
+            )
+            .expect("create post");
+
+        let html = render_dashboard_forum_tab(&state, Some(post_id));
+        assert!(html.contains("Ask a question"));
+        assert!(html.contains("Best brush for longhair?"));
+        assert!(html.contains(&format!(r#"data-post-id="{post_id}""#)));
+        assert!(html.contains("Post reply"));
+    }
+
+    #[test]
     fn dashboard_admin_nav_placeholders_are_replaced() {
         let storage = Storage::open_at(std::env::temp_dir().join(format!(
             "ww-admin-nav-template-{}",
@@ -4261,6 +4602,9 @@ async fn main() {
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
+        .route("/home/forum/post", post(forum_post_submit))
+        .route("/home/forum/reply", post(forum_reply_submit))
+        .route("/home/forum/:id", get(forum_thread_redirect))
         .route("/home/paw-points/checkout", post(paw_points_checkout))
         .route("/webhooks/stripe", post(stripe_webhook))
         .route("/logout", post(user_logout))

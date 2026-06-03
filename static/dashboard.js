@@ -46,12 +46,44 @@
 
   const params = new URLSearchParams(window.location.search);
   const requestedTab = params.get("tab");
-  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "calendar", "feedback"];
+  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "forum", "calendar", "feedback"];
   if (requestedTab && validTabs.includes(requestedTab)) {
     showTab(requestedTab);
   } else if (tabList) {
     tabList.scrollLeft = 0;
   }
+
+  const requestedThread = params.get("thread");
+  if (requestedTab === "forum" && requestedThread) {
+    const threadEl = document.querySelector(
+      `.forum-thread[data-post-id="${requestedThread}"]`
+    );
+    if (threadEl instanceof HTMLDetailsElement) {
+      threadEl.open = true;
+      threadEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  document.querySelectorAll(".forum-thread").forEach((threadEl) => {
+    if (!(threadEl instanceof HTMLDetailsElement)) {
+      return;
+    }
+    threadEl.addEventListener("toggle", () => {
+      if (!threadEl.open) {
+        return;
+      }
+      const postId = threadEl.dataset.postId;
+      if (!postId) {
+        return;
+      }
+      const cleanParams = new URLSearchParams();
+      cleanParams.set("tab", "forum");
+      cleanParams.set("thread", postId);
+      const cleanUrl =
+        window.location.pathname + "?" + cleanParams.toString();
+      window.history.replaceState({}, document.title, cleanUrl);
+    });
+  });
 
   const vetFollowup = params.get("vet_followup");
   if (vetFollowup === "1" && !requestedTab) {
@@ -62,6 +94,9 @@
     const cleanParams = new URLSearchParams();
     if (requestedTab) {
       cleanParams.set("tab", requestedTab);
+    }
+    if (requestedTab === "forum" && requestedThread) {
+      cleanParams.set("thread", requestedThread);
     }
     const cleanQuery = cleanParams.toString();
     const cleanUrl = window.location.pathname + (cleanQuery ? "?" + cleanQuery : "");

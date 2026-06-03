@@ -1,4 +1,4 @@
-use crate::{ContactSubmission, FeedbackSubmission, User, UserProfile};
+use crate::{ContactSubmission, FeedbackSubmission, ForumPost, ForumReply, User, UserProfile};
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -204,6 +204,7 @@ impl Storage {
         };
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
+        storage.migrate_forum_tables()?;
         storage.migrate_from_jsonl()?;
         Ok(storage)
     }
@@ -237,7 +238,34 @@ impl Storage {
         };
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
+        storage.migrate_forum_tables()?;
         Ok(storage)
+    }
+
+    fn migrate_forum_tables(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS forum_posts (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_id TEXT NOT NULL,
+                 author_username TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS forum_replies (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 post_id INTEGER NOT NULL,
+                 user_id TEXT NOT NULL,
+                 author_username TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 FOREIGN KEY (post_id) REFERENCES forum_posts(id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id
+                 ON forum_replies(post_id);",
+        )?;
+        Ok(())
     }
 
     fn migrate_password_reset_tokens_table(&self) -> Result<(), StorageError> {
@@ -701,6 +729,125 @@ impl Storage {
         Ok(feedback)
     }
 
+    pub fn create_forum_post(
+        &self,
+        user_id: &str,
+        author_username: &str,
+        title: &str,
+        body: &str,
+        created_at: u64,
+    ) -> Result<i64, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO forum_posts (user_id, author_username, title, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                user_id,
+                author_username,
+                title,
+                body,
+                created_at as i64,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn list_forum_posts(&self) -> Result<Vec<ForumPost>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, user_id, author_username, title, body, created_at
+             FROM forum_posts ORDER BY created_at DESC",
+        )?;
+        let posts = stmt
+            .query_map([], |row| {
+                Ok(ForumPost {
+                    id: row.get(0)?,
+                    user_id: row.get(1)?,
+                    author_username: row.get(2)?,
+                    title: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get::<_, i64>(5)? as u64,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(posts)
+    }
+
+    pub fn get_forum_post(&self, post_id: i64) -> Result<Option<ForumPost>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, user_id, author_username, title, body, created_at
+             FROM forum_posts WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![post_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ForumPost {
+                id: row.get(0)?,
+                user_id: row.get(1)?,
+                author_username: row.get(2)?,
+                title: row.get(3)?,
+                body: row.get(4)?,
+                created_at: row.get::<_, i64>(5)? as u64,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn count_forum_replies(&self, post_id: i64) -> Result<u32, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM forum_replies WHERE post_id = ?1",
+            params![post_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u32)
+    }
+
+    pub fn list_forum_replies(&self, post_id: i64) -> Result<Vec<ForumReply>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, post_id, user_id, author_username, body, created_at
+             FROM forum_replies WHERE post_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let replies = stmt
+            .query_map(params![post_id], |row| {
+                Ok(ForumReply {
+                    id: row.get(0)?,
+                    post_id: row.get(1)?,
+                    user_id: row.get(2)?,
+                    author_username: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get::<_, i64>(5)? as u64,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(replies)
+    }
+
+    pub fn create_forum_reply(
+        &self,
+        post_id: i64,
+        user_id: &str,
+        author_username: &str,
+        body: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO forum_replies (post_id, user_id, author_username, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                post_id,
+                user_id,
+                author_username,
+                body,
+                created_at as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Returns true if this session was newly recorded (caller should credit points).
     pub fn try_record_stripe_fulfillment(
         &self,
@@ -1038,5 +1185,42 @@ mod tests {
 
         let _ = fs::remove_dir(nested);
         std::env::set_current_dir(&manifest_dir).expect("restore cwd");
+    }
+
+    #[test]
+    fn forum_posts_and_replies_round_trip() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let now = 1_700_000_000_u64;
+
+        let post_id = storage
+            .create_forum_post(
+                "user@test.local",
+                "catmom",
+                "How often should I brush?",
+                "My longhair sheds a lot.",
+                now,
+            )
+            .expect("create post");
+
+        storage
+            .create_forum_reply(
+                post_id,
+                "helper@test.local",
+                "vetfan",
+                "Daily brushing helps!",
+                now + 60,
+            )
+            .expect("create reply");
+
+        let posts = storage.list_forum_posts().expect("list posts");
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].title, "How often should I brush?");
+
+        let replies = storage.list_forum_replies(post_id).expect("list replies");
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].body, "Daily brushing helps!");
+
+        assert_eq!(storage.count_forum_replies(post_id).expect("count"), 1);
     }
 }

@@ -1550,6 +1550,114 @@ footer p {
   font-weight: 700;
 }
 
+.forum-ask-card {
+  margin-bottom: 1.2rem;
+}
+
+.forum-ask-card h2,
+.forum-list h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.forum-ask-form textarea {
+  min-height: 6rem;
+}
+
+.forum-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.forum-empty {
+  color: var(--muted);
+  margin: 0;
+  padding: 1rem 1.1rem;
+  background: var(--pink-surface-soft);
+  border: 1px dashed rgba(0, 0, 0, 0.16);
+  border-radius: 14px;
+}
+
+.forum-thread {
+  background: var(--pink-surface);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.forum-thread[open] {
+  background: var(--pink-card);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.forum-thread-summary {
+  list-style: none;
+  cursor: var(--paw-cursor);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.forum-thread-summary::-webkit-details-marker {
+  display: none;
+}
+
+.forum-thread-title {
+  font-weight: 800;
+  font-size: 1.02rem;
+  color: var(--ink);
+}
+
+.forum-thread-meta,
+.forum-reply-meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.forum-thread-body {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.forum-thread-body > p {
+  margin: 0.85rem 0 1rem;
+  line-height: 1.5;
+}
+
+.forum-replies {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.forum-reply {
+  background: rgba(255, 210, 230, 0.45);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+}
+
+.forum-reply-body {
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+
+.forum-no-replies {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0 0 1rem;
+}
+
+.forum-reply-form textarea {
+  min-height: 4.5rem;
+}
+
 @media (max-width: 900px) {
   .dashboard-tabs {
     flex-wrap: nowrap;
@@ -1818,6 +1926,11 @@ footer p {
 }
 
 .dashboard-vaccine-alert {
+  margin: 0 0 1rem;
+}
+
+.pet-tab-vet-alert,
+.calendar-tab-vet-alert {
   margin: 0 0 1rem;
 }
 
