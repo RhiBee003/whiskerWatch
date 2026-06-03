@@ -994,6 +994,8 @@ footer p {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   padding: 1.5rem 0 max(3rem, env(safe-area-inset-bottom, 0px));
 }
 
@@ -1001,6 +1003,8 @@ footer p {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .dashboard-stats {
@@ -1038,7 +1042,12 @@ footer p {
   flex-wrap: wrap;
   gap: 0.45rem;
   margin-bottom: 1.2rem;
+  max-width: 100%;
   -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-tab-label-short {
+  display: none;
 }
 
 .dashboard-tab {
@@ -1271,8 +1280,13 @@ footer p {
 .points-grid,
 .account-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 1rem;
+}
+
+#panel-points {
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .points-big {
@@ -1833,14 +1847,24 @@ footer p {
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
+    width: 100%;
+    min-width: 0;
     padding-bottom: 0.35rem;
-    padding-inline: 0.25rem;
-    scroll-padding-inline: 0.5rem;
+    padding-inline: 0.25rem 0.75rem;
+    scroll-padding-inline: 0.75rem;
     scrollbar-width: thin;
   }
 
   .dashboard-tab {
     flex: 0 0 auto;
+  }
+
+  .dashboard-tab[data-tab="points"] .dashboard-tab-label-long {
+    display: none;
+  }
+
+  .dashboard-tab[data-tab="points"] .dashboard-tab-label-short {
+    display: inline;
   }
 
   .dashboard-topbar {

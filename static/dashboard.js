@@ -15,13 +15,10 @@
     if (!activeTab) {
       return;
     }
-    const listRect = tabList.getBoundingClientRect();
-    const tabRect = activeTab.getBoundingClientRect();
-    if (tabRect.left < listRect.left) {
-      tabList.scrollLeft -= listRect.left - tabRect.left;
-    } else if (tabRect.right > listRect.right) {
-      tabList.scrollLeft += tabRect.right - listRect.right;
-    }
+    activeTab.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
   }
 
   const calendarPetSetupStorageKey = "whiskerCalendarPetSetupPrompted";
