@@ -720,7 +720,7 @@ fn ensure_dashboard_session(state: &AppState, jar: CookieJar) -> Result<(CookieJ
         return Ok((jar, email));
     }
 
-    Err(Redirect::to("/login"))
+    Err(Redirect::to("/"))
 }
 
 fn admin_dashboard_nav_link(state: &AppState, jar: &CookieJar) -> &'static str {
@@ -806,7 +806,7 @@ fn clear_user_session(state: &AppState, jar: CookieJar) -> CookieJar {
 }
 
 fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String, Redirect> {
-    user_session_email(state, jar).ok_or_else(|| Redirect::to("/login"))
+    user_session_email(state, jar).ok_or_else(|| Redirect::to("/"))
 }
 
 fn default_starter_tasks() -> Vec<UserTask> {
@@ -5065,7 +5065,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dashboard_requires_login() {
+    async fn dashboard_without_session_redirects_to_public_home() {
         let state = routing_test_state();
         let response = dashboard_page(
             State(state),
@@ -5075,7 +5075,7 @@ mod tests {
         .await
         .into_response();
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(response_location(response), "/login");
+        assert_eq!(response_location(response), "/");
     }
 
     #[tokio::test]
