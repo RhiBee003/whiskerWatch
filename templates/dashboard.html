@@ -6,7 +6,7 @@
     <title>WhiskerWatch — My Home</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="dashboard-body">
+  <body class="dashboard-body" {{NEEDS_PET_SETUP_DATA}}>
     <header class="dashboard-topbar">
       <div class="brand" aria-label="WhiskerWatch">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
@@ -58,9 +58,8 @@
               <h1>{{PET_NAME}}</h1>
               <p class="pet-meta">{{PET_META}}</p>
               <p class="pet-outfit">Wearing: <strong>{{EQUIPPED_OUTFIT}}</strong></p>
-              <p class="pet-blurb">
-                {{PET_NAME}} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!
-              </p>
+              <p class="pet-blurb">{{PET_BLURB}}</p>
+              {{PET_SETUP_CTA}}
               {{PET_HEALTH_INFO}}
             </div>
           </div>

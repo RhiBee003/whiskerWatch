@@ -2059,12 +2059,36 @@ fn render_health_tab(profile: &UserProfile) -> String {
     )
 }
 
+fn user_needs_pet_setup(profile: &UserProfile) -> bool {
+    !profile.onboarding_completed && !is_admin_account(&profile.email)
+}
+
+fn render_pet_blurb(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return "No pet yet!".to_string();
+    }
+
+    format!(
+        "{} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!",
+        escape_html(&profile.pet_name)
+    )
+}
+
+fn render_pet_setup_cta(profile: &UserProfile) -> String {
+    if !user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<p class="pet-setup-cta"><button type="button" class="download-btn" id="pet-setup-trigger">Create your pet</button></p>"#
+        .to_string()
+}
+
 fn render_onboarding_modal(profile: &UserProfile) -> String {
     if profile.onboarding_completed || is_admin_account(&profile.email) {
         return String::new();
     }
 
-    r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
   <div class="onboarding-modal">
     <h2 id="onboarding-title">Tell us about your cat 🐾</h2>
     <p class="onboarding-intro">We will personalize your pet tab and schedule vet and vaccine reminders on your calendar.</p>
@@ -2803,6 +2827,16 @@ async fn dashboard_page(
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
         .replace("{{PET_NAME}}", &escape_html(&profile.pet_name))
+        .replace("{{PET_BLURB}}", &render_pet_blurb(&profile))
+        .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
+        .replace(
+            "{{NEEDS_PET_SETUP_DATA}}",
+            if user_needs_pet_setup(&profile) {
+                r#"data-needs-pet-setup="true""#
+            } else {
+                ""
+            },
+        )
         .replace("{{PET_META}}", &render_pet_meta(&profile))
         .replace("{{PET_AVATAR}}", &render_pet_avatar(&profile))
         .replace("{{PET_HEALTH_INFO}}", &render_pet_health_info(&profile))
@@ -4630,6 +4664,42 @@ mod tests {
     fn admin_account_skips_onboarding_modal() {
         let profile = admin_profile(&admin_email());
         assert!(render_onboarding_modal(&profile).is_empty());
+    }
+
+    #[test]
+    fn incomplete_onboarding_shows_no_pet_blurb_and_cta() {
+        let profile = default_profile("user@example.com");
+        assert_eq!(render_pet_blurb(&profile), "No pet yet!");
+        let cta = render_pet_setup_cta(&profile);
+        assert!(cta.contains("Create your pet"));
+        assert!(cta.contains("pet-setup-trigger"));
+        assert!(user_needs_pet_setup(&profile));
+    }
+
+    #[test]
+    fn admin_account_skips_pet_setup_cta() {
+        let profile = admin_profile(&admin_email());
+        assert!(render_pet_setup_cta(&profile).is_empty());
+        assert!(!user_needs_pet_setup(&profile));
+    }
+
+    #[test]
+    fn onboarding_modal_hidden_until_opened() {
+        let profile = default_profile("user@example.com");
+        let modal = render_onboarding_modal(&profile);
+        assert!(modal.contains("id=\"onboarding-modal\""));
+        assert!(modal.contains("hidden"));
+    }
+
+    #[test]
+    fn completed_onboarding_shows_personalized_pet_blurb() {
+        let mut profile = default_profile("user@example.com");
+        profile.onboarding_completed = true;
+        profile.pet_name = "Mochi".to_string();
+        let blurb = render_pet_blurb(&profile);
+        assert!(blurb.contains("Mochi"));
+        assert!(blurb.contains("mirrors your real cat"));
+        assert!(render_pet_setup_cta(&profile).is_empty());
     }
 
     #[test]

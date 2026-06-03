@@ -430,6 +430,34 @@
     });
   }
 
+  const onboardingModal = document.getElementById("onboarding-modal");
+  const petSetupTrigger = document.getElementById("pet-setup-trigger");
+
+  function openOnboardingModal() {
+    if (!onboardingModal) {
+      return;
+    }
+    onboardingModal.hidden = false;
+    document.body.classList.add("modal-open");
+    const firstInput = onboardingModal.querySelector("#cat_name");
+    if (firstInput instanceof HTMLElement) {
+      firstInput.focus();
+    }
+  }
+
+  if (petSetupTrigger) {
+    petSetupTrigger.addEventListener("click", () => {
+      showTab("pet");
+      openOnboardingModal();
+    });
+  }
+
+  if (params.get("setup") === "pet") {
+    openOnboardingModal();
+  } else if (document.body.dataset.needsPetSetup === "true") {
+    openOnboardingModal();
+  }
+
   const parentLevelModal = document.getElementById("parent-level-modal");
   const parentLevelClose = document.getElementById("parent-level-close");
   const parentLevelTriggers = document.querySelectorAll(".parent-level-trigger");
