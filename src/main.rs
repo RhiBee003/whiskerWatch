@@ -4031,7 +4031,7 @@ async fn forum_post_submit(
     ) {
         Ok(post_id) => {
             let url = format!("/home?tab=forum&thread={post_id}&status=forum_post_sent");
-            Redirect::temporary(&url).into_response()
+            Redirect::to(&url).into_response()
         }
         Err(error) => {
             eprintln!("forum post failed for {email}: {error}");
@@ -4058,7 +4058,7 @@ async fn forum_reply_submit(
 
     if body.is_empty() {
         let url = format!("/home?tab=forum&thread={post_id}&status=forum_reply_missing");
-        return Redirect::temporary(&url).into_response();
+        return Redirect::to(&url).into_response();
     }
 
     if state.storage.get_forum_post(post_id).ok().flatten().is_none() {
@@ -4078,12 +4078,12 @@ async fn forum_reply_submit(
     ) {
         Ok(()) => {
             let url = format!("/home?tab=forum&thread={post_id}&status=forum_reply_sent");
-            Redirect::temporary(&url).into_response()
+            Redirect::to(&url).into_response()
         }
         Err(error) => {
             eprintln!("forum reply failed for {email}: {error}");
             let url = format!("/home?tab=forum&thread={post_id}&status=forum_failed");
-            Redirect::temporary(&url).into_response()
+            Redirect::to(&url).into_response()
         }
     }
 }
@@ -4794,6 +4794,26 @@ mod tests {
         assert!(admin_dashboard_nav_link(&state, &jar).contains("/admin"));
     }
 
+    #[tokio::test]
+    async fn forum_post_redirect_uses_see_other_not_temporary() {
+        let state = routing_test_state();
+        let jar = create_user_session(&state, CookieJar::new(), "forum-user@example.com");
+        let response = forum_post_submit(
+            State(state),
+            jar,
+            Form(ForumPostForm {
+                title: "How often to brush?".to_string(),
+                body: "Longhair cat hates brushing.".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response_location(response);
+        assert!(location.contains("tab=forum"));
+        assert!(location.contains("status=forum_post_sent"));
+        assert!(location.contains("thread="));
+    }
+
     #[test]
     fn forum_tab_renders_ask_form_and_threads() {
         let storage = Storage::open_at(std::env::temp_dir().join(format!(
@@ -5071,16 +5091,55 @@ mod tests {
         .into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let html = response_html(response).await;
-        assert!(
-            !html.contains("{{PET_BLURB}}"),
-            "/home must substitute pet blurb placeholder"
-        );
-        assert!(
-            !html.contains("{{PET_SETUP_CTA}}"),
-            "/home must substitute pet setup CTA placeholder"
-        );
+        assert_no_unreplaced_dashboard_placeholders(&html);
         assert!(html.contains("No pet yet!"));
         assert!(html.contains("Create your pet"));
+        assert!(html.contains("calendar-pet-setup-alert"));
+    }
+
+    #[tokio::test]
+    async fn logged_in_home_admin_session_replaces_all_placeholders() {
+        let state = routing_test_state();
+        let email = admin_email();
+        let jar = create_user_session(&state, CookieJar::new(), &email);
+        let jar = create_admin_session(&state, jar);
+        let response = dashboard_page(
+            State(state),
+            jar,
+            Query(empty_dashboard_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = response_html(response).await;
+        assert_no_unreplaced_dashboard_placeholders(&html);
+        assert!(html.contains(r#"<a href="/admin">ADMIN</a>"#));
+    }
+
+    fn assert_no_unreplaced_dashboard_placeholders(html: &str) {
+        assert!(
+            !html.contains("{{"),
+            "/home leaked template placeholders: {}",
+            unreplaced_dashboard_placeholders(html)
+        );
+    }
+
+    fn unreplaced_dashboard_placeholders(html: &str) -> String {
+        let mut found = Vec::new();
+        let mut rest = html;
+        while let Some(start) = rest.find("{{") {
+            let after = &rest[start + 2..];
+            if let Some(end) = after.find("}}") {
+                let mut token = String::from("{{");
+                token.push_str(&after[..end]);
+                token.push_str("}}");
+                found.push(token);
+                rest = &after[end + 2..];
+            } else {
+                break;
+            }
+        }
+        found.join(", ")
     }
 
     #[tokio::test]
