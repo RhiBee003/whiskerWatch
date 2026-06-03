@@ -15,12 +15,6 @@
   box-sizing: border-box;
 }
 
-*,
-*::before,
-*::after {
-  cursor: var(--paw-cursor);
-}
-
 html {
   cursor: var(--paw-cursor);
   background: var(--pink-bg);
@@ -37,6 +31,22 @@ body {
   font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   background: var(--pink-bg);
   color: var(--ink);
+  cursor: var(--paw-cursor);
+}
+
+a[href],
+button,
+input,
+select,
+textarea,
+label,
+summary,
+[role="button"],
+.home-download-btn,
+.dashboard-tab,
+.admin-logout-btn,
+.password-toggle {
+  cursor: var(--paw-cursor);
 }
 
 html:has(.dashboard-body) {

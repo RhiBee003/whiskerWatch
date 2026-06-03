@@ -756,6 +756,12 @@ fn auth_nav_link_html(state: &AppState, jar: &CookieJar) -> &'static str {
     }
 }
 
+fn apply_auth_nav_link(html: &str, state: &AppState, jar: &CookieJar) -> String {
+    let link = auth_nav_link_html(state, jar);
+    html.replace("{{AUTH_NAV_LINK}}", link)
+        .replace(r#"<a href="/login">LOG IN</a>"#, link)
+}
+
 fn user_for_email(state: &AppState, email: &str) -> Option<User> {
     state
         .storage
@@ -2121,9 +2127,9 @@ async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         return Redirect::to("/home").into_response();
     }
 
-    match fs::read_to_string("static/index.html").await {
+    match fs::read_to_string("templates/marketing-home.html").await {
         Ok(contents) => {
-            let html = contents.replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar));
+            let html = apply_auth_nav_link(&contents, &state, &jar);
             Html(html).into_response()
         }
         Err(_) => (
@@ -3508,10 +3514,10 @@ async fn contact_page(
             let body = contents
                 .replace("{{CONTACT_SUCCESS_BLOCK}}", contact_success_block)
                 .replace("{{CONTACT_ERROR_BLOCK}}", contact_error_block)
-                .replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar))
                 .replace("{{CONTACT_EMAIL}}", &contact_email)
                 .replace("{{FORM_NAME}}", &form_name)
                 .replace("{{FORM_EMAIL}}", &form_email);
+            let body = apply_auth_nav_link(&body, &state, &jar);
             Html(body).into_response()
         }
         Err(_) => (
@@ -3548,9 +3554,9 @@ async fn feedback_page(
             let body = contents
                 .replace("{{FEEDBACK_SUCCESS_BLOCK}}", feedback_success_block)
                 .replace("{{FEEDBACK_ERROR_BLOCK}}", feedback_error_block)
-                .replace("{{AUTH_NAV_LINK}}", auth_nav_link_html(&state, &jar))
                 .replace("{{FORM_NAME}}", &form_name)
                 .replace("{{FORM_EMAIL}}", &form_email);
+            let body = apply_auth_nav_link(&body, &state, &jar);
             Html(body).into_response()
         }
         Err(_) => (
@@ -4667,6 +4673,54 @@ mod tests {
         assert!(html.contains("The app for cat owners"));
         assert!(html.contains("href=\"/login\""));
         assert!(!html.contains("Log In to WhiskerWatch"));
+        assert!(!html.contains("{{"));
+    }
+
+    #[test]
+    fn apply_auth_nav_link_replaces_login_and_legacy_placeholder() {
+        let state = routing_test_state();
+        let html = apply_auth_nav_link(
+            "<nav>{{AUTH_NAV_LINK}}<a href=\"/login\">LOG IN</a></nav>",
+            &state,
+            &CookieJar::new(),
+        );
+        assert!(!html.contains("{{"));
+        assert!(html.contains(r#"<a href="/login">LOG IN</a>"#));
+    }
+
+    #[tokio::test]
+    async fn public_nav_routes_return_expected_status() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let cases = [
+            ("/", StatusCode::OK),
+            ("/login", StatusCode::OK),
+            ("/signup", StatusCode::OK),
+            ("/forgot-password", StatusCode::OK),
+            ("/contact", StatusCode::OK),
+            ("/feedback", StatusCode::OK),
+            ("/home", StatusCode::SEE_OTHER),
+            ("/index.html", StatusCode::PERMANENT_REDIRECT),
+        ];
+
+        for (path, expected) in cases {
+            let state = routing_test_state();
+            let uploads = state.storage.data_dir().join("uploads");
+            let _ = std::fs::create_dir_all(&uploads);
+            let app = build_app(state, uploads);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), expected, "path {path}");
+        }
     }
 
     #[tokio::test]
@@ -4770,7 +4824,7 @@ mod tests {
         assert_public_home_nav(&response_html(signup).await, "signup");
 
         let forgot = forgot_password_page(
-            State(state),
+            State(state.clone()),
             CookieJar::new(),
             Query(ForgotPasswordQuery::default()),
         )
@@ -4778,37 +4832,35 @@ mod tests {
         .into_response();
         assert_eq!(forgot.status(), StatusCode::OK);
         assert_public_home_nav(&response_html(forgot).await, "forgot-password");
+
+        let contact = contact_page(
+            State(state.clone()),
+            CookieJar::new(),
+            Query(ContactQuery::default()),
+        )
+        .await
+        .into_response();
+        assert_eq!(contact.status(), StatusCode::OK);
+        let contact_html = response_html(contact).await;
+        assert!(!contact_html.contains("{{"));
+        assert!(contact_html.contains(r#"<a href="/contact">CONTACT</a>"#));
+
+        let feedback = feedback_page(
+            State(state),
+            CookieJar::new(),
+            Query(FeedbackQuery::default()),
+        )
+        .await
+        .into_response();
+        assert_eq!(feedback.status(), StatusCode::OK);
+        let feedback_html = response_html(feedback).await;
+        assert!(!feedback_html.contains("{{"));
+        assert!(feedback_html.contains(r#"<a href="/feedback">FEEDBACK</a>"#));
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let storage = Storage::open().unwrap_or_else(|error| {
-        panic!("failed to open storage: {error:?}");
-    });
-    let uploads_dir = storage.data_dir().join("uploads");
-    if let Err(error) = std::fs::create_dir_all(&uploads_dir) {
-        eprintln!("warning: could not create uploads directory {}: {error}", uploads_dir.display());
-    }
-    let db_path = storage.db_path();
-    eprintln!(
-        "Using data directory: {} (database: {})",
-        storage.data_dir().display(),
-        db_path.display()
-    );
-    if !std::env::var("DATA_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false) {
-        eprintln!(
-            "Tip: set DATA_DIR to a fixed absolute path if accounts seem to disappear between runs."
-        );
-    }
-
-    let state = AppState {
-        storage,
-        admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-        user_sessions: Arc::new(Mutex::new(HashMap::new())),
-    };
-
-    let app = Router::new()
+fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
+    Router::new()
         .route("/", get(index_page))
         .route("/index.html", get(|| async { Redirect::permanent("/") }))
         .route("/home", get(dashboard_page))
@@ -4845,7 +4897,37 @@ async fn main() {
         .nest_service("/uploads", ServeDir::new(uploads_dir))
         .nest_service("/images", ServeDir::new("static/images"))
         .fallback_service(ServeDir::new("static"))
-        .with_state(state);
+        .with_state(state)
+}
+
+#[tokio::main]
+async fn main() {
+    let storage = Storage::open().unwrap_or_else(|error| {
+        panic!("failed to open storage: {error:?}");
+    });
+    let uploads_dir = storage.data_dir().join("uploads");
+    if let Err(error) = std::fs::create_dir_all(&uploads_dir) {
+        eprintln!("warning: could not create uploads directory {}: {error}", uploads_dir.display());
+    }
+    let db_path = storage.db_path();
+    eprintln!(
+        "Using data directory: {} (database: {})",
+        storage.data_dir().display(),
+        db_path.display()
+    );
+    if !std::env::var("DATA_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false) {
+        eprintln!(
+            "Tip: set DATA_DIR to a fixed absolute path if accounts seem to disappear between runs."
+        );
+    }
+
+    let state = AppState {
+        storage,
+        admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+        user_sessions: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let app = build_app(state, uploads_dir);
 
     let address = listen_address();
     let listener = TcpListener::bind(&address)
