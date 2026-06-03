@@ -1033,7 +1033,7 @@ fn render_pet_avatar(profile: &UserProfile) -> String {
         r#"<div class="pet-cinder-stage" id="cinder-pet-stage" data-pet-name="{display_name}">
       <p class="cinder-pet-label">{display_name}</p>
       <div class="cinder-pet-image-wrap">
-        <img class="cinder-pet-image" src="/cinderanimate.png" width="160" height="160" alt="{display_name} virtual pet" />
+        <img class="cinder-pet-image" src="/cinderanimate.png" alt="{display_name} virtual pet" />
       </div>
       {user_photo}
       {photo_toggle}
