@@ -71,6 +71,12 @@ fn find_project_root(mut start: PathBuf) -> Option<PathBuf> {
 }
 
 fn project_root_from_candidates() -> Option<PathBuf> {
+    // Baked in at compile time so static/templates resolve regardless of process cwd.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if manifest_dir.join("Cargo.toml").is_file() {
+        return Some(manifest_dir);
+    }
+
     let mut candidates = Vec::new();
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd);
@@ -87,6 +93,11 @@ fn project_root_from_candidates() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Directory for CSS, JS, and marketing images (`static/`).
+pub fn static_dir() -> PathBuf {
+    path_in_project("static")
 }
 
 fn default_data_dir() -> PathBuf {
@@ -1211,6 +1222,10 @@ mod tests {
         assert_eq!(template, manifest_dir.join("templates/marketing-home.html"));
         assert!(template.is_file(), "marketing template should exist");
 
+        let styles = static_dir().join("styles.css");
+        assert_eq!(styles, manifest_dir.join("static/styles.css"));
+        assert!(styles.is_file(), "styles.css should exist");
+
         let _ = fs::remove_dir(nested);
         std::env::set_current_dir(&manifest_dir).expect("restore cwd");
     }
@@ -1304,3 +1319,4 @@ mod tests {
         assert_eq!(loaded[0].user_id.as_deref(), Some("tester@example.com"));
     }
 }
+

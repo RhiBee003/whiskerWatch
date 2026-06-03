@@ -4719,6 +4719,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn static_assets_served_when_cwd_is_not_project_root() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let nested = manifest_dir.join("target").join("static-asset-cwd-test");
+        std::fs::create_dir_all(&nested).expect("nested cwd");
+        std::env::set_current_dir(&nested).expect("chdir");
+
+        let cases = [("/styles.css", "text/css"), ("/images/logo.png", "image/png")];
+        for (path, expected_type) in cases {
+            let state = routing_test_state();
+            let uploads = state.storage.data_dir().join("uploads");
+            std::fs::create_dir_all(&uploads).expect("uploads");
+            let app = build_app(state, uploads);
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::OK, "path {path}");
+            let content_type = response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("");
+            assert!(
+                content_type.contains(expected_type),
+                "path {path} content-type {content_type}"
+            );
+        }
+
+        std::env::set_current_dir(&manifest_dir).expect("restore cwd");
+        let _ = std::fs::remove_dir(nested);
+    }
+
+    #[tokio::test]
     async fn signed_in_root_redirects_to_dashboard() {
         let state = routing_test_state();
         let email = "guest@example.com".to_string();
@@ -4909,11 +4951,8 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/contact.html", get(|| async { Redirect::permanent("/contact") }))
         .route("/feedback.html", get(|| async { Redirect::permanent("/feedback") }))
         .nest_service("/uploads", ServeDir::new(uploads_dir))
-        .nest_service(
-            "/images",
-            ServeDir::new(storage::path_in_project("static/images")),
-        )
-        .fallback_service(ServeDir::new(storage::path_in_project("static")))
+        .nest_service("/images", ServeDir::new(storage::static_dir().join("images")))
+        .fallback_service(ServeDir::new(storage::static_dir()))
         .with_state(state)
 }
 
