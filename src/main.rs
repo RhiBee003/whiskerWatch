@@ -4069,7 +4069,7 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 
 async fn admin_logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     let jar = clear_admin_session(&state, jar);
-    (jar, Redirect::to("/login")).into_response()
+    (jar, Redirect::to("/")).into_response()
 }
 
 #[cfg(test)]
@@ -4620,6 +4620,96 @@ mod tests {
 
         let jar = create_admin_session(&state, jar);
         assert!(admin_session_valid(&state, &jar));
+    }
+
+    fn routing_test_state() -> AppState {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-routing-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        AppState {
+            storage,
+            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
+            user_sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn empty_dashboard_query() -> DashboardQuery {
+        DashboardQuery {
+            status: None,
+            session_id: None,
+            vet_followup: None,
+            thread: None,
+        }
+    }
+
+    fn response_location(response: Response) -> String {
+        response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn public_root_serves_marketing_homepage() {
+        let state = routing_test_state();
+        let response = index_page(State(state), CookieJar::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let html = String::from_utf8(body.to_vec()).expect("utf8");
+        assert!(html.contains("The app for cat owners"));
+        assert!(html.contains("href=\"/login\""));
+        assert!(!html.contains("Log In to WhiskerWatch"));
+    }
+
+    #[tokio::test]
+    async fn signed_in_root_redirects_to_dashboard() {
+        let state = routing_test_state();
+        let email = "guest@example.com".to_string();
+        let jar = create_user_session(&state, CookieJar::new(), &email);
+        let response = index_page(State(state), jar).await.into_response();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response_location(response), "/home");
+    }
+
+    #[tokio::test]
+    async fn dashboard_requires_login() {
+        let state = routing_test_state();
+        let response = dashboard_page(
+            State(state),
+            CookieJar::new(),
+            Query(empty_dashboard_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response_location(response), "/login");
+    }
+
+    #[tokio::test]
+    async fn user_logout_redirects_to_public_home() {
+        let state = routing_test_state();
+        let response = user_logout(State(state), CookieJar::new())
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response_location(response), "/");
+    }
+
+    #[tokio::test]
+    async fn admin_logout_redirects_to_public_home() {
+        let state = routing_test_state();
+        let jar = create_admin_session(&state, CookieJar::new());
+        let response = admin_logout(State(state), jar).await.into_response();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response_location(response), "/");
     }
 }
 
