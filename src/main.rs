@@ -4662,7 +4662,7 @@ async fn main() {
         .route("/home/tasks/toggle", post(task_toggle))
         .route("/home/forum/post", post(forum_post_submit))
         .route("/home/forum/reply", post(forum_reply_submit))
-        .route("/home/forum/:id", get(forum_thread_redirect))
+        .route("/home/forum/{id}", get(forum_thread_redirect))
         .route("/home/paw-points/checkout", post(paw_points_checkout))
         .route("/webhooks/stripe", post(stripe_webhook))
         .route("/logout", post(user_logout))
