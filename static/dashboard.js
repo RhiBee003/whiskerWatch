@@ -24,6 +24,8 @@
     }
   }
 
+  const calendarPetSetupStorageKey = "whiskerCalendarPetSetupPrompted";
+
   function showTab(tabId) {
     tabs.forEach((tab) => {
       const active = tab.dataset.tab === tabId;
@@ -38,6 +40,10 @@
     });
 
     scrollActiveTabIntoView(tabId);
+
+    if (tabId === "calendar") {
+      maybePromptPetSetupOnCalendar();
+    }
   }
 
   tabs.forEach((tab) => {
@@ -431,7 +437,7 @@
   }
 
   const onboardingModal = document.getElementById("onboarding-modal");
-  const petSetupTrigger = document.getElementById("pet-setup-trigger");
+  const petSetupTriggers = document.querySelectorAll(".pet-setup-trigger");
 
   function openOnboardingModal() {
     if (!onboardingModal) {
@@ -445,16 +451,27 @@
     }
   }
 
-  if (petSetupTrigger) {
-    petSetupTrigger.addEventListener("click", () => {
-      showTab("pet");
-      openOnboardingModal();
-    });
+  function maybePromptPetSetupOnCalendar() {
+    if (document.body.dataset.needsPetSetup !== "true") {
+      return;
+    }
+    if (sessionStorage.getItem(calendarPetSetupStorageKey) === "1") {
+      return;
+    }
+    sessionStorage.setItem(calendarPetSetupStorageKey, "1");
+    openOnboardingModal();
   }
 
+  petSetupTriggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      if (trigger.id === "pet-setup-trigger") {
+        showTab("pet");
+      }
+      openOnboardingModal();
+    });
+  });
+
   if (params.get("setup") === "pet") {
-    openOnboardingModal();
-  } else if (document.body.dataset.needsPetSetup === "true") {
     openOnboardingModal();
   }
 

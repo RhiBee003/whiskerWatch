@@ -2079,8 +2079,20 @@ fn render_pet_setup_cta(profile: &UserProfile) -> String {
         return String::new();
     }
 
-    r#"<p class="pet-setup-cta"><button type="button" class="download-btn" id="pet-setup-trigger">Create your pet</button></p>"#
+    r#"<p class="pet-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="pet-setup-trigger">Create your pet</button></p>"#
         .to_string()
+}
+
+fn render_calendar_pet_setup_prompt(profile: &UserProfile) -> String {
+    if !user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<div class="calendar-pet-setup-alert" role="alert">
+  <p>Add your cat to unlock a personalized calendar with vet and vaccine reminders.</p>
+  <p class="calendar-pet-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="calendar-pet-setup-trigger">Create your pet</button></p>
+</div>"#
+    .to_string()
 }
 
 fn render_onboarding_modal(profile: &UserProfile) -> String {
@@ -2847,6 +2859,10 @@ async fn dashboard_page(
         .replace(
             "{{CALENDAR_VET_ALERT}}",
             &render_vet_urgency_alert(&profile, "calendar-tab-vet-alert"),
+        )
+        .replace(
+            "{{CALENDAR_PET_SETUP_PROMPT}}",
+            &render_calendar_pet_setup_prompt(&profile),
         )
         .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
         .replace(
@@ -4689,6 +4705,29 @@ mod tests {
         let modal = render_onboarding_modal(&profile);
         assert!(modal.contains("id=\"onboarding-modal\""));
         assert!(modal.contains("hidden"));
+    }
+
+    #[test]
+    fn calendar_tab_shows_pet_setup_prompt_when_onboarding_incomplete() {
+        let profile = default_profile("user@example.com");
+        let prompt = render_calendar_pet_setup_prompt(&profile);
+        assert!(prompt.contains("calendar-pet-setup-alert"));
+        assert!(prompt.contains("calendar-pet-setup-trigger"));
+        assert!(prompt.contains("pet-setup-trigger"));
+        assert!(prompt.contains("Create your pet"));
+    }
+
+    #[test]
+    fn calendar_pet_setup_prompt_hidden_after_onboarding() {
+        let mut profile = default_profile("user@example.com");
+        profile.onboarding_completed = true;
+        assert!(render_calendar_pet_setup_prompt(&profile).is_empty());
+    }
+
+    #[test]
+    fn admin_account_skips_calendar_pet_setup_prompt() {
+        let profile = admin_profile(&admin_email());
+        assert!(render_calendar_pet_setup_prompt(&profile).is_empty());
     }
 
     #[test]

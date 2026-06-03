@@ -1238,6 +1238,27 @@ footer p {
   margin: 0.75rem 0 0;
 }
 
+.calendar-pet-setup-alert {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: var(--pink-surface-soft);
+  border: 1px solid var(--pink-accent);
+  color: var(--ink);
+}
+
+.calendar-pet-setup-alert p {
+  margin: 0;
+}
+
+.calendar-pet-setup-cta {
+  margin: 0.65rem 0 0;
+}
+
+.calendar-pet-setup-cta .download-btn {
+  margin: 0;
+}
+
 .points-grid,
 .account-grid {
   display: grid;
