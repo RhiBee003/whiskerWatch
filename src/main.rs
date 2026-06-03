@@ -5059,6 +5059,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logged_in_home_replaces_pet_tab_placeholders() {
+        let state = routing_test_state();
+        let jar = create_user_session(&state, CookieJar::new(), "user@example.com");
+        let response = dashboard_page(
+            State(state),
+            jar,
+            Query(empty_dashboard_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = response_html(response).await;
+        assert!(
+            !html.contains("{{PET_BLURB}}"),
+            "/home must substitute pet blurb placeholder"
+        );
+        assert!(
+            !html.contains("{{PET_SETUP_CTA}}"),
+            "/home must substitute pet setup CTA placeholder"
+        );
+        assert!(html.contains("No pet yet!"));
+        assert!(html.contains("Create your pet"));
+    }
+
+    #[tokio::test]
     async fn user_logout_redirects_to_public_home() {
         let state = routing_test_state();
         let response = user_logout(State(state), CookieJar::new())
