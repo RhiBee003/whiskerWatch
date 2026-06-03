@@ -1333,10 +1333,6 @@ footer p {
   color: var(--pink-accent);
 }
 
-.parent-level-backdrop:not([hidden]) {
-  display: grid;
-}
-
 .parent-level-modal {
   position: relative;
   width: min(520px, 94vw);
@@ -1932,11 +1928,14 @@ footer p {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: grid;
-  place-items: center;
   padding: 1rem;
   background: rgba(74, 40, 64, 0.45);
   backdrop-filter: blur(4px);
+}
+
+.onboarding-backdrop:not([hidden]) {
+  display: grid;
+  place-items: center;
 }
 
 .onboarding-modal {

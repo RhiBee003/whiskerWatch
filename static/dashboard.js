@@ -509,6 +509,10 @@
     parentLevelClose.addEventListener("click", closeParentLevelModal);
   }
 
+  document.querySelectorAll(".parent-level-shop-link").forEach((link) => {
+    link.addEventListener("click", closeParentLevelModal);
+  });
+
   if (parentLevelModal) {
     parentLevelModal.addEventListener("click", (event) => {
       if (event.target === parentLevelModal) {
