@@ -4711,6 +4711,74 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
         assert_eq!(response_location(response), "/");
     }
+
+    fn assert_public_home_nav(html: &str, page: &str) {
+        assert!(
+            html.contains(r#"<a href="/">HOME</a>"#),
+            "{page} HOME should link to the public index"
+        );
+        assert!(
+            !html.contains(r#"<a href="/home">HOME</a>"#),
+            "{page} HOME must not link to the auth-only dashboard"
+        );
+    }
+
+    async fn response_html(response: Response) -> String {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        String::from_utf8(body.to_vec()).expect("utf8")
+    }
+
+    #[test]
+    fn auth_templates_home_links_to_public_index() {
+        for path in [
+            "templates/login.html",
+            "templates/signup.html",
+            "templates/forgot-password.html",
+            "templates/reset-password.html",
+        ] {
+            let html = std::fs::read_to_string(path).unwrap_or_else(|error| {
+                panic!("could not read {path}: {error}");
+            });
+            assert_public_home_nav(&html, path);
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_pages_serve_public_home_nav_link() {
+        let state = routing_test_state();
+
+        let login = login_page(
+            State(state.clone()),
+            CookieJar::new(),
+            Query(LoginQuery::default()),
+        )
+        .await
+        .into_response();
+        assert_eq!(login.status(), StatusCode::OK);
+        assert_public_home_nav(&response_html(login).await, "login");
+
+        let signup = signup_page(
+            State(state.clone()),
+            CookieJar::new(),
+            Query(SignupQuery::default()),
+        )
+        .await
+        .into_response();
+        assert_eq!(signup.status(), StatusCode::OK);
+        assert_public_home_nav(&response_html(signup).await, "signup");
+
+        let forgot = forgot_password_page(
+            State(state),
+            CookieJar::new(),
+            Query(ForgotPasswordQuery::default()),
+        )
+        .await
+        .into_response();
+        assert_eq!(forgot.status(), StatusCode::OK);
+        assert_public_home_nav(&response_html(forgot).await, "forgot-password");
+    }
 }
 
 #[tokio::main]
