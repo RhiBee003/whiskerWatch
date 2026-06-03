@@ -207,6 +207,8 @@ img {
   width: 100%;
   height: auto;
   display: block;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .home-hero-copy h1 {
@@ -269,7 +271,6 @@ img {
   line-height: 1.45;
 }
 
-.home-hero-art img,
 .home-feature-art img,
 .home-pawpoints-phone img,
 .home-shop-grid-wrap img {
