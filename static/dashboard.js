@@ -429,4 +429,52 @@
       petPhotoPreview.innerHTML = `<img src="${previewUrl}" alt="Preview of your cat photo" />`;
     });
   }
+
+  const parentLevelModal = document.getElementById("parent-level-modal");
+  const parentLevelClose = document.getElementById("parent-level-close");
+  const parentLevelTriggers = document.querySelectorAll(".parent-level-trigger");
+
+  function openParentLevelModal() {
+    if (!parentLevelModal) {
+      return;
+    }
+    parentLevelModal.hidden = false;
+    document.body.classList.add("modal-open");
+    if (parentLevelClose instanceof HTMLElement) {
+      parentLevelClose.focus();
+    }
+  }
+
+  function closeParentLevelModal() {
+    if (!parentLevelModal) {
+      return;
+    }
+    parentLevelModal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  parentLevelTriggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      showTab("points");
+      openParentLevelModal();
+    });
+  });
+
+  if (parentLevelClose) {
+    parentLevelClose.addEventListener("click", closeParentLevelModal);
+  }
+
+  if (parentLevelModal) {
+    parentLevelModal.addEventListener("click", (event) => {
+      if (event.target === parentLevelModal) {
+        closeParentLevelModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && parentLevelModal && !parentLevelModal.hidden) {
+      closeParentLevelModal();
+    }
+  });
 })();

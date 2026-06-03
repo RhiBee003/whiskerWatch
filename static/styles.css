@@ -1121,7 +1121,6 @@ footer p {
   border: 2px solid rgba(208, 112, 152, 0.45);
   border-radius: 22px;
   padding: 0.65rem 0.5rem 0.75rem;
-  box-shadow: 0 8px 20px rgba(208, 112, 152, 0.18);
 }
 
 .pet-cinder-stage.photo-mode .cinder-pet-image-wrap {
@@ -1147,9 +1146,7 @@ footer p {
   place-items: center;
   width: 17.5rem;
   height: 17.5rem;
-  border-radius: 50%;
   background: transparent;
-  border: 1px dashed rgba(208, 112, 152, 0.35);
   transition: opacity 0.25s ease;
 }
 
@@ -1161,7 +1158,6 @@ footer p {
   max-height: 17.5rem;
   object-fit: contain;
   object-position: center;
-  filter: drop-shadow(0 4px 6px rgba(31, 28, 34, 0.12));
 }
 
 .pet-user-photo-optional {
@@ -1264,6 +1260,136 @@ footer p {
   height: 100%;
   background: linear-gradient(90deg, #d07098, #e8357a);
   border-radius: 999px;
+}
+
+.stat-chip-button {
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-chip-button:hover,
+.stat-chip-button:focus-visible {
+  background: rgba(255, 220, 235, 0.85);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+.parent-level-card {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.parent-level-card:hover,
+.parent-level-card:focus-visible {
+  background: rgba(255, 220, 235, 0.72);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.1);
+}
+
+.parent-level-hint {
+  display: block;
+  margin-top: 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--pink-accent);
+}
+
+.parent-level-backdrop:not([hidden]) {
+  display: grid;
+}
+
+.parent-level-modal {
+  position: relative;
+  width: min(520px, 94vw);
+}
+
+.parent-level-close {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.95rem;
+  border: none;
+  background: transparent;
+  font-size: 1.75rem;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.parent-level-close:hover,
+.parent-level-close:focus-visible {
+  color: var(--ink);
+}
+
+.parent-level-intro {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.parent-level-sections {
+  display: grid;
+  gap: 1rem;
+}
+
+.parent-level-section {
+  background: var(--pink-surface-soft);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 14px;
+  padding: 0.95rem 1rem;
+}
+
+.parent-level-section h3 {
+  margin: 0 0 0.65rem;
+  font-size: 1.05rem;
+}
+
+.parent-level-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem 1rem;
+}
+
+.parent-level-dl dt {
+  font-weight: 800;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.parent-level-dl dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.parent-level-progress-text {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.parent-level-shop-link {
+  color: var(--pink-accent);
+  font-weight: 900;
+  text-decoration: underline;
+  text-decoration-color: rgba(232, 53, 122, 0.35);
+  text-underline-offset: 2px;
+}
+
+.parent-level-shop-link:hover,
+.parent-level-shop-link:focus-visible {
+  text-decoration-color: var(--pink-accent);
+}
+
+.parent-level-shop-hint {
+  margin: 0.85rem 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
 }
 
 .activity-list,

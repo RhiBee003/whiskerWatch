@@ -1238,16 +1238,130 @@ pub(crate) fn push_activity(profile: &mut UserProfile, message: &str) {
     }
 }
 
+const XP_PER_LEVEL: u32 = 100;
+
 fn level_progress(profile: &UserProfile) -> (u32, String) {
-    let xp_per_level = 100;
-    let progress = (profile.parent_xp * 100) / xp_per_level;
-    let remaining = xp_per_level.saturating_sub(profile.parent_xp);
+    let progress = (profile.parent_xp * 100) / XP_PER_LEVEL;
+    let remaining = XP_PER_LEVEL.saturating_sub(profile.parent_xp);
     let text = if remaining == 0 {
         "Ready to level up! Complete more tasks.".to_string()
     } else {
         format!("{remaining} XP to reach level {}.", profile.parent_level + 1)
     };
     (progress.min(100), text)
+}
+
+fn task_rewards_earned(profile: &UserProfile) -> u32 {
+    profile
+        .tasks
+        .iter()
+        .filter(|task| task.completed)
+        .map(|task| task.reward)
+        .sum()
+}
+
+fn task_xp_earned(profile: &UserProfile) -> u32 {
+    task_rewards_earned(profile) / 2
+}
+
+fn outfit_points_spent(profile: &UserProfile) -> u32 {
+    profile
+        .owned_outfits
+        .iter()
+        .filter_map(|id| outfit_by_id(id))
+        .map(|outfit| outfit.price)
+        .sum()
+}
+
+fn purchased_paw_points(profile: &UserProfile) -> u32 {
+    profile
+        .activity
+        .iter()
+        .filter_map(|item| {
+            let message = item.message.as_str();
+            if !message.contains("Purchased") || !message.contains("paw points") {
+                return None;
+            }
+            message
+                .split_whitespace()
+                .find_map(|word| word.parse::<u32>().ok())
+        })
+        .sum()
+}
+
+fn lifetime_xp(profile: &UserProfile) -> u32 {
+    profile
+        .parent_level
+        .saturating_sub(1)
+        .saturating_mul(XP_PER_LEVEL)
+        .saturating_add(profile.parent_xp)
+}
+
+fn render_parent_level_breakdown(profile: &UserProfile) -> String {
+    let xp_from_tasks = task_xp_earned(profile);
+    let paw_from_tasks = task_rewards_earned(profile);
+    let paw_spent = outfit_points_spent(profile);
+    let paw_purchased = purchased_paw_points(profile);
+    let lifetime = lifetime_xp(profile);
+    let xp_remaining = XP_PER_LEVEL.saturating_sub(profile.parent_xp);
+    let progress_pct = (profile.parent_xp * 100) / XP_PER_LEVEL;
+
+    format!(
+        r#"<div class="onboarding-backdrop parent-level-backdrop" id="parent-level-modal" role="dialog" aria-modal="true" aria-labelledby="parent-level-title" hidden>
+  <div class="onboarding-modal parent-level-modal">
+    <button type="button" class="parent-level-close" id="parent-level-close" aria-label="Close breakdown">&times;</button>
+    <h2 id="parent-level-title">Parent Level {level} Breakdown</h2>
+    <p class="parent-level-intro">Track your XP progress and paw points earned as a cat parent.</p>
+    <div class="parent-level-sections">
+      <section class="parent-level-section">
+        <h3>XP</h3>
+        <dl class="parent-level-dl">
+          <dt>Current level</dt>
+          <dd>Level {level}</dd>
+          <dt>XP this level</dt>
+          <dd>{parent_xp} / {xp_per_level}</dd>
+          <dt>Progress</dt>
+          <dd>
+            <div class="level-bar" aria-hidden="true"><span class="level-fill" style="width: {progress_pct}%"></span></div>
+            <span class="parent-level-progress-text">{xp_remaining} XP to level {next_level}</span>
+          </dd>
+          <dt>Lifetime XP</dt>
+          <dd>{lifetime}</dd>
+          <dt>From care tasks</dt>
+          <dd>+{xp_from_tasks} XP</dd>
+        </dl>
+      </section>
+      <section class="parent-level-section">
+        <h3>Paw Points</h3>
+        <dl class="parent-level-dl">
+          <dt>Available balance</dt>
+          <dd><a href="/home?tab=outfits" class="parent-level-shop-link">{paw_points} paw points</a></dd>
+          <dt>From care tasks</dt>
+          <dd>+{paw_from_tasks}</dd>
+          <dt>Purchased</dt>
+          <dd>+{paw_purchased}</dd>
+          <dt>Spent in shop</dt>
+          <dd>-{paw_spent}</dd>
+        </dl>
+        <p class="parent-level-shop-hint"><a href="/home?tab=outfits" class="parent-level-shop-link">Visit the outfit shop</a> to spend paw points on looks for {pet_name}.</p>
+      </section>
+    </div>
+  </div>
+</div>"#,
+        level = profile.parent_level,
+        parent_xp = profile.parent_xp,
+        xp_per_level = XP_PER_LEVEL,
+        progress_pct = progress_pct,
+        xp_remaining = xp_remaining,
+        next_level = profile.parent_level + 1,
+        lifetime = lifetime,
+        xp_from_tasks = xp_from_tasks,
+        paw_points = profile.paw_points,
+        paw_from_tasks = paw_from_tasks,
+        paw_purchased = paw_purchased,
+        paw_spent = paw_spent,
+        pet_name = escape_html(&profile.pet_name),
+    )
 }
 
 fn outfit_by_id(id: &str) -> Option<&'static OutfitCatalogItem> {
@@ -2705,6 +2819,10 @@ async fn dashboard_page(
             "{{VET_FOLLOWUP_MODAL}}",
             &render_vet_followup_modal(&profile, show_vet_followup),
         )
+        .replace(
+            "{{PARENT_LEVEL_BREAKDOWN_MODAL}}",
+            &render_parent_level_breakdown(&profile),
+        )
         .replace("{{HEALTH_TAB_CONTENT}}", &render_health_tab(&profile))
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
         .replace("{{STATUS_BLOCK}}", &render_dashboard_status_area(&profile, query.status.as_deref()))
@@ -4109,6 +4227,53 @@ mod tests {
             stripe_customer_id: None,
             pet_photo_url: None,
         }
+    }
+
+    #[test]
+    fn parent_level_breakdown_computes_xp_and_paw_points() {
+        let mut profile = test_profile_weeks(12, "indoor");
+        profile.parent_level = 3;
+        profile.parent_xp = 40;
+        profile.paw_points = 85;
+        profile.tasks = vec![UserTask {
+            id: "t1".to_string(),
+            title: "Feed".to_string(),
+            completed: true,
+            due_label: "Today".to_string(),
+            due_day: None,
+            due_month: None,
+            due_year: None,
+            reward: 20,
+        }];
+        profile.owned_outfits = vec!["classic_collar".to_string(), "cozy_sweater".to_string()];
+        profile.activity.push(ProfileActivity {
+            message: "Purchased 100 paw points via Stripe Checkout.".to_string(),
+            timestamp: 1,
+        });
+
+        assert_eq!(lifetime_xp(&profile), 240);
+        assert_eq!(task_xp_earned(&profile), 10);
+        assert_eq!(task_rewards_earned(&profile), 20);
+        assert_eq!(outfit_points_spent(&profile), 50);
+        assert_eq!(purchased_paw_points(&profile), 100);
+
+        let html = render_parent_level_breakdown(&profile);
+        assert!(html.contains("Parent Level 3 Breakdown"));
+        assert!(html.contains("40 / 100"));
+        assert!(html.contains("href=\"/home?tab=outfits\""));
+        assert!(html.contains("85 paw points"));
+        assert!(html.contains("+20"));
+        assert!(html.contains("-50"));
+    }
+
+    #[test]
+    fn level_progress_reports_remaining_xp() {
+        let mut profile = test_profile_weeks(12, "indoor");
+        profile.parent_level = 2;
+        profile.parent_xp = 75;
+        let (pct, text) = level_progress(&profile);
+        assert_eq!(pct, 75);
+        assert!(text.contains("25 XP to reach level 3"));
     }
 
     #[test]

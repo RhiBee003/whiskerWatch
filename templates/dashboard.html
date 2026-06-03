@@ -31,10 +31,10 @@
           <span class="stat-label">Paw Points</span>
           <span class="stat-value">{{PAW_POINTS}}</span>
         </div>
-        <div class="stat-chip">
+        <button type="button" class="stat-chip stat-chip-button parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
           <span class="stat-label">Parent Level</span>
           <span class="stat-value">Level {{PARENT_LEVEL}}</span>
-        </div>
+        </button>
       </div>
 
       <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
@@ -74,13 +74,14 @@
               <p class="points-big">{{PAW_POINTS}} paw points</p>
               <p>Earn more by completing care tasks for your real cat.</p>
             </article>
-            <article class="dashboard-card">
+            <button type="button" class="dashboard-card parent-level-card parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
               <h2>Parent Level {{PARENT_LEVEL}}</h2>
               <div class="level-bar" aria-hidden="true">
                 <span class="level-fill" style="width: {{LEVEL_PROGRESS}}%"></span>
               </div>
               <p>{{LEVEL_PROGRESS_TEXT}}</p>
-            </article>
+              <span class="parent-level-hint">Tap for XP &amp; paw points breakdown</span>
+            </button>
           </div>
           <article class="dashboard-card">
             <h2>Recent Activity</h2>
@@ -173,6 +174,7 @@
 
     {{ONBOARDING_MODAL}}
     {{VET_FOLLOWUP_MODAL}}
+    {{PARENT_LEVEL_BREAKDOWN_MODAL}}
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/dashboard.js"></script>
