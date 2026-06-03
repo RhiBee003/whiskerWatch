@@ -2122,22 +2122,17 @@ fn signed_in_redirect(state: &AppState, jar: CookieJar, email: &str) -> Response
     (jar, Redirect::to("/home")).into_response()
 }
 
+/// Baked in at compile time so `/` never depends on runtime cwd or a stale
+/// `static/index.html` path left over from older binaries.
+const MARKETING_HOME_HTML: &str = include_str!("../templates/marketing-home.html");
+
 async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
     if user_session_email(&state, &jar).is_some() || admin_session_valid(&state, &jar) {
         return Redirect::to("/home").into_response();
     }
 
-    match fs::read_to_string("templates/marketing-home.html").await {
-        Ok(contents) => {
-            let html = apply_auth_nav_link(&contents, &state, &jar);
-            Html(html).into_response()
-        }
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Could not load homepage".to_string(),
-        )
-            .into_response(),
-    }
+    let html = apply_auth_nav_link(MARKETING_HOME_HTML, &state, &jar);
+    Html(html).into_response()
 }
 
 fn dashboard_status_block(status: Option<&str>) -> String {
@@ -4671,9 +4666,9 @@ mod tests {
             .expect("body");
         let html = String::from_utf8(body.to_vec()).expect("utf8");
         assert!(html.contains("The app for cat owners"));
-        assert!(html.contains("href=\"/login\""));
+        assert!(html.contains("id=\"features\""));
         assert!(!html.contains("Log In to WhiskerWatch"));
-        assert!(!html.contains("{{"));
+        assert_marketing_top_nav(&html, "/");
     }
 
     #[test]
@@ -4777,6 +4772,22 @@ mod tests {
         );
     }
 
+    fn assert_marketing_top_nav(html: &str, page: &str) {
+        for (label, href) in [
+            ("HOME", r#"<a href="/">HOME</a>"#),
+            ("FEATURES", r#"<a href="/#features">FEATURES</a>"#),
+            ("LOG IN", r#"<a href="/login">LOG IN</a>"#),
+            ("FEEDBACK", r#"<a href="/feedback">FEEDBACK</a>"#),
+            ("CONTACT", r#"<a href="/contact">CONTACT</a>"#),
+        ] {
+            assert!(html.contains(href), "{page} nav missing {label} -> {href}");
+        }
+        assert!(
+            !html.contains("{{"),
+            "{page} must not leak template placeholders"
+        );
+    }
+
     async fn response_html(response: Response) -> String {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -4811,7 +4822,9 @@ mod tests {
         .await
         .into_response();
         assert_eq!(login.status(), StatusCode::OK);
-        assert_public_home_nav(&response_html(login).await, "login");
+        let login_html = response_html(login).await;
+        assert_public_home_nav(&login_html, "login");
+        assert_marketing_top_nav(&login_html, "login");
 
         let signup = signup_page(
             State(state.clone()),
