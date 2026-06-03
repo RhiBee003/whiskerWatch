@@ -1148,7 +1148,7 @@ footer p {
   width: 17.5rem;
   height: 17.5rem;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.55), rgba(242, 184, 212, 0.35));
+  background: transparent;
   border: 1px dashed rgba(208, 112, 152, 0.35);
   transition: opacity 0.25s ease;
 }
