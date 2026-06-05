@@ -1,8 +1,8 @@
 use axum::{
-    Form, Router,
+    Form, Json, Router,
     body::Bytes,
     extract::{Multipart, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::ACCEPT},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -24,6 +24,7 @@ use sha2::{Digest, Sha256};
 use time::Duration as CookieDuration;
 use uuid::Uuid;
 
+mod breeds;
 mod storage;
 mod stripe_payments;
 use storage::Storage;
@@ -279,6 +280,20 @@ struct OutfitEquipForm {
 #[derive(Deserialize)]
 struct TaskToggleForm {
     task_id: String,
+}
+
+#[derive(Serialize)]
+struct TaskToggleResponse {
+    ok: bool,
+    status: &'static str,
+    tasks_html: String,
+    activity_html: String,
+    paw_points: u32,
+    parent_level: u32,
+    level_progress: u32,
+    level_progress_text: String,
+    calendar_data: serde_json::Value,
+    show_vet_followup: bool,
 }
 
 fn group_form_fields(pairs: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
@@ -1068,6 +1083,14 @@ async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
         let _ = save_profile(state, &profile).await;
     }
 
+    if !is_admin_account(email) {
+        let has_pet = profile_has_pet(&profile);
+        if profile.onboarding_completed != has_pet {
+            profile.onboarding_completed = has_pet;
+            let _ = save_profile(state, &profile).await;
+        }
+    }
+
     if refresh_profile_tasks(&mut profile) {
         let _ = save_profile(state, &profile).await;
     }
@@ -1166,7 +1189,7 @@ fn vaccines_due_or_overdue(profile: &UserProfile, today: NaiveDate) -> bool {
 }
 
 fn needs_vet_appointment_asap(profile: &UserProfile, today: NaiveDate) -> bool {
-    if !profile.onboarding_completed || is_admin_account(&profile.email) {
+    if !profile_has_pet(profile) || is_admin_account(&profile.email) {
         return false;
     }
 
@@ -1779,7 +1802,7 @@ fn generate_vet_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -
 }
 
 fn render_pet_health_info(profile: &UserProfile) -> String {
-    if !profile.onboarding_completed {
+    if !profile_has_pet(profile) {
         return String::new();
     }
 
@@ -1857,61 +1880,97 @@ fn render_vaccine_row_html(name: &str, date: &str) -> String {
     )
 }
 
-fn render_vet_followup_modal(profile: &UserProfile, show: bool) -> String {
-    if !show || !profile.onboarding_completed {
-        return String::new();
-    }
-
+fn default_vet_visit_date(profile: &UserProfile) -> String {
     let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
-    let last_vet_value = profile
+    profile
         .last_vet_date
         .as_deref()
         .filter(|value| !value.is_empty())
-        .unwrap_or(&today);
+        .unwrap_or(&today)
+        .to_string()
+}
 
-    let vaccine_rows = if profile.vaccine_history.is_empty() {
+fn render_vet_visit_vaccine_rows(profile: &UserProfile) -> String {
+    if profile.vaccine_history.is_empty() {
         render_vaccine_row_html("", "")
     } else {
         profile
             .vaccine_history
             .iter()
             .map(|record| render_vaccine_row_html(&record.vaccine_name, &record.date))
-            .collect::<String>()
-    };
+            .collect()
+    }
+}
 
+fn render_vet_visit_form_fields(
+    profile: &UserProfile,
+    last_vet_input_id: &str,
+    vaccine_rows_id: &str,
+    add_vaccine_btn_id: &str,
+    vet_note_id: &str,
+    submit_label: &str,
+) -> String {
     format!(
-        r#"<div class="onboarding-backdrop" id="vet-followup-modal" role="dialog" aria-modal="true" aria-labelledby="vet-followup-title">
-  <div class="onboarding-modal">
-    <h2 id="vet-followup-title">Record vet visit 🏥</h2>
-    <p class="onboarding-intro">Update vaccines and add notes from your appointment so your Health tab stays current.</p>
-    <form class="onboarding-form login-form" action="/home/vet-visit" method="post">
-      <label for="vet_last_vet_date">Last vet appointment</label>
-      <input id="vet_last_vet_date" name="last_vet_date" type="date" value="{last_vet}" />
+        r#"<label for="{last_vet_input_id}">Last vet appointment</label>
+      <input id="{last_vet_input_id}" name="last_vet_date" type="date" value="{last_vet}" />
 
       <fieldset class="vaccine-history-fieldset">
         <legend>Vaccines given</legend>
         <p class="field-hint">Add or edit vaccines from this visit.</p>
-        <div id="vet-vaccine-rows" class="vaccine-rows">
+        <div id="{vaccine_rows_id}" class="vaccine-rows">
           {vaccine_rows}
         </div>
-        <button type="button" class="download-btn vaccine-add-btn" id="vet-add-vaccine-row">+ Add vaccine</button>
+        <button type="button" class="download-btn vaccine-add-btn" id="{add_vaccine_btn_id}">+ Add vaccine</button>
       </fieldset>
 
-      <label for="vet_note">Veterinary notes</label>
-      <textarea id="vet_note" name="vet_note" rows="4" placeholder="Exam findings, recommendations, follow-up instructions…"></textarea>
+      <label for="{vet_note_id}">Veterinary notes</label>
+      <textarea id="{vet_note_id}" name="vet_note" rows="4" placeholder="Exam findings, recommendations, follow-up instructions…"></textarea>
 
-      <button type="submit" class="download-btn login-submit">Save vet visit</button>
+      <button type="submit" class="download-btn login-submit">{submit_label}</button>"#,
+        last_vet_input_id = last_vet_input_id,
+        last_vet = escape_html_attr(&default_vet_visit_date(profile)),
+        vaccine_rows_id = vaccine_rows_id,
+        vaccine_rows = render_vet_visit_vaccine_rows(profile),
+        add_vaccine_btn_id = add_vaccine_btn_id,
+        vet_note_id = vet_note_id,
+        submit_label = submit_label,
+    )
+}
+
+fn render_vet_followup_modal(profile: &UserProfile, show: bool) -> String {
+    if !profile_has_pet(profile) {
+        return String::new();
+    }
+
+    let hidden = if show { "" } else { " hidden" };
+    let form_fields = render_vet_visit_form_fields(
+        profile,
+        "vet_last_vet_date",
+        "vet-vaccine-rows",
+        "vet-add-vaccine-row",
+        "vet_note",
+        "Save vet visit",
+    );
+
+    format!(
+        r#"<div class="onboarding-backdrop" id="vet-followup-modal" role="dialog" aria-modal="true" aria-labelledby="vet-followup-title"{hidden}>
+  <div class="onboarding-modal">
+    <h2 id="vet-followup-title">Record vet visit 🏥</h2>
+    <p class="onboarding-intro">Update vaccines and add notes from your appointment so your Health tab stays current.</p>
+    <form class="onboarding-form login-form" action="/home/vet-visit" method="post">
+      {form_fields}
     </form>
   </div>
 </div>"#,
-        last_vet = escape_html_attr(last_vet_value),
-        vaccine_rows = vaccine_rows,
+        form_fields = form_fields,
     )
 }
 
 fn render_health_tab(profile: &UserProfile) -> String {
-    if !profile.onboarding_completed {
-        return r#"<p class="panel-intro">Complete onboarding on your first visit to see health records here.</p>"#.to_string();
+    if user_needs_pet_setup(profile) {
+        return r#"<p class="panel-intro">Health records need a pet profile before you can track vaccines, vet visits, and notes.</p>
+<p class="field-hint pet-health-tab-hint">Visit the <a href="/home?tab=health&amp;setup=pet" class="pet-health-tab-link">Create Pet page</a> to tell us about your cat.</p>"#
+            .to_string();
     }
 
     let last_vet = profile
@@ -2010,10 +2069,25 @@ fn render_health_tab(profile: &UserProfile) -> String {
         };
 
     let textarea_value = vet_notes_value.unwrap_or("");
+    let vet_visit_form = render_vet_visit_form_fields(
+        profile,
+        "health-vet-last-date",
+        "health-vaccine-rows",
+        "health-add-vaccine-row",
+        "health-vet-note",
+        "Save vet visit",
+    );
 
     format!(
         r#"<p class="panel-intro">Health records for {pet_name} — vaccines, vet visits, and notes.</p>
 <div class="health-grid">
+  <article class="dashboard-card health-vet-visit-card">
+    <h2>Add veterinary information</h2>
+    <p class="field-hint">Record a vet appointment for {pet_name}: date, vaccines given, and visit notes.</p>
+    <form class="onboarding-form login-form health-vet-visit-form" action="/home/vet-visit" method="post">
+      {vet_visit_form}
+    </form>
+  </article>
   <article class="dashboard-card">
     <h2>Overview</h2>
     <dl class="pet-health-dl">
@@ -2056,16 +2130,41 @@ fn render_health_tab(profile: &UserProfile) -> String {
         textarea_value = escape_html(textarea_value),
         submit_label = submit_label,
         visit_notes_section = visit_notes_section,
+        vet_visit_form = vet_visit_form,
     )
 }
 
+fn profile_has_pet(profile: &UserProfile) -> bool {
+    let name = profile.pet_name.trim();
+    let breed = profile.pet_breed.trim();
+    let has_name = !name.is_empty()
+        && !name.eq_ignore_ascii_case("your cat")
+        && !name.eq_ignore_ascii_case("no pet yet");
+    let has_breed = !breed.is_empty() && !breed.eq_ignore_ascii_case("add your cat's details");
+    let has_age = profile.pet_age_weeks.is_some() || profile.pet_age_years.is_some();
+    let has_lifestyle = profile
+        .pet_indoor_outdoor
+        .as_deref()
+        .is_some_and(|value| value == "indoor" || value == "outdoor");
+
+    has_name && has_breed && has_age && has_lifestyle
+}
+
 fn user_needs_pet_setup(profile: &UserProfile) -> bool {
-    !profile.onboarding_completed && !is_admin_account(&profile.email)
+    !is_admin_account(&profile.email) && !profile_has_pet(profile)
+}
+
+fn display_pet_name(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        "No pet yet".to_string()
+    } else {
+        profile.pet_name.clone()
+    }
 }
 
 fn render_pet_blurb(profile: &UserProfile) -> String {
     if user_needs_pet_setup(profile) {
-        return "No pet yet!".to_string();
+        return "Create a pet".to_string();
     }
 
     format!(
@@ -2083,6 +2182,18 @@ fn render_pet_setup_cta(profile: &UserProfile) -> String {
         .to_string()
 }
 
+fn render_pet_tab_setup_prompt(profile: &UserProfile) -> String {
+    if !user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<div class="pet-tab-setup-alert" role="alert">
+  <p>Add your cat to unlock a personalized pet tab, health records, and calendar reminders.</p>
+  <p class="pet-tab-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="pet-tab-setup-trigger">Create your pet</button></p>
+</div>"#
+    .to_string()
+}
+
 fn render_calendar_pet_setup_prompt(profile: &UserProfile) -> String {
     if !user_needs_pet_setup(profile) {
         return String::new();
@@ -2095,8 +2206,20 @@ fn render_calendar_pet_setup_prompt(profile: &UserProfile) -> String {
     .to_string()
 }
 
+fn render_tasks_tab_setup_prompt(profile: &UserProfile) -> String {
+    if !user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<div class="tasks-tab-setup-alert" role="alert">
+  <p>Add your cat to unlock personalized care tasks and start earning paw points.</p>
+  <p class="tasks-tab-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="tasks-tab-setup-trigger">Create your pet</button></p>
+</div>"#
+    .to_string()
+}
+
 fn render_onboarding_modal(profile: &UserProfile) -> String {
-    if profile.onboarding_completed || is_admin_account(&profile.email) {
+    if !user_needs_pet_setup(profile) {
         return String::new();
     }
 
@@ -2109,17 +2232,8 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
       <input id="cat_name" name="cat_name" type="text" placeholder="Mochi" required />
 
       <label for="pet_breed">Cat breed</label>
-      <input id="pet_breed" name="pet_breed" type="text" list="cat-breeds" placeholder="e.g. Domestic Shorthair" required />
-      <datalist id="cat-breeds">
-        <option value="Domestic Shorthair" />
-        <option value="Domestic Longhair" />
-        <option value="Siamese" />
-        <option value="Maine Coon" />
-        <option value="Persian" />
-        <option value="Ragdoll" />
-        <option value="Bengal" />
-        <option value="Mixed" />
-      </datalist>
+      <input id="pet_breed" name="pet_breed" type="text" class="breed-picker-input" placeholder="Tap to choose a breed" required readonly />
+      <p class="field-hint">Opens the breed picker so you can browse types and descriptions.</p>
 
       <label for="pet_color">Cat color / markings</label>
       <input id="pet_color" name="pet_color" type="text" list="cat-colors" placeholder="e.g. tabby, black and white" />
@@ -2317,9 +2431,7 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("payments_unconfigured") => {
             r#"<p class="auth-error" role="alert">Payments are not configured on this server yet.</p>"#
         }
-        Some("task_done") => {
-            r#"<p class="auth-success" role="status">Task completed! Paw points and XP added.</p>"#
-        }
+        Some("task_done") => "",
         Some("task_reopened") => {
             r#"<p class="auth-success" role="status">Task marked as incomplete.</p>"#
         }
@@ -2779,6 +2891,37 @@ async fn member_since_label(state: &AppState, email: &str) -> String {
         .unwrap_or_else(|| "Recently joined".to_string())
 }
 
+async fn breed_select_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let (jar, email) = match ensure_dashboard_session(&state, jar) {
+        Ok(pair) => pair,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let user = user_for_email(&state, &email);
+    let username = user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| "Parent".to_string());
+
+    match fs::read_to_string("templates/breed-select.html").await {
+        Ok(template) => {
+            let html = template
+                .replace("{{USER_NAME}}", &escape_html(&username))
+                .replace(
+                    "{{ADMIN_NAV_LINK}}",
+                    admin_dashboard_nav_link(&state, &jar),
+                )
+                .replace("{{BREED_CATALOG}}", &breeds::render_catalog_html());
+            (jar, Html(html)).into_response()
+        }
+        Err(_) => (
+            jar,
+            (StatusCode::INTERNAL_SERVER_ERROR, "Could not load breed page"),
+        )
+            .into_response(),
+    }
+}
+
 async fn dashboard_page(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -2838,7 +2981,11 @@ async fn dashboard_page(
         .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
-        .replace("{{PET_NAME}}", &escape_html(&profile.pet_name))
+        .replace("{{PET_NAME}}", &escape_html(&display_pet_name(&profile)))
+        .replace(
+            "{{PET_TAB_SETUP_PROMPT}}",
+            &render_pet_tab_setup_prompt(&profile),
+        )
         .replace("{{PET_BLURB}}", &render_pet_blurb(&profile))
         .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
         .replace(
@@ -2863,6 +3010,10 @@ async fn dashboard_page(
         .replace(
             "{{CALENDAR_PET_SETUP_PROMPT}}",
             &render_calendar_pet_setup_prompt(&profile),
+        )
+        .replace(
+            "{{TASKS_PET_SETUP_PROMPT}}",
+            &render_tasks_tab_setup_prompt(&profile),
         )
         .replace("{{ONBOARDING_MODAL}}", &render_onboarding_modal(&profile))
         .replace(
@@ -3106,21 +3257,64 @@ async fn outfit_equip(
     }
 }
 
+fn wants_json_response(headers: &HeaderMap) -> bool {
+    headers
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("application/json"))
+}
+
+fn task_toggle_json_response(profile: &UserProfile, status: &'static str, show_vet_followup: bool) -> Response {
+    let (level_progress_pct, level_progress_text) = level_progress(profile);
+    let calendar_month = current_calendar_month();
+    let calendar_year = current_calendar_year();
+    let calendar_data = serde_json::from_str(&render_calendar_data_json(
+        profile,
+        calendar_month,
+        calendar_year,
+    ))
+    .unwrap_or_else(|_| serde_json::json!({}));
+
+    Json(TaskToggleResponse {
+        ok: true,
+        status,
+        tasks_html: render_task_list(profile),
+        activity_html: render_activity_list(profile),
+        paw_points: profile.paw_points,
+        parent_level: profile.parent_level,
+        level_progress: level_progress_pct,
+        level_progress_text,
+        calendar_data,
+        show_vet_followup,
+    })
+    .into_response()
+}
+
 async fn task_toggle(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Form(form): Form<TaskToggleForm>,
-) -> impl IntoResponse {
+) -> Response {
+    let wants_json = wants_json_response(&headers);
     let email = match user_redirect_if_missing(&state, &jar) {
         Ok(email) => email,
-        Err(redirect) => return redirect,
+        Err(redirect) => return redirect.into_response(),
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
     let task_id = form.task_id.trim();
 
     let Some(index) = profile.tasks.iter().position(|task| task.id == task_id) else {
-        return Redirect::to("/home?tab=tasks&status=task_invalid");
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=tasks&status=task_invalid").into_response()
+        };
     };
 
     if profile.tasks[index].completed {
@@ -3128,8 +3322,14 @@ async fn task_toggle(
         profile.tasks[index].completed = false;
         push_activity(&mut profile, &format!("Reopened task: {title}."));
         return match save_profile(&state, &profile).await {
-            Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened"),
-            Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+            Ok(()) if wants_json => task_toggle_json_response(&profile, "reopened", false),
+            Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened").into_response(),
+            Err(_) if wants_json => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "status": "error" })),
+            )
+                .into_response(),
+            Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid").into_response(),
         };
     }
 
@@ -3158,11 +3358,19 @@ async fn task_toggle(
     }
 
     match save_profile(&state, &profile).await {
-        Ok(()) if is_vet_task => {
-            Redirect::to("/home?tab=tasks&vet_followup=1&status=task_done")
+        Ok(()) if wants_json => {
+            task_toggle_json_response(&profile, "completed", is_vet_task && profile_has_pet(&profile))
         }
-        Ok(()) => Redirect::to("/home?tab=tasks&status=task_done"),
-        Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid"),
+        Ok(()) if is_vet_task => {
+            Redirect::to("/home?tab=tasks&vet_followup=1&status=task_done").into_response()
+        }
+        Ok(()) => Redirect::to("/home?tab=tasks&status=task_done").into_response(),
+        Err(_) if wants_json => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "ok": false, "status": "error" })),
+        )
+            .into_response(),
+        Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid").into_response(),
     }
 }
 
@@ -3177,6 +3385,9 @@ async fn vet_visit_submit(
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return Redirect::to("/home?tab=health&status=vet_visit_invalid");
+    }
 
     let vaccine_history = parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates);
 
@@ -3239,7 +3450,7 @@ async fn vet_notes_submit(
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
-    if !profile.onboarding_completed {
+    if !profile_has_pet(&profile) {
         return Redirect::to("/home?tab=health&status=vet_notes_invalid");
     }
 
@@ -3887,7 +4098,7 @@ async fn signup_submit(
     }
 
     match save_user(&state, &form) {
-        Ok(()) => Redirect::to("/login?signup=created").into_response(),
+        Ok(()) => signed_in_redirect(&state, jar, email),
         Err(storage::StorageError::EmailTaken) => {
             redirect_to_login_existing_account(jar, email, password)
         }
@@ -4685,7 +4896,7 @@ mod tests {
     #[test]
     fn incomplete_onboarding_shows_no_pet_blurb_and_cta() {
         let profile = default_profile("user@example.com");
-        assert_eq!(render_pet_blurb(&profile), "No pet yet!");
+        assert_eq!(render_pet_blurb(&profile), "Create a pet");
         let cta = render_pet_setup_cta(&profile);
         assert!(cta.contains("Create your pet"));
         assert!(cta.contains("pet-setup-trigger"));
@@ -4721,7 +4932,32 @@ mod tests {
     fn calendar_pet_setup_prompt_hidden_after_onboarding() {
         let mut profile = default_profile("user@example.com");
         profile.onboarding_completed = true;
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
         assert!(render_calendar_pet_setup_prompt(&profile).is_empty());
+    }
+
+    #[test]
+    fn placeholder_pet_name_does_not_count_as_having_pet() {
+        let mut profile = default_profile("user@example.com");
+        profile.onboarding_completed = true;
+        profile.pet_name = "No pet yet".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+        assert!(!profile_has_pet(&profile));
+        assert_eq!(render_pet_blurb(&profile), "Create a pet");
+    }
+
+    #[test]
+    fn placeholder_profile_still_needs_pet_setup_when_flag_set() {
+        let mut profile = default_profile("user@example.com");
+        profile.onboarding_completed = true;
+        assert!(user_needs_pet_setup(&profile));
+        assert!(!render_pet_tab_setup_prompt(&profile).is_empty());
+        assert!(!render_onboarding_modal(&profile).is_empty());
     }
 
     #[test]
@@ -4735,10 +4971,14 @@ mod tests {
         let mut profile = default_profile("user@example.com");
         profile.onboarding_completed = true;
         profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
         let blurb = render_pet_blurb(&profile);
         assert!(blurb.contains("Mochi"));
         assert!(blurb.contains("mirrors your real cat"));
         assert!(render_pet_setup_cta(&profile).is_empty());
+        assert_eq!(display_pet_name(&profile), "Mochi");
     }
 
     #[test]
@@ -4773,6 +5013,73 @@ mod tests {
         let empty_html = render_health_tab(&profile);
         assert!(empty_html.contains("Add vet notes"));
         assert!(empty_html.contains("No vet notes yet"));
+    }
+
+    #[test]
+    fn health_tab_shows_vet_visit_form_when_pet_exists() {
+        let profile = test_profile_weeks(10, "indoor");
+        let html = render_health_tab(&profile);
+        assert!(html.contains("Add veterinary information"));
+        assert!(html.contains("action=\"/home/vet-visit\""));
+        assert!(html.contains("health-vaccine-rows"));
+        assert!(html.contains("health-vet-note"));
+    }
+
+    #[test]
+    fn breed_catalog_includes_all_categories() {
+        let html = breeds::render_catalog_html();
+        assert!(html.contains("Long-Haired Breeds"));
+        assert!(html.contains("Short-Haired Breeds"));
+        assert!(html.contains("Unique / Specialty Breeds"));
+        assert!(html.contains("Colorpoint Breeds (Siamese-derived)"));
+        assert!(html.contains("Persian"));
+        assert!(html.contains("flat face, silky coat, calm and gentle"));
+        assert!(html.contains("Snowshoe"));
+        assert!(html.contains(r#"href="/home?setup=pet&amp;breed=Maine%20Coon""#));
+    }
+
+    #[test]
+    fn onboarding_modal_uses_breed_picker_input() {
+        let profile = test_profile_weeks(10, "indoor");
+        let mut profile = profile;
+        profile.onboarding_completed = false;
+        let modal = render_onboarding_modal(&profile);
+        assert!(modal.contains(r#"id="pet_breed""#));
+        assert!(modal.contains("breed-picker-input"));
+        assert!(modal.contains("readonly"));
+        assert!(!modal.contains("cat-breeds"));
+    }
+
+    #[test]
+    fn tasks_tab_shows_pet_setup_prompt_when_onboarding_incomplete() {
+        let profile = default_profile("user@example.com");
+        let prompt = render_tasks_tab_setup_prompt(&profile);
+        assert!(prompt.contains("tasks-tab-setup-alert"));
+        assert!(prompt.contains("tasks-tab-setup-trigger"));
+        assert!(prompt.contains("pet-setup-trigger"));
+        assert!(prompt.contains("Create your pet"));
+    }
+
+    #[test]
+    fn tasks_tab_pet_setup_prompt_hidden_after_onboarding() {
+        let mut profile = default_profile("user@example.com");
+        profile.onboarding_completed = true;
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+        assert!(render_tasks_tab_setup_prompt(&profile).is_empty());
+    }
+
+    #[test]
+    fn health_tab_prompts_pet_setup_without_cat() {
+        let mut profile = test_profile_weeks(10, "indoor");
+        profile.onboarding_completed = false;
+        let html = render_health_tab(&profile);
+        assert!(html.contains(r#"href="/home?tab=health&amp;setup=pet""#));
+        assert!(html.contains("Create Pet page"));
+        assert!(html.contains("pet-health-tab-link"));
+        assert!(!html.contains("action=\"/home/vet-visit\""));
     }
 
     #[test]
@@ -5093,10 +5400,11 @@ mod tests {
         let html = response_html(response).await;
         assert_no_unreplaced_dashboard_placeholders(&html);
         assert!(html.contains(r#"data-tab="pet""#));
-        assert!(html.contains(">My Pet</button>"));
-        assert!(html.contains("No pet yet!"));
+        assert!(html.contains("My Pet"));
+        assert!(html.contains("Create a pet"));
         assert!(html.contains("Create your pet"));
         assert!(html.contains("calendar-pet-setup-alert"));
+        assert!(html.contains("tasks-tab-setup-alert"));
     }
 
     #[tokio::test]
@@ -5116,7 +5424,7 @@ mod tests {
         let html = response_html(response).await;
         assert_no_unreplaced_dashboard_placeholders(&html);
         assert!(html.contains(r#"data-tab="pet""#));
-        assert!(html.contains(">My Pet</button>"));
+        assert!(html.contains("My Pet"));
         assert!(html.contains(r#"<a href="/admin">ADMIN</a>"#));
     }
 
@@ -5282,6 +5590,7 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/", get(index_page))
         .route("/index.html", get(|| async { Redirect::permanent("/") }))
         .route("/home", get(dashboard_page))
+        .route("/home/breeds", get(breed_select_page))
         .route("/home/onboarding", post(onboarding_submit))
         .route("/home/vet-visit", post(vet_visit_submit))
         .route("/home/vet-notes", post(vet_notes_submit))

@@ -38,7 +38,7 @@
       </div>
 
       <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
-        <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true">My Pet</button>
+        <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true" aria-label="My Pet"><span class="dashboard-tab-label-long" aria-hidden="true">My Pet</span><span class="dashboard-tab-label-short" aria-hidden="true">Pet</span></button>
         <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false" aria-label="Paw Points"><span class="dashboard-tab-label-long" aria-hidden="true">Paw Points</span><span class="dashboard-tab-label-short" aria-hidden="true">Points</span></button>
         <button type="button" class="dashboard-tab" data-tab="outfits" role="tab" aria-selected="false">Outfits</button>
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
@@ -51,6 +51,7 @@
 
       <main class="dashboard-panels">
         <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
+          {{PET_TAB_SETUP_PROMPT}}
           {{PET_VET_ALERT}}
             <div class="pet-showcase">
             {{PET_AVATAR}}
@@ -129,6 +130,7 @@
 
         <section id="panel-tasks" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Care Tasks</h1>
+          {{TASKS_PET_SETUP_PROMPT}}
           <p class="panel-intro">Complete tasks to earn paw points and level up as a cat parent.</p>
           <ul class="task-list">
             {{TASK_LIST}}

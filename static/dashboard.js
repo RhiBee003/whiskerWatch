@@ -8,7 +8,12 @@
       return;
     }
     if (tabId === "pet") {
-      tabList.scrollLeft = 0;
+      const petTab = tabList.querySelector('.dashboard-tab[data-tab="pet"]');
+      if (petTab instanceof HTMLElement) {
+        petTab.scrollIntoView({ inline: "start", block: "nearest" });
+      } else {
+        tabList.scrollLeft = 0;
+      }
       return;
     }
     const activeTab = Array.from(tabs).find((tab) => tab.dataset.tab === tabId);
@@ -25,7 +30,7 @@
     }
   }
 
-  const calendarPetSetupStorageKey = "whiskerCalendarPetSetupPrompted";
+  const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
 
   function showTab(tabId) {
     tabs.forEach((tab) => {
@@ -41,10 +46,6 @@
     });
 
     scrollActiveTabIntoView(tabId);
-
-    if (tabId === "calendar") {
-      maybePromptPetSetupOnCalendar();
-    }
   }
 
   tabs.forEach((tab) => {
@@ -52,6 +53,26 @@
   });
 
   const params = new URLSearchParams(window.location.search);
+
+  function showTaskCompleteToast() {
+    const toast = document.createElement("div");
+    toast.className = "task-complete-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    toast.textContent = "Task completed! Paw Points and XP added.";
+    document.body.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.add("is-visible");
+    });
+
+    window.setTimeout(() => {
+      toast.classList.add("is-hiding");
+      toast.classList.remove("is-visible");
+      window.setTimeout(() => toast.remove(), 300);
+    }, 5000);
+  }
+
   const requestedTab = params.get("tab");
   const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "forum", "calendar", "feedback"];
   if (requestedTab && validTabs.includes(requestedTab)) {
@@ -92,9 +113,135 @@
     });
   });
 
+  const vetFollowupModal = document.getElementById("vet-followup-modal");
+
+  function openVetFollowupModal() {
+    if (!vetFollowupModal) {
+      return;
+    }
+    vetFollowupModal.hidden = false;
+    document.body.classList.add("modal-open");
+    const firstInput = vetFollowupModal.querySelector("#vet_last_vet_date");
+    if (firstInput instanceof HTMLElement) {
+      firstInput.focus();
+    }
+  }
+
+  function updateDashboardFromTaskToggle(data) {
+    const tasksPanelList = document.querySelector("#panel-tasks .task-list");
+    if (tasksPanelList && data.tasks_html) {
+      tasksPanelList.innerHTML = data.tasks_html;
+    }
+
+    const activityList = document.querySelector("#panel-points .activity-list");
+    if (activityList && data.activity_html) {
+      activityList.innerHTML = data.activity_html;
+    }
+
+    const statValues = document.querySelectorAll(
+      ".dashboard-stats .stat-chip .stat-value, .dashboard-stats .stat-chip-button .stat-value"
+    );
+    if (statValues[0]) {
+      statValues[0].textContent = String(data.paw_points);
+    }
+    if (statValues[1]) {
+      statValues[1].textContent = "Level " + data.parent_level;
+    }
+
+    const pointsBig = document.querySelector("#panel-points .points-big");
+    if (pointsBig) {
+      pointsBig.textContent = data.paw_points + " paw points";
+    }
+
+    const levelHeading = document.querySelector(".parent-level-card h2");
+    if (levelHeading) {
+      levelHeading.textContent = "Parent Level " + data.parent_level;
+    }
+
+    const levelFill = document.querySelector(".parent-level-card .level-fill");
+    if (levelFill) {
+      levelFill.style.width = data.level_progress + "%";
+    }
+
+    const levelText = document.querySelector(".parent-level-card p");
+    if (levelText && data.level_progress_text) {
+      levelText.textContent = data.level_progress_text;
+    }
+
+    if (data.calendar_data) {
+      calendarPayload = {
+        viewMonth: data.calendar_data.viewMonth || 0,
+        viewYear: data.calendar_data.viewYear || 0,
+        todayDay: data.calendar_data.todayDay || 0,
+        events: data.calendar_data.events || [],
+        tasks: data.calendar_data.tasks || [],
+      };
+      if (calendarDataEl) {
+        calendarDataEl.textContent = JSON.stringify(data.calendar_data);
+      }
+      const selectedDay = document.querySelector(".calendar-day.selected");
+      if (selectedDay) {
+        selectDay(selectedDay);
+      }
+    }
+  }
+
+  document.addEventListener("submit", async (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    if (!form.action.includes("/home/tasks/toggle")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const data = await response.json();
+      if (!data.ok) {
+        return;
+      }
+
+      updateDashboardFromTaskToggle(data);
+      if (data.status === "completed") {
+        showTaskCompleteToast();
+      }
+      if (data.show_vet_followup) {
+        openVetFollowupModal();
+      }
+    } catch (_error) {
+      form.submit();
+    } finally {
+      if (submitButton instanceof HTMLButtonElement) {
+        submitButton.disabled = false;
+      }
+    }
+  });
+
   const vetFollowup = params.get("vet_followup");
   if (vetFollowup === "1" && !requestedTab) {
     showTab("tasks");
+  }
+  if (vetFollowup === "1") {
+    openVetFollowupModal();
   }
 
   if (params.has("status") || params.has("tab")) {
@@ -251,22 +398,6 @@
     selectDay(calendarDays[0]);
   }
 
-  const vaccineRows = document.getElementById("vaccine-rows");
-  const addVaccineRowBtn = document.getElementById("add-vaccine-row");
-  const vetVaccineRows = document.getElementById("vet-vaccine-rows");
-  const vetAddVaccineRowBtn = document.getElementById("vet-add-vaccine-row");
-
-  function vaccineRowTemplateFrom(container) {
-    if (!container) {
-      return null;
-    }
-    const row = container.querySelector(".vaccine-row");
-    return row ? row.cloneNode(true) : null;
-  }
-
-  const onboardingVaccineTemplate = vaccineRowTemplateFrom(vaccineRows);
-  const vetVaccineTemplate = vaccineRowTemplateFrom(vetVaccineRows);
-
   function bindVaccineRow(row) {
     const removeBtn = row.querySelector(".vaccine-remove-btn");
     if (!removeBtn) {
@@ -277,35 +408,33 @@
     });
   }
 
-  if (vaccineRows) {
-    vaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
-  }
+  function setupVaccineRows(containerId, addButtonId) {
+    const container = document.getElementById(containerId);
+    const addButton = document.getElementById(addButtonId);
+    if (!container) {
+      return;
+    }
 
-  if (addVaccineRowBtn && vaccineRows && onboardingVaccineTemplate) {
-    addVaccineRowBtn.addEventListener("click", () => {
-      const row = onboardingVaccineTemplate.cloneNode(true);
+    const template = container.querySelector(".vaccine-row");
+    container.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
+
+    if (!addButton || !template) {
+      return;
+    }
+
+    addButton.addEventListener("click", () => {
+      const row = template.cloneNode(true);
       row.querySelectorAll("select, input").forEach((field) => {
         field.value = "";
       });
-      vaccineRows.appendChild(row);
+      container.appendChild(row);
       bindVaccineRow(row);
     });
   }
 
-  if (vetVaccineRows) {
-    vetVaccineRows.querySelectorAll(".vaccine-row").forEach(bindVaccineRow);
-  }
-
-  if (vetAddVaccineRowBtn && vetVaccineRows && vetVaccineTemplate) {
-    vetAddVaccineRowBtn.addEventListener("click", () => {
-      const row = vetVaccineTemplate.cloneNode(true);
-      row.querySelectorAll("select, input").forEach((field) => {
-        field.value = "";
-      });
-      vetVaccineRows.appendChild(row);
-      bindVaccineRow(row);
-    });
-  }
+  setupVaccineRows("vaccine-rows", "add-vaccine-row");
+  setupVaccineRows("vet-vaccine-rows", "vet-add-vaccine-row");
+  setupVaccineRows("health-vaccine-rows", "health-add-vaccine-row");
 
   const vaccinesUnknownCheckbox = document.getElementById("pet_vaccines_unknown");
   const vaccineUnknownAlert = document.getElementById("vaccine-unknown-alert");
@@ -452,14 +581,20 @@
     }
   }
 
-  function maybePromptPetSetupOnCalendar() {
+  function maybePromptPetSetup() {
     if (document.body.dataset.needsPetSetup !== "true") {
       return;
     }
-    if (sessionStorage.getItem(calendarPetSetupStorageKey) === "1") {
+    if (!onboardingModal) {
       return;
     }
-    sessionStorage.setItem(calendarPetSetupStorageKey, "1");
+    if (params.get("setup") === "pet" || params.get("breed")) {
+      return;
+    }
+    if (sessionStorage.getItem(petSetupPromptStorageKey) === "1") {
+      return;
+    }
+    sessionStorage.setItem(petSetupPromptStorageKey, "1");
     openOnboardingModal();
   }
 
@@ -472,8 +607,30 @@
     });
   });
 
-  if (params.get("setup") === "pet") {
+  const petBreedInput = document.getElementById("pet_breed");
+  const selectedBreed = params.get("breed");
+
+  if (selectedBreed && petBreedInput instanceof HTMLInputElement) {
+    petBreedInput.value = selectedBreed;
+  }
+
+  if (petBreedInput instanceof HTMLInputElement) {
+    const goToBreedPicker = () => {
+      window.location.href = "/home/breeds";
+    };
+    petBreedInput.addEventListener("click", goToBreedPicker);
+    petBreedInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        goToBreedPicker();
+      }
+    });
+  }
+
+  if (params.get("setup") === "pet" || selectedBreed) {
     openOnboardingModal();
+  } else {
+    maybePromptPetSetup();
   }
 
   const parentLevelModal = document.getElementById("parent-level-modal");
