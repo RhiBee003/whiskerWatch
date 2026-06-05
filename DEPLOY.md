@@ -64,28 +64,39 @@ Test cards: [Stripe test cards](https://stripe.com/docs/testing#cards) (e.g. `42
 
 ## User accounts and SQLite persistence
 
-Accounts and passwords are stored in **`$DATA_DIR/whiskerwatch.db`** (SQLite). Passwords are hashed with bcrypt before storage.
+All app data lives in **`$DATA_DIR/whiskerwatch.db`** (SQLite), including:
+
+- **User accounts** (bcrypt-hashed passwords, profiles, paw points, pets)
+- **Login sessions** (so restarts do not log you out during local testing)
+- **Forum Q&amp;A** (posts and replies)
+- **Feedback** (bug reports, ideas, and fix requests from `/feedback` and the dashboard Feedback tab)
+- **Contact messages** (from `/contact`)
+- **Stripe fulfilled checkout sessions** (paw point purchases)
 
 | Environment | `DATA_DIR` | Notes |
 |-------------|------------|-------|
 | Local (`cargo run`) | Auto-detected project `data/` folder | Walks up from cwd and the binary path to find `Cargo.toml`, so the same database is used even if you run from another directory. Relative `DATA_DIR=data` is also anchored to the project root when found. Override with an absolute path (e.g. `DATA_DIR=/path/to/data`) if needed. |
-| Render (see `render.yaml`) | `/data` | Requires the **persistent disk** mounted at `/data`. Without it, accounts are wiped on every deploy or restart. |
+| Render (see `render.yaml`) | `/data` | Requires the **persistent disk** mounted at `/data`. Without it, accounts, forum posts, and feedback are wiped on every deploy or restart. |
+
+Legacy `users.jsonl`, `user_profiles.jsonl`, `contact_messages.jsonl`, and `feedback.jsonl` files in `DATA_DIR` are imported into SQLite automatically on first startup when the matching table is empty.
 
 ### Verify persistence locally
 
 ```bash
 cd whiskerWatch
 cargo run
-# Sign up at http://127.0.0.1:3000/signup, then stop the server (Ctrl+C) and run cargo run again.
-# Log in with the same email and password — it should succeed.
+# Sign up, post forum Q&A, submit feedback, then stop the server (Ctrl+C) and run cargo run again.
 sqlite3 data/whiskerwatch.db "SELECT email FROM users;"
+sqlite3 data/whiskerwatch.db "SELECT title FROM forum_posts;"
+sqlite3 data/whiskerwatch.db "SELECT category, message FROM feedback;"
 ```
 
-On startup the server logs the resolved database path, for example:
+On startup the server logs the resolved database path and row counts, for example:
 
-`Using data directory: /path/to/whiskerWatch/data (database: .../whiskerwatch.db)`
+`Using data directory: /path/to/whiskerWatch/data (database: .../whiskerwatch.db)`  
+`SQLite contains 3 users, 2 forum posts, 1 forum replies, 4 feedback entries, 0 contact messages`
 
-If login fails after a restart, confirm you are hitting the same database file shown in that log line.
+If data disappears after a restart, confirm you are hitting the same database file shown in that log line.
 
 ### Render checklist
 

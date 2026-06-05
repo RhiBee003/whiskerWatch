@@ -11,7 +11,7 @@
 # auto-deploy tracks this file. See RENDER_SETUP.md.
 #
 # SQLite lives at $DATA_DIR/whiskerwatch.db. The persistent disk below (Starter+)
-# keeps user accounts across redeploys.
+# keeps user accounts, forum Q&A, feedback, and contact messages across redeploys.
 services:
   - type: web
     name: whiskerwatch

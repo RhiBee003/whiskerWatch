@@ -201,8 +201,28 @@ impl Storage {
                  email TEXT NOT NULL,
                  category TEXT NOT NULL,
                  message TEXT NOT NULL,
-                 submitted_at INTEGER NOT NULL
+                 submitted_at INTEGER NOT NULL,
+                 user_id TEXT
              );
+             CREATE TABLE IF NOT EXISTS forum_posts (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 user_id TEXT NOT NULL,
+                 author_username TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS forum_replies (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 post_id INTEGER NOT NULL,
+                 user_id TEXT NOT NULL,
+                 author_username TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 FOREIGN KEY (post_id) REFERENCES forum_posts(id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_forum_replies_post_id
+                 ON forum_replies(post_id);
              CREATE TABLE IF NOT EXISTS stripe_fulfilled_sessions (
                  session_id TEXT PRIMARY KEY,
                  user_email TEXT NOT NULL,
@@ -224,9 +244,11 @@ impl Storage {
         };
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
+        storage.migrate_auth_sessions_table()?;
         storage.migrate_forum_tables()?;
         storage.migrate_submission_tables()?;
         storage.migrate_from_jsonl()?;
+        let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
     }
 
@@ -259,8 +281,11 @@ impl Storage {
         };
         storage.migrate_user_columns()?;
         storage.migrate_password_reset_tokens_table()?;
+        storage.migrate_auth_sessions_table()?;
         storage.migrate_forum_tables()?;
         storage.migrate_submission_tables()?;
+        storage.migrate_from_jsonl()?;
+        let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
     }
 
@@ -333,6 +358,98 @@ impl Storage {
                  ON password_reset_tokens(email);",
         )?;
         Ok(())
+    }
+
+    fn migrate_auth_sessions_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS auth_sessions (
+                 session_id TEXT PRIMARY KEY,
+                 kind TEXT NOT NULL CHECK(kind IN ('user', 'admin')),
+                 email TEXT,
+                 created_at INTEGER NOT NULL,
+                 expires_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires
+                 ON auth_sessions(expires_at);",
+        )?;
+        Ok(())
+    }
+
+    fn auth_timestamp_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64
+    }
+
+    pub fn save_auth_session(
+        &self,
+        session_id: &str,
+        kind: &str,
+        email: Option<&str>,
+        created_at: u64,
+        expires_at: u64,
+    ) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO auth_sessions (session_id, kind, email, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                session_id,
+                kind,
+                email,
+                created_at as i64,
+                expires_at as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_auth_session(&self, session_id: &str) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn lookup_user_session(&self, session_id: &str) -> Result<Option<String>, StorageError> {
+        let now = Self::auth_timestamp_now();
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT email FROM auth_sessions
+             WHERE session_id = ?1 AND kind = 'user' AND expires_at > ?2",
+        )?;
+        let mut rows = stmt.query(params![session_id, now])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn admin_session_valid(&self, session_id: &str) -> Result<bool, StorageError> {
+        let now = Self::auth_timestamp_now();
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM auth_sessions
+             WHERE session_id = ?1 AND kind = 'admin' AND expires_at > ?2",
+            params![session_id, now],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn purge_expired_auth_sessions(&self) -> Result<usize, StorageError> {
+        let now = Self::auth_timestamp_now();
+        let conn = self.conn.lock().expect("storage lock");
+        let deleted = conn.execute(
+            "DELETE FROM auth_sessions WHERE expires_at <= ?1",
+            params![now],
+        )?;
+        Ok(deleted)
     }
 
     fn ensure_username_index(conn: &Connection) -> Result<(), StorageError> {
@@ -1002,14 +1119,42 @@ impl Storage {
         let feedback_path = self.data_dir.join("feedback.jsonl");
         if self.load_feedback()?.is_empty() && feedback_path.exists() {
             let contents = std::fs::read_to_string(&feedback_path)?;
+            let mut migrated = 0_u32;
             for line in contents.lines().filter(|line| !line.trim().is_empty()) {
                 if let Ok(submission) = serde_json::from_str::<FeedbackSubmission>(line) {
-                    let _ = self.save_feedback(&submission);
+                    if self.save_feedback(&submission).is_ok() {
+                        migrated += 1;
+                    }
                 }
+            }
+            if migrated > 0 {
+                eprintln!(
+                    "Migrated {migrated} feedback entries from {} into SQLite",
+                    feedback_path.display()
+                );
             }
         }
 
         Ok(())
+    }
+
+    pub fn persisted_counts(&self) -> Result<(usize, usize, usize, usize, usize), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let users: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+        let forum_posts: i64 =
+            conn.query_row("SELECT COUNT(*) FROM forum_posts", [], |row| row.get(0))?;
+        let forum_replies: i64 =
+            conn.query_row("SELECT COUNT(*) FROM forum_replies", [], |row| row.get(0))?;
+        let feedback: i64 = conn.query_row("SELECT COUNT(*) FROM feedback", [], |row| row.get(0))?;
+        let contacts: i64 =
+            conn.query_row("SELECT COUNT(*) FROM contact_messages", [], |row| row.get(0))?;
+        Ok((
+            users as usize,
+            forum_posts as usize,
+            forum_replies as usize,
+            feedback as usize,
+            contacts as usize,
+        ))
     }
 }
 
@@ -1196,6 +1341,59 @@ mod tests {
     }
 
     #[test]
+    fn auth_sessions_survive_storage_reopen() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path().to_path_buf();
+        let session_id = "test-session-id";
+        let email = "user@test.local";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let expires_at = now + 30 * 24 * 3600;
+
+        {
+            let storage = Storage::open_at(data_dir.clone()).expect("open storage");
+            storage
+                .save_auth_session(session_id, "user", Some(email), now, expires_at)
+                .expect("save user session");
+            storage
+                .save_auth_session("admin-session", "admin", None, now, expires_at)
+                .expect("save admin session");
+        }
+
+        let storage = Storage::open_at(data_dir).expect("reopen storage");
+        assert_eq!(
+            storage
+                .lookup_user_session(session_id)
+                .expect("lookup user session")
+                .as_deref(),
+            Some(email)
+        );
+        assert!(
+            storage
+                .admin_session_valid("admin-session")
+                .expect("lookup admin session")
+        );
+    }
+
+    #[test]
+    fn expired_auth_sessions_are_not_valid() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        storage
+            .save_auth_session("expired", "user", Some("user@test.local"), 1, 2)
+            .expect("save expired session");
+
+        assert!(
+            storage
+                .lookup_user_session("expired")
+                .expect("lookup")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn duplicate_email_returns_email_taken() {
         let temp = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
@@ -1297,6 +1495,30 @@ mod tests {
         assert_eq!(replies[0].body, "Daily brushing helps!");
 
         assert_eq!(storage.count_forum_replies(post_id).expect("count"), 1);
+    }
+
+    #[test]
+    fn feedback_survives_storage_reopen() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let data_dir = temp.path().to_path_buf();
+        {
+            let storage = Storage::open_at(data_dir.clone()).expect("open storage");
+            storage
+                .save_feedback(&FeedbackSubmission {
+                    name: "Tester".to_string(),
+                    email: "tester@example.com".to_string(),
+                    category: "idea".to_string(),
+                    message: "Keep feedback after restart".to_string(),
+                    submitted_at: 1_700_000_100,
+                    user_id: Some("tester@example.com".to_string()),
+                })
+                .expect("save feedback");
+        }
+
+        let storage = Storage::open_at(data_dir).expect("reopen storage");
+        let loaded = storage.load_feedback().expect("load feedback");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].message, "Keep feedback after restart");
     }
 
     #[test]

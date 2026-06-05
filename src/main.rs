@@ -15,7 +15,6 @@ use serde::{
 use std::{
     collections::{HashMap, HashSet},
     env,
-    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{fs, net::TcpListener};
@@ -34,12 +33,11 @@ const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
 const USER_SESSION_COOKIE: &str = "ww_user_session";
 const LOGIN_PREFILL_COOKIE: &str = "ww_login_prefill";
 const LOGIN_PREFILL_MAX_AGE_SECS: i64 = 120;
+const AUTH_SESSION_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
 
 #[derive(Clone)]
 struct AppState {
     storage: Storage,
-    admin_sessions: Arc<Mutex<HashSet<String>>>,
-    user_sessions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 #[derive(Deserialize)]
@@ -648,34 +646,38 @@ fn admin_session_valid(state: &AppState, jar: &CookieJar) -> bool {
     };
 
     state
-        .admin_sessions
-        .lock()
-        .expect("admin session lock")
-        .contains(cookie.value())
+        .storage
+        .admin_session_valid(cookie.value())
+        .unwrap_or(false)
 }
 
 fn create_admin_session(state: &AppState, jar: CookieJar) -> CookieJar {
     let session_id = Uuid::new_v4().to_string();
-    state
-        .admin_sessions
-        .lock()
-        .expect("admin session lock")
-        .insert(session_id.clone());
+    let now = timestamp_now();
+    let expires_at = now.saturating_add(AUTH_SESSION_MAX_AGE_SECS as u64);
+    if let Err(error) = state.storage.save_auth_session(
+        &session_id,
+        "admin",
+        None,
+        now,
+        expires_at,
+    ) {
+        eprintln!("failed to persist admin session: {error}");
+    }
 
     let mut cookie = Cookie::new(ADMIN_SESSION_COOKIE, session_id);
     cookie.set_http_only(true);
     cookie.set_path("/");
     cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(Some(CookieDuration::seconds(AUTH_SESSION_MAX_AGE_SECS)));
     jar.add(cookie)
 }
 
 fn clear_admin_session(state: &AppState, jar: CookieJar) -> CookieJar {
     if let Some(cookie) = jar.get(ADMIN_SESSION_COOKIE) {
-        state
-            .admin_sessions
-            .lock()
-            .expect("admin session lock")
-            .remove(cookie.value());
+        if let Err(error) = state.storage.delete_auth_session(cookie.value()) {
+            eprintln!("failed to delete admin session: {error}");
+        }
     }
 
     jar.remove(Cookie::from(ADMIN_SESSION_COOKIE))
@@ -698,8 +700,9 @@ fn ensure_admin_user_account(state: &AppState) -> Result<(), storage::StorageErr
     match state.storage.load_profile(&email)? {
         Some(mut profile) => {
             let mut changed = false;
-            if !profile.onboarding_completed {
-                profile.onboarding_completed = true;
+            let has_pet = profile_has_pet(&profile);
+            if profile.onboarding_completed != has_pet {
+                profile.onboarding_completed = has_pet;
                 changed = true;
             }
             let before = profile.tasks.len();
@@ -756,11 +759,10 @@ fn replace_admin_nav_link(template: &str, state: &AppState, jar: &CookieJar) -> 
 fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
     let cookie = jar.get(USER_SESSION_COOKIE)?;
     state
-        .user_sessions
-        .lock()
-        .expect("user session lock")
-        .get(cookie.value())
-        .cloned()
+        .storage
+        .lookup_user_session(cookie.value())
+        .ok()
+        .flatten()
 }
 
 fn auth_nav_link_html(state: &AppState, jar: &CookieJar) -> &'static str {
@@ -810,11 +812,9 @@ async fn form_prefill(state: &AppState, jar: &CookieJar) -> (String, String) {
 
 fn clear_user_session(state: &AppState, jar: CookieJar) -> CookieJar {
     if let Some(cookie) = jar.get(USER_SESSION_COOKIE) {
-        state
-            .user_sessions
-            .lock()
-            .expect("user session lock")
-            .remove(cookie.value());
+        if let Err(error) = state.storage.delete_auth_session(cookie.value()) {
+            eprintln!("failed to delete user session: {error}");
+        }
     }
 
     jar.remove(Cookie::from(USER_SESSION_COOKIE))
@@ -949,10 +949,7 @@ fn default_profile(email: &str) -> UserProfile {
 
 fn admin_profile(email: &str) -> UserProfile {
     let mut profile = default_profile(email);
-    profile.onboarding_completed = true;
     profile.tasks = vec![];
-    profile.pet_name = "No pet yet".to_string();
-    profile.pet_breed = String::new();
     profile.pet_mood = "Admin dashboard".to_string();
     profile
 }
@@ -1078,17 +1075,10 @@ async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
         default_profile(email)
     };
 
-    if is_admin_account(email) && !profile.onboarding_completed {
-        profile.onboarding_completed = true;
+    let has_pet = profile_has_pet(&profile);
+    if profile.onboarding_completed != has_pet {
+        profile.onboarding_completed = has_pet;
         let _ = save_profile(state, &profile).await;
-    }
-
-    if !is_admin_account(email) {
-        let has_pet = profile_has_pet(&profile);
-        if profile.onboarding_completed != has_pet {
-            profile.onboarding_completed = has_pet;
-            let _ = save_profile(state, &profile).await;
-        }
     }
 
     if refresh_profile_tasks(&mut profile) {
@@ -1969,7 +1959,10 @@ fn render_vet_followup_modal(profile: &UserProfile, show: bool) -> String {
 fn render_health_tab(profile: &UserProfile) -> String {
     if user_needs_pet_setup(profile) {
         return r#"<p class="panel-intro">Health records need a pet profile before you can track vaccines, vet visits, and notes.</p>
-<p class="field-hint pet-health-tab-hint">Visit the <a href="/home?tab=health&amp;setup=pet" class="pet-health-tab-link">Create Pet page</a> to tell us about your cat.</p>"#
+<div class="health-tab-setup-alert" role="alert">
+  <p>Add your cat to unlock vaccine tracking, vet visit logs, and health notes.</p>
+  <p class="health-tab-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="health-tab-setup-trigger">Create your pet</button></p>
+</div>"#
             .to_string();
     }
 
@@ -2151,7 +2144,7 @@ fn profile_has_pet(profile: &UserProfile) -> bool {
 }
 
 fn user_needs_pet_setup(profile: &UserProfile) -> bool {
-    !is_admin_account(&profile.email) && !profile_has_pet(profile)
+    !profile_has_pet(profile)
 }
 
 fn display_pet_name(profile: &UserProfile) -> String {
@@ -2180,18 +2173,6 @@ fn render_pet_setup_cta(profile: &UserProfile) -> String {
 
     r#"<p class="pet-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="pet-setup-trigger">Create your pet</button></p>"#
         .to_string()
-}
-
-fn render_pet_tab_setup_prompt(profile: &UserProfile) -> String {
-    if !user_needs_pet_setup(profile) {
-        return String::new();
-    }
-
-    r#"<div class="pet-tab-setup-alert" role="alert">
-  <p>Add your cat to unlock a personalized pet tab, health records, and calendar reminders.</p>
-  <p class="pet-tab-setup-cta"><button type="button" class="download-btn pet-setup-trigger" id="pet-tab-setup-trigger">Create your pet</button></p>
-</div>"#
-    .to_string()
 }
 
 fn render_calendar_pet_setup_prompt(profile: &UserProfile) -> String {
@@ -2350,16 +2331,23 @@ fn calendar_month_label(month: u32, year: u32) -> String {
 
 fn create_user_session(state: &AppState, jar: CookieJar, email: &str) -> CookieJar {
     let session_id = Uuid::new_v4().to_string();
-    state
-        .user_sessions
-        .lock()
-        .expect("user session lock")
-        .insert(session_id.clone(), email.to_string());
+    let now = timestamp_now();
+    let expires_at = now.saturating_add(AUTH_SESSION_MAX_AGE_SECS as u64);
+    if let Err(error) = state.storage.save_auth_session(
+        &session_id,
+        "user",
+        Some(email),
+        now,
+        expires_at,
+    ) {
+        eprintln!("failed to persist user session: {error}");
+    }
 
     let mut cookie = Cookie::new(USER_SESSION_COOKIE, session_id);
     cookie.set_http_only(true);
     cookie.set_path("/");
     cookie.set_same_site(SameSite::Lax);
+    cookie.set_max_age(Some(CookieDuration::seconds(AUTH_SESSION_MAX_AGE_SECS)));
     jar.add(cookie)
 }
 
@@ -2982,10 +2970,6 @@ async fn dashboard_page(
         .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
         .replace("{{PET_NAME}}", &escape_html(&display_pet_name(&profile)))
-        .replace(
-            "{{PET_TAB_SETUP_PROMPT}}",
-            &render_pet_tab_setup_prompt(&profile),
-        )
         .replace("{{PET_BLURB}}", &render_pet_blurb(&profile))
         .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
         .replace(
@@ -4203,7 +4187,8 @@ async fn feedback_submit(
                 Redirect::to("/feedback?status=sent")
             }
         }
-        Err(_) => {
+        Err(error) => {
+            eprintln!("feedback save failed: {error}");
             if from_dashboard {
                 Redirect::to("/home?tab=feedback&status=feedback_failed")
             } else {
@@ -4822,6 +4807,36 @@ mod tests {
     }
 
     #[test]
+    fn user_session_survives_app_state_reopen() {
+        let data_dir = std::env::temp_dir().join(format!("ww-session-reopen-{}", Uuid::new_v4()));
+        let email = "session-user@example.com";
+
+        let jar = {
+            let storage = Storage::open_at(data_dir.clone()).expect("storage");
+            storage
+                .save_user(&User {
+                    username: "SessionUser".to_string(),
+                    first_name: "Session".to_string(),
+                    last_name: "User".to_string(),
+                    email: email.to_string(),
+                    password: "TestPass1!".to_string(),
+                    created_at: 1,
+                })
+                .expect("save user");
+            let state = AppState { storage };
+            create_user_session(&state, CookieJar::new(), email)
+        };
+
+        let restarted = AppState {
+            storage: Storage::open_at(data_dir).expect("reopen storage"),
+        };
+        assert_eq!(
+            user_session_email(&restarted, &jar).as_deref(),
+            Some(email)
+        );
+    }
+
+    #[test]
     fn complete_sign_in_grants_admin_session_for_admin_email() {
         let storage = Storage::open_at(std::env::temp_dir().join(format!(
             "ww-admin-login-{}",
@@ -4839,11 +4854,7 @@ mod tests {
             })
             .expect("save admin user");
 
-        let state = AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let state = AppState { storage };
 
         let jar = complete_sign_in(&state, CookieJar::new(), &admin_email());
         assert!(admin_session_valid(&state, &jar));
@@ -4888,8 +4899,19 @@ mod tests {
     }
 
     #[test]
-    fn admin_account_skips_onboarding_modal() {
+    fn admin_without_pet_gets_onboarding_modal() {
         let profile = admin_profile(&admin_email());
+        assert!(!render_onboarding_modal(&profile).is_empty());
+    }
+
+    #[test]
+    fn admin_with_pet_skips_onboarding_modal() {
+        let mut profile = admin_profile(&admin_email());
+        profile.onboarding_completed = true;
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
         assert!(render_onboarding_modal(&profile).is_empty());
     }
 
@@ -4904,8 +4926,20 @@ mod tests {
     }
 
     #[test]
-    fn admin_account_skips_pet_setup_cta() {
+    fn admin_without_pet_gets_pet_setup_cta() {
         let profile = admin_profile(&admin_email());
+        assert!(render_pet_setup_cta(&profile).contains("Create your pet"));
+        assert!(user_needs_pet_setup(&profile));
+    }
+
+    #[test]
+    fn admin_with_pet_skips_pet_setup_cta() {
+        let mut profile = admin_profile(&admin_email());
+        profile.onboarding_completed = true;
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
         assert!(render_pet_setup_cta(&profile).is_empty());
         assert!(!user_needs_pet_setup(&profile));
     }
@@ -4956,14 +4990,14 @@ mod tests {
         let mut profile = default_profile("user@example.com");
         profile.onboarding_completed = true;
         assert!(user_needs_pet_setup(&profile));
-        assert!(!render_pet_tab_setup_prompt(&profile).is_empty());
+        assert!(!render_pet_setup_cta(&profile).is_empty());
         assert!(!render_onboarding_modal(&profile).is_empty());
     }
 
     #[test]
-    fn admin_account_skips_calendar_pet_setup_prompt() {
+    fn admin_without_pet_gets_calendar_pet_setup_prompt() {
         let profile = admin_profile(&admin_email());
-        assert!(render_calendar_pet_setup_prompt(&profile).is_empty());
+        assert!(!render_calendar_pet_setup_prompt(&profile).is_empty());
     }
 
     #[test]
@@ -5076,9 +5110,10 @@ mod tests {
         let mut profile = test_profile_weeks(10, "indoor");
         profile.onboarding_completed = false;
         let html = render_health_tab(&profile);
-        assert!(html.contains(r#"href="/home?tab=health&amp;setup=pet""#));
-        assert!(html.contains("Create Pet page"));
-        assert!(html.contains("pet-health-tab-link"));
+        assert!(html.contains("health-tab-setup-alert"));
+        assert!(html.contains("health-tab-setup-trigger"));
+        assert!(html.contains("pet-setup-trigger"));
+        assert!(html.contains("Create your pet"));
         assert!(!html.contains("action=\"/home/vet-visit\""));
     }
 
@@ -5089,11 +5124,7 @@ mod tests {
             Uuid::new_v4()
         )))
         .expect("storage");
-        let state = AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let state = AppState { storage };
         let jar = CookieJar::new();
         assert_eq!(admin_dashboard_nav_link(&state, &jar), "");
 
@@ -5128,11 +5159,7 @@ mod tests {
             Uuid::new_v4()
         )))
         .expect("storage");
-        let state = AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let state = AppState { storage };
 
         let post_id = state
             .storage
@@ -5159,11 +5186,7 @@ mod tests {
             Uuid::new_v4()
         )))
         .expect("storage");
-        let state = AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let state = AppState { storage };
         let template = "<nav>{{ADMIN_NAV_LINK}}\n{{admin_nav_link}}</nav>";
 
         let jar = CookieJar::new();
@@ -5212,11 +5235,7 @@ mod tests {
             Uuid::new_v4()
         )))
         .expect("storage");
-        let state = AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        };
+        let state = AppState { storage };
         let jar = CookieJar::new();
         assert!(!admin_session_valid(&state, &jar));
 
@@ -5230,11 +5249,7 @@ mod tests {
             Uuid::new_v4()
         )))
         .expect("storage");
-        AppState {
-            storage,
-            admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-            user_sessions: Arc::new(Mutex::new(HashMap::new())),
-        }
+        AppState { storage }
     }
 
     fn empty_dashboard_query() -> DashboardQuery {
@@ -5642,17 +5657,21 @@ async fn main() {
         storage.data_dir().display(),
         db_path.display()
     );
+    match storage.persisted_counts() {
+        Ok((users, forum_posts, forum_replies, feedback, contacts)) => {
+            eprintln!(
+                "SQLite contains {users} users, {forum_posts} forum posts, {forum_replies} forum replies, {feedback} feedback entries, {contacts} contact messages"
+            );
+        }
+        Err(error) => eprintln!("warning: could not read SQLite counts: {error}"),
+    }
     if !std::env::var("DATA_DIR").map(|v| !v.trim().is_empty()).unwrap_or(false) {
         eprintln!(
-            "Tip: set DATA_DIR to a fixed absolute path if accounts seem to disappear between runs."
+            "Tip: set DATA_DIR to a fixed absolute path if accounts, forum posts, or feedback seem to disappear between runs."
         );
     }
 
-    let state = AppState {
-        storage,
-        admin_sessions: Arc::new(Mutex::new(HashSet::new())),
-        user_sessions: Arc::new(Mutex::new(HashMap::new())),
-    };
+    let state = AppState { storage };
 
     let app = build_app(state, uploads_dir);
 

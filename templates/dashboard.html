@@ -51,7 +51,6 @@
 
       <main class="dashboard-panels">
         <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
-          {{PET_TAB_SETUP_PROMPT}}
           {{PET_VET_ALERT}}
             <div class="pet-showcase">
             {{PET_AVATAR}}
@@ -79,7 +78,7 @@
               <div class="level-bar" aria-hidden="true">
                 <span class="level-fill" style="width: {{LEVEL_PROGRESS}}%"></span>
               </div>
-              <p>{{LEVEL_PROGRESS_TEXT}}</p>
+              <p class="parent-level-progress-summary">{{LEVEL_PROGRESS_TEXT}}</p>
               <span class="parent-level-hint">Tap for XP &amp; paw points breakdown</span>
             </button>
           </div>
