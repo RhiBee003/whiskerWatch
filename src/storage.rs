@@ -4,6 +4,13 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ForumDeleteOutcome {
+    Deleted,
+    NotFound,
+    NotAuthorized,
+}
+
 #[derive(Debug)]
 pub enum StorageError {
     Sqlite(rusqlite::Error),
@@ -1020,6 +1027,60 @@ impl Storage {
         Ok(())
     }
 
+    pub fn delete_forum_post_owned(
+        &self,
+        post_id: i64,
+        user_id: &str,
+    ) -> Result<ForumDeleteOutcome, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let owner: Result<String, rusqlite::Error> = conn.query_row(
+            "SELECT user_id FROM forum_posts WHERE id = ?1",
+            params![post_id],
+            |row| row.get(0),
+        );
+        let owner = match owner {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Ok(ForumDeleteOutcome::NotFound);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !owner.eq_ignore_ascii_case(user_id) {
+            return Ok(ForumDeleteOutcome::NotAuthorized);
+        }
+        conn.execute(
+            "DELETE FROM forum_replies WHERE post_id = ?1",
+            params![post_id],
+        )?;
+        conn.execute("DELETE FROM forum_posts WHERE id = ?1", params![post_id])?;
+        Ok(ForumDeleteOutcome::Deleted)
+    }
+
+    pub fn delete_forum_reply_owned(
+        &self,
+        reply_id: i64,
+        user_id: &str,
+    ) -> Result<ForumDeleteOutcome, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let owner: Result<String, rusqlite::Error> = conn.query_row(
+            "SELECT user_id FROM forum_replies WHERE id = ?1",
+            params![reply_id],
+            |row| row.get(0),
+        );
+        let owner = match owner {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Ok(ForumDeleteOutcome::NotFound);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !owner.eq_ignore_ascii_case(user_id) {
+            return Ok(ForumDeleteOutcome::NotAuthorized);
+        }
+        conn.execute("DELETE FROM forum_replies WHERE id = ?1", params![reply_id])?;
+        Ok(ForumDeleteOutcome::Deleted)
+    }
+
     /// Returns true if this session was newly recorded (caller should credit points).
     pub fn try_record_stripe_fulfillment(
         &self,
@@ -1495,6 +1556,81 @@ mod tests {
         assert_eq!(replies[0].body, "Daily brushing helps!");
 
         assert_eq!(storage.count_forum_replies(post_id).expect("count"), 1);
+    }
+
+    #[test]
+    fn forum_delete_respects_ownership() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let now = 1_700_000_000_u64;
+
+        let post_id = storage
+            .create_forum_post(
+                "owner@test.local",
+                "owner",
+                "Question?",
+                "Details.",
+                now,
+            )
+            .expect("create post");
+
+        storage
+            .create_forum_reply(
+                post_id,
+                "owner@test.local",
+                "owner",
+                "My own answer.",
+                now + 30,
+            )
+            .expect("create reply");
+
+        storage
+            .create_forum_reply(
+                post_id,
+                "other@test.local",
+                "other",
+                "Someone else's answer.",
+                now + 60,
+            )
+            .expect("create other reply");
+
+        let replies = storage.list_forum_replies(post_id).expect("list replies");
+        let own_reply_id = replies
+            .iter()
+            .find(|reply| reply.user_id == "owner@test.local")
+            .expect("own reply")
+            .id;
+        let other_reply_id = replies
+            .iter()
+            .find(|reply| reply.user_id == "other@test.local")
+            .expect("other reply")
+            .id;
+
+        assert_eq!(
+            storage
+                .delete_forum_reply_owned(other_reply_id, "owner@test.local")
+                .expect("delete other reply"),
+            ForumDeleteOutcome::NotAuthorized
+        );
+        assert_eq!(
+            storage
+                .delete_forum_reply_owned(own_reply_id, "owner@test.local")
+                .expect("delete own reply"),
+            ForumDeleteOutcome::Deleted
+        );
+        assert_eq!(
+            storage
+                .delete_forum_post_owned(post_id, "other@test.local")
+                .expect("delete post as other"),
+            ForumDeleteOutcome::NotAuthorized
+        );
+        assert_eq!(
+            storage
+                .delete_forum_post_owned(post_id, "owner@test.local")
+                .expect("delete post as owner"),
+            ForumDeleteOutcome::Deleted
+        );
+        assert!(storage.list_forum_posts().expect("list posts").is_empty());
     }
 
     #[test]

@@ -2,7 +2,7 @@ use axum::{
     Form, Json, Router,
     body::Bytes,
     extract::{Multipart, Path, Query, State},
-    http::{HeaderMap, StatusCode, header::ACCEPT},
+    http::{HeaderMap, StatusCode, header, header::ACCEPT},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -26,7 +26,7 @@ use uuid::Uuid;
 mod breeds;
 mod storage;
 mod stripe_payments;
-use storage::Storage;
+use storage::{ForumDeleteOutcome, Storage};
 use stripe_payments::CheckoutError;
 
 const ADMIN_SESSION_COOKIE: &str = "ww_admin_session";
@@ -480,6 +480,17 @@ struct ForumPostForm {
 struct ForumReplyForm {
     post_id: String,
     body: String,
+}
+
+#[derive(Deserialize)]
+struct ForumDeletePostForm {
+    post_id: String,
+}
+
+#[derive(Deserialize)]
+struct ForumDeleteReplyForm {
+    reply_id: String,
+    post_id: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -2309,7 +2320,10 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
         </label>
       </fieldset>
 
-      <button type="submit" class="download-btn login-submit">Save &amp; continue</button>
+      <div class="onboarding-actions">
+        <button type="submit" class="download-btn login-submit">Save &amp; continue</button>
+        <button type="button" class="onboarding-skip-btn" id="onboarding-skip">Skip for now</button>
+      </div>
     </form>
   </div>
 </div>"#
@@ -2390,89 +2404,101 @@ async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
 fn dashboard_status_block(status: Option<&str>) -> String {
     match status {
         Some("outfit_bought") => {
-            r#"<p class="auth-success" role="status">Outfit purchased and equipped! Your pet looks adorable.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Outfit purchased and equipped! Your pet looks adorable.</p>"#
         }
         Some("outfit_equipped") => {
-            r#"<p class="auth-success" role="status">Outfit equipped for your pet.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Outfit equipped for your pet.</p>"#
         }
         Some("outfit_owned") => {
-            r#"<p class="auth-error" role="alert">You already own that outfit.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">You already own that outfit.</p>"#
         }
         Some("outfit_points") => {
-            r#"<p class="auth-error" role="alert">Not enough paw points for that outfit.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Not enough paw points for that outfit.</p>"#
         }
         Some("outfit_invalid") => {
-            r#"<p class="auth-error" role="alert">That outfit is not available.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">That outfit is not available.</p>"#
         }
         Some("points_bought") => {
-            r#"<p class="auth-success" role="status">Payment received! Paw points have been added to your account.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Payment received! Paw points have been added to your account.</p>"#
         }
         Some("points_cancelled") => {
-            r#"<p class="auth-error" role="alert">Checkout was cancelled. No charge was made.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Checkout was cancelled. No charge was made.</p>"#
         }
         Some("points_checkout_failed") => {
-            r#"<p class="auth-error" role="alert">Could not start checkout. Try again or contact support.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Could not start checkout. Try again or contact support.</p>"#
         }
         Some("points_invalid") => {
-            r#"<p class="auth-error" role="alert">That point package is not available.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">That point package is not available.</p>"#
         }
         Some("payments_unconfigured") => {
-            r#"<p class="auth-error" role="alert">Payments are not configured on this server yet.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Payments are not configured on this server yet.</p>"#
         }
         Some("task_done") => "",
         Some("task_reopened") => {
-            r#"<p class="auth-success" role="status">Task marked as incomplete.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Task marked as incomplete.</p>"#
         }
         Some("task_invalid") => {
-            r#"<p class="auth-error" role="alert">That task could not be updated.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">That task could not be updated.</p>"#
         }
         Some("onboarding_done") => {
-            r#"<p class="auth-success" role="status">Welcome! Your cat profile is saved with vet and vaccine reminders on your calendar.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Welcome! Your cat profile is saved with vet and vaccine reminders on your calendar.</p>"#
         }
         Some("onboarding_invalid") => {
-            r#"<p class="auth-error" role="alert">Please enter your cat's name, breed, a valid age, and whether they are indoor or outdoor.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Please enter your cat's name, breed, a valid age, and whether they are indoor or outdoor.</p>"#
         }
         Some("onboarding_photo_invalid") => {
-            r#"<p class="auth-error" role="alert">That photo could not be saved. Use a JPEG, PNG, or WebP image under 5MB, or skip the photo.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">That photo could not be saved. Use a JPEG, PNG, or WebP image under 5MB, or skip the photo.</p>"#
         }
         Some("vet_visit_done") => {
-            r#"<p class="auth-success" role="status">Vet visit saved! Vaccines and health notes updated.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Vet visit saved! Vaccines and health notes updated.</p>"#
         }
         Some("vet_visit_invalid") => {
-            r#"<p class="auth-error" role="alert">Could not save vet visit. Check vaccine dates and try again.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Could not save vet visit. Check vaccine dates and try again.</p>"#
         }
         Some("vet_notes_done") => {
-            r#"<p class="auth-success" role="status">Vet notes saved.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Vet notes saved.</p>"#
         }
         Some("vet_notes_invalid") => {
-            r#"<p class="auth-error" role="alert">Could not save vet notes. Please try again.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Could not save vet notes. Please try again.</p>"#
         }
         Some("feedback_sent") => {
-            r#"<p class="auth-success" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
         }
         Some("feedback_missing") => {
-            r#"<p class="auth-error" role="alert">Please fill out all feedback fields.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Please fill out all feedback fields.</p>"#
         }
         Some("feedback_failed") => {
-            r#"<p class="auth-error" role="alert">We could not save your feedback. Please try again.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">We could not save your feedback. Please try again.</p>"#
         }
         Some("forum_post_sent") => {
-            r#"<p class="auth-success" role="status">Your question was posted to the forum.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Your question was posted to the forum.</p>"#
         }
         Some("forum_reply_sent") => {
-            r#"<p class="auth-success" role="status">Your reply was posted.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Your reply was posted.</p>"#
         }
         Some("forum_missing") => {
-            r#"<p class="auth-error" role="alert">Please enter a title and question details.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Please enter a title and question details.</p>"#
         }
         Some("forum_reply_missing") => {
-            r#"<p class="auth-error" role="alert">Please enter a reply.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">Please enter a reply.</p>"#
         }
         Some("forum_invalid") => {
-            r#"<p class="auth-error" role="alert">That forum thread could not be found.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">That forum thread could not be found.</p>"#
         }
         Some("forum_failed") => {
-            r#"<p class="auth-error" role="alert">We could not save your forum post. Please try again.</p>"#
+            r#"<p class="auth-error status-flash" role="alert">We could not save your forum post. Please try again.</p>"#
+        }
+        Some("forum_post_deleted") => {
+            r#"<p class="auth-success status-flash" role="status">Your question was deleted.</p>"#
+        }
+        Some("forum_reply_deleted") => {
+            r#"<p class="auth-success status-flash" role="status">Your answer was deleted.</p>"#
+        }
+        Some("forum_delete_denied") => {
+            r#"<p class="auth-error status-flash" role="alert">You can only delete your own questions and answers.</p>"#
+        }
+        Some("forum_delete_failed") => {
+            r#"<p class="auth-error status-flash" role="alert">We could not delete that forum item. Please try again.</p>"#
         }
         _ => "",
     }
@@ -2553,15 +2579,37 @@ fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
     )
 }
 
-fn render_forum_reply(reply: &ForumReply) -> String {
+fn forum_user_owns(content_user_id: &str, current_user_id: &str) -> bool {
+    content_user_id.eq_ignore_ascii_case(current_user_id)
+}
+
+fn render_forum_reply(reply: &ForumReply, current_user_id: &str) -> String {
+    let delete_form = if forum_user_owns(&reply.user_id, current_user_id) {
+        format!(
+            r#"<form class="forum-delete-form" action="/home/forum/reply/delete" method="post" onsubmit="return confirm('Delete your answer?');">
+              <input type="hidden" name="reply_id" value="{reply_id}" />
+              <input type="hidden" name="post_id" value="{post_id}" />
+              <button type="submit" class="forum-delete-btn">Delete answer</button>
+            </form>"#,
+            reply_id = reply.id,
+            post_id = reply.post_id,
+        )
+    } else {
+        String::new()
+    };
+
     format!(
         r#"<li class="forum-reply">
-          <p class="forum-reply-meta"><strong>{author}</strong> · {when}</p>
+          <div class="forum-reply-header">
+            <p class="forum-reply-meta"><strong>{author}</strong> · {when}</p>
+            {delete_form}
+          </div>
           <p class="forum-reply-body">{body}</p>
         </li>"#,
         author = escape_html(&reply.author_username),
         when = escape_html(&format_timestamp(reply.created_at)),
         body = escape_html(&reply.body),
+        delete_form = delete_form,
     )
 }
 
@@ -2570,6 +2618,7 @@ fn render_forum_thread(
     replies: &[ForumReply],
     reply_count: u32,
     open: bool,
+    current_user_id: &str,
 ) -> String {
     let open_attr = if open { " open" } else { "" };
     let answer_label = if reply_count == 1 {
@@ -2577,18 +2626,35 @@ fn render_forum_thread(
     } else {
         format!("{reply_count} answers")
     };
-    let replies_html: String = replies.iter().map(render_forum_reply).collect();
+    let replies_html: String = replies
+        .iter()
+        .map(|reply| render_forum_reply(reply, current_user_id))
+        .collect();
     let replies_block = if replies.is_empty() {
         r#"<p class="forum-no-replies">No answers yet — be the first to help!</p>"#.to_string()
     } else {
         format!(r#"<ul class="forum-replies">{replies_html}</ul>"#, replies_html = replies_html)
     };
+    let delete_question_form = if forum_user_owns(&post.user_id, current_user_id) {
+        format!(
+            r#"<form class="forum-delete-form forum-delete-form-question" action="/home/forum/post/delete" method="post" onsubmit="return confirm('Delete this question and all its answers?');">
+              <input type="hidden" name="post_id" value="{id}" />
+              <button type="submit" class="forum-delete-minus" aria-label="Delete question" title="Delete question" onclick="event.stopPropagation();">−</button>
+            </form>"#,
+            id = post.id,
+        )
+    } else {
+        String::new()
+    };
 
     format!(
         r#"<details class="forum-thread"{open_attr} data-post-id="{id}">
           <summary class="forum-thread-summary">
-            <span class="forum-thread-title">{title}</span>
-            <span class="forum-thread-meta">by {author} · {when} · {answers}</span>
+            <span class="forum-thread-summary-text">
+              <span class="forum-thread-title">{title}</span>
+              <span class="forum-thread-meta">by {author} · {when} · {answers}</span>
+            </span>
+            {delete_question_form}
           </summary>
           <div class="forum-thread-body">
             <p>{body}</p>
@@ -2608,11 +2674,16 @@ fn render_forum_thread(
         when = escape_html(&format_timestamp(post.created_at)),
         answers = escape_html(&answer_label),
         body = escape_html(&post.body),
+        delete_question_form = delete_question_form,
         replies_block = replies_block,
     )
 }
 
-fn render_dashboard_forum_tab(state: &AppState, open_thread: Option<i64>) -> String {
+fn render_dashboard_forum_tab(
+    state: &AppState,
+    open_thread: Option<i64>,
+    current_user_id: &str,
+) -> String {
     let posts = state.storage.list_forum_posts().unwrap_or_default();
     let mut threads = String::new();
 
@@ -2631,7 +2702,13 @@ fn render_dashboard_forum_tab(state: &AppState, open_thread: Option<i64>) -> Str
                 .count_forum_replies(post.id)
                 .unwrap_or(replies.len() as u32);
             let open = open_thread.is_some_and(|id| id == post.id);
-            threads.push_str(&render_forum_thread(post, &replies, reply_count, open));
+            threads.push_str(&render_forum_thread(
+                post,
+                &replies,
+                reply_count,
+                open,
+                current_user_id,
+            ));
         }
     }
 
@@ -3042,7 +3119,7 @@ async fn dashboard_page(
         .and_then(|value| value.parse::<i64>().ok());
     let body = body.replace(
         "{{FORUM_TAB_CONTENT}}",
-        &render_dashboard_forum_tab(&state, open_thread),
+        &render_dashboard_forum_tab(&state, open_thread, &email),
     );
     let body = replace_admin_nav_link(&body, &state, &jar);
 
@@ -3533,26 +3610,26 @@ async fn login_page(
         Ok(contents) => {
             let login_error_block = match query.error.as_deref() {
                 Some("admin_invalid") => {
-                    r#"<p class="auth-error" role="alert">Incorrect password for the admin account. Use the <code>ADMIN_PASSWORD</code> from your server environment (Render → Environment tab in production). Locally, the default is <code>WhiskerAdmin2026!</code> unless you set <code>ADMIN_PASSWORD</code>.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Incorrect password for the admin account. Use the <code>ADMIN_PASSWORD</code> from your server environment (Render → Environment tab in production). Locally, the default is <code>WhiskerAdmin2026!</code> unless you set <code>ADMIN_PASSWORD</code>.</p>"#
                 }
                 Some("invalid") => {
-                    r#"<p class="auth-error" role="alert">Incorrect password. Please try again.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Incorrect password. Please try again.</p>"#
                 }
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please enter both email and password.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please enter both email and password.</p>"#
                 }
                 Some("storage") => {
-                    r#"<p class="auth-error" role="alert">We could not verify your account right now. Please try again in a moment.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">We could not verify your account right now. Please try again in a moment.</p>"#
                 }
                 _ => "",
             };
             let signup_success_block = match query.signup.as_deref() {
-                Some("created") => r#"<p class="auth-success" role="status">Account created! You can log in with your new email and password.</p>"#,
+                Some("created") => r#"<p class="auth-success status-flash" role="status">Account created! You can log in with your new email and password.</p>"#,
                 _ => "",
             };
             let reset_success_block = match query.reset.as_deref() {
                 Some("success") => {
-                    r#"<p class="auth-success" role="status">Your password was updated. You can log in with your new password.</p>"#
+                    r#"<p class="auth-success status-flash" role="status">Your password was updated. You can log in with your new password.</p>"#
                 }
                 _ => "",
             };
@@ -3563,7 +3640,7 @@ async fn login_page(
             let account_exists_block = if query.exists.as_deref() == Some("1")
                 || !prefill_email.is_empty()
             {
-                r#"<p class="auth-success" role="status">An account with this email already exists. Log in below.</p>"#
+                r#"<p class="auth-success status-flash" role="status">An account with this email already exists. Log in below.</p>"#
             } else {
                 ""
             };
@@ -3597,15 +3674,15 @@ async fn forgot_password_page(
         Ok(contents) => {
             let forgot_error_block = match query.error.as_deref() {
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please enter your email address.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please enter your email address.</p>"#
                 }
                 Some("failed") => {
-                    r#"<p class="auth-error" role="alert">We could not process your request right now. Please try again in a moment.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">We could not process your request right now. Please try again in a moment.</p>"#
                 }
                 _ => "",
             };
             let forgot_success_block = match query.sent.as_deref() {
-                Some("1") => r#"<p class="auth-success" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
+                Some("1") => r#"<p class="auth-success status-flash" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
                 _ => "",
             };
             let body = contents
@@ -3629,7 +3706,7 @@ fn render_forgot_password_sent(dev_reset_link_block: &str) -> Response {
                 .replace("{{FORGOT_ERROR_BLOCK}}", "")
                 .replace(
                     "{{FORGOT_SUCCESS_BLOCK}}",
-                    r#"<p class="auth-success" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
+                    r#"<p class="auth-success status-flash" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
                 )
                 .replace("{{DEV_RESET_LINK_BLOCK}}", dev_reset_link_block);
             Html(body).into_response()
@@ -3716,16 +3793,16 @@ async fn reset_password_page(
         Ok(contents) => {
             let reset_error_block = match query.error.as_deref() {
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please enter and confirm your new password.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please enter and confirm your new password.</p>"#
                 }
                 Some("password") => {
-                    r#"<p class="auth-error" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
                 }
                 Some("password_mismatch") => {
-                    r#"<p class="auth-error" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
                 }
                 Some("failed") => {
-                    r#"<p class="auth-error" role="alert">This reset link is invalid or has expired. Please request a new one.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">This reset link is invalid or has expired. Please request a new one.</p>"#
                 }
                 _ => "",
             };
@@ -3801,25 +3878,25 @@ async fn signup_page(
         Ok(contents) => {
             let signup_error_block = match query.error.as_deref() {
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please fill out all sign up fields.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please fill out all sign up fields.</p>"#
                 }
                 Some("email_exists") | Some("exists") => {
-                    r#"<p class="auth-error" role="alert">An account with that email already exists. <a href="/login">Log in</a> instead.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">An account with that email already exists. <a href="/login">Log in</a> instead.</p>"#
                 }
                 Some("username") => {
-                    r#"<p class="auth-error" role="alert">That username is already taken. Please choose another.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">That username is already taken. Please choose another.</p>"#
                 }
                 Some("password") => {
-                    r#"<p class="auth-error" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Password must be at least 5 characters and include a number and a special character.</p>"#
                 }
                 Some("password_mismatch") => {
-                    r#"<p class="auth-error" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Passwords do not match. Please re-enter your password and try again.</p>"#
                 }
                 Some("no_account") => {
-                    r#"<p class="auth-error" role="alert">You don't have an account yet. Create one below.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">You don't have an account yet. Create one below.</p>"#
                 }
                 Some("failed") => {
-                    r#"<p class="auth-error" role="alert">We could not create your account. Please try again.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">We could not create your account. Please try again.</p>"#
                 }
                 _ => "",
             };
@@ -3855,16 +3932,16 @@ async fn contact_page(
             let (form_name, form_email) = form_prefill(&state, &jar).await;
             let contact_success_block = match query.status.as_deref() {
                 Some("sent") => {
-                    r#"<p class="auth-success" role="status">Thanks! Your message was received. We will get back to you soon.</p>"#
+                    r#"<p class="auth-success status-flash" role="status">Thanks! Your message was received. We will get back to you soon.</p>"#
                 }
                 _ => "",
             };
             let contact_error_block = match query.status.as_deref() {
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please fill out all fields before sending your message.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please fill out all fields before sending your message.</p>"#
                 }
                 Some("failed") => {
-                    r#"<p class="auth-error" role="alert">We could not save your message. Please try again in a moment.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">We could not save your message. Please try again in a moment.</p>"#
                 }
                 _ => "",
             };
@@ -3896,16 +3973,16 @@ async fn feedback_page(
             let (form_name, form_email) = form_prefill(&state, &jar).await;
             let feedback_success_block = match query.status.as_deref() {
                 Some("sent") => {
-                    r#"<p class="auth-success" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
+                    r#"<p class="auth-success status-flash" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
                 }
                 _ => "",
             };
             let feedback_error_block = match query.status.as_deref() {
                 Some("missing") => {
-                    r#"<p class="auth-error" role="alert">Please fill out all feedback fields.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Please fill out all feedback fields.</p>"#
                 }
                 Some("failed") => {
-                    r#"<p class="auth-error" role="alert">We could not save your feedback. Please try again.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">We could not save your feedback. Please try again.</p>"#
                 }
                 _ => "",
             };
@@ -4289,6 +4366,78 @@ async fn forum_thread_redirect(Path(post_id): Path<i64>) -> Response {
     Redirect::temporary(&url).into_response()
 }
 
+fn forum_delete_redirect(post_id: Option<i64>, status: &str) -> Response {
+    let mut url = format!("/home?tab=forum&status={status}");
+    if let Some(post_id) = post_id {
+        url.push_str(&format!("&thread={post_id}"));
+    }
+    Redirect::to(&url).into_response()
+}
+
+async fn forum_post_delete(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ForumDeletePostForm>,
+) -> Response {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let post_id: i64 = match form.post_id.trim().parse() {
+        Ok(id) if id > 0 => id,
+        _ => return Redirect::to("/home?tab=forum&status=forum_invalid").into_response(),
+    };
+
+    match state.storage.delete_forum_post_owned(post_id, &email) {
+        Ok(ForumDeleteOutcome::Deleted) => forum_delete_redirect(None, "forum_post_deleted"),
+        Ok(ForumDeleteOutcome::NotFound) => {
+            Redirect::to("/home?tab=forum&status=forum_invalid").into_response()
+        }
+        Ok(ForumDeleteOutcome::NotAuthorized) => {
+            forum_delete_redirect(Some(post_id), "forum_delete_denied")
+        }
+        Err(error) => {
+            eprintln!("forum post delete failed for {email}: {error}");
+            forum_delete_redirect(Some(post_id), "forum_delete_failed")
+        }
+    }
+}
+
+async fn forum_reply_delete(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ForumDeleteReplyForm>,
+) -> Response {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let reply_id: i64 = match form.reply_id.trim().parse() {
+        Ok(id) if id > 0 => id,
+        _ => return Redirect::to("/home?tab=forum&status=forum_invalid").into_response(),
+    };
+    let post_id: i64 = match form.post_id.trim().parse() {
+        Ok(id) if id > 0 => id,
+        _ => return Redirect::to("/home?tab=forum&status=forum_invalid").into_response(),
+    };
+
+    match state.storage.delete_forum_reply_owned(reply_id, &email) {
+        Ok(ForumDeleteOutcome::Deleted) => forum_delete_redirect(Some(post_id), "forum_reply_deleted"),
+        Ok(ForumDeleteOutcome::NotFound) => {
+            Redirect::to("/home?tab=forum&status=forum_invalid").into_response()
+        }
+        Ok(ForumDeleteOutcome::NotAuthorized) => {
+            forum_delete_redirect(Some(post_id), "forum_delete_denied")
+        }
+        Err(error) => {
+            eprintln!("forum reply delete failed for {email}: {error}");
+            forum_delete_redirect(Some(post_id), "forum_delete_failed")
+        }
+    }
+}
+
 fn render_submission_rows(
     rows: &[(&str, &str, &str, &str, u64)],
     empty_message: &str,
@@ -4418,6 +4567,7 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         </table>
       </section>
     </main>
+    <script src="/paw-cursor.js"></script>
   </body>
 </html>"#,
         feedback_count = feedback.len(),
@@ -5172,11 +5322,16 @@ mod tests {
             )
             .expect("create post");
 
-        let html = render_dashboard_forum_tab(&state, Some(post_id));
+        let html = render_dashboard_forum_tab(&state, Some(post_id), "user@test.local");
         assert!(html.contains("Ask a question"));
         assert!(html.contains("Best brush for longhair?"));
         assert!(html.contains(&format!(r#"data-post-id="{post_id}""#)));
         assert!(html.contains("Post reply"));
+        assert!(html.contains(r#"aria-label="Delete question""#));
+        assert!(html.contains("forum-delete-minus"));
+
+        let other_view = render_dashboard_forum_tab(&state, Some(post_id), "other@test.local");
+        assert!(!other_view.contains(r#"aria-label="Delete question""#));
     }
 
     #[test]
@@ -5600,6 +5755,22 @@ mod tests {
     }
 }
 
+async fn serve_static_no_cache(filename: &'static str, content_type: &'static str) -> Response {
+    let path = storage::static_dir().join(filename);
+    match fs::read(&path).await {
+        Ok(body) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, content_type),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
     Router::new()
         .route("/", get(index_page))
@@ -5613,7 +5784,9 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
         .route("/home/forum/post", post(forum_post_submit))
+        .route("/home/forum/post/delete", post(forum_post_delete))
         .route("/home/forum/reply", post(forum_reply_submit))
+        .route("/home/forum/reply/delete", post(forum_reply_delete))
         .route("/home/forum/{id}", get(forum_thread_redirect))
         .route("/home/paw-points/checkout", post(paw_points_checkout))
         .route("/webhooks/stripe", post(stripe_webhook))
@@ -5636,6 +5809,22 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/signup.html", get(|| async { Redirect::permanent("/signup") }))
         .route("/contact.html", get(|| async { Redirect::permanent("/contact") }))
         .route("/feedback.html", get(|| async { Redirect::permanent("/feedback") }))
+        .route(
+            "/styles.css",
+            get(|| serve_static_no_cache("styles.css", "text/css; charset=utf-8")),
+        )
+        .route(
+            "/dashboard.js",
+            get(|| serve_static_no_cache("dashboard.js", "application/javascript; charset=utf-8")),
+        )
+        .route(
+            "/alerts.js",
+            get(|| serve_static_no_cache("alerts.js", "application/javascript; charset=utf-8")),
+        )
+        .route(
+            "/paw-cursor.js",
+            get(|| serve_static_no_cache("paw-cursor.js", "application/javascript; charset=utf-8")),
+        )
         .nest_service("/uploads", ServeDir::new(uploads_dir))
         .nest_service("/images", ServeDir::new(storage::static_dir().join("images")))
         .fallback_service(ServeDir::new(storage::static_dir()))

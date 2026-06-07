@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#fac8dd" />
     <title>WhiskerWatch — My Home</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -27,10 +28,10 @@
       {{STATUS_BLOCK}}
 
       <div class="dashboard-stats">
-        <div class="stat-chip">
+        <button type="button" class="stat-chip stat-chip-button paw-points-trigger" aria-label="View paw points">
           <span class="stat-label">Paw Points</span>
           <span class="stat-value">{{PAW_POINTS}}</span>
-        </div>
+        </button>
         <button type="button" class="stat-chip stat-chip-button parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
           <span class="stat-label">Parent Level</span>
           <span class="stat-value">Level {{PARENT_LEVEL}}</span>
@@ -178,6 +179,8 @@
     {{PARENT_LEVEL_BREAKDOWN_MODAL}}
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
+    <script src="/paw-cursor.js"></script>
+    <script src="/alerts.js"></script>
     <script src="/dashboard.js"></script>
     <script src="/cinder-pet.js"></script>
   </body>

@@ -54,12 +54,12 @@
 
   const params = new URLSearchParams(window.location.search);
 
-  function showTaskCompleteToast() {
+  function showStatusToast(message) {
     const toast = document.createElement("div");
     toast.className = "task-complete-toast";
     toast.setAttribute("role", "status");
     toast.setAttribute("aria-live", "polite");
-    toast.textContent = "Task completed! Paw Points and XP added.";
+    toast.textContent = message;
     document.body.appendChild(toast);
 
     requestAnimationFrame(() => {
@@ -71,6 +71,10 @@
       toast.classList.remove("is-visible");
       window.setTimeout(() => toast.remove(), 300);
     }, 5000);
+  }
+
+  function showTaskCompleteToast() {
+    showStatusToast("Task completed! Paw Points and XP added.");
   }
 
   const requestedTab = params.get("tab");
@@ -439,6 +443,8 @@
   const vaccinesUnknownCheckbox = document.getElementById("pet_vaccines_unknown");
   const vaccineUnknownAlert = document.getElementById("vaccine-unknown-alert");
   const vaccineHistoryFieldset = document.querySelector(".vaccine-history-fieldset");
+  const vaccineRows = document.getElementById("vaccine-rows");
+  const addVaccineRowBtn = document.getElementById("add-vaccine-row");
 
   function syncVaccinesUnknownField() {
     if (!vaccinesUnknownCheckbox) {
@@ -581,6 +587,19 @@
     }
   }
 
+  function closeOnboardingModal() {
+    if (!onboardingModal) {
+      return;
+    }
+    onboardingModal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  function skipPetSetupForNow() {
+    sessionStorage.setItem(petSetupPromptStorageKey, "1");
+    closeOnboardingModal();
+  }
+
   function maybePromptPetSetup() {
     if (document.body.dataset.needsPetSetup !== "true") {
       return;
@@ -633,6 +652,26 @@
     maybePromptPetSetup();
   }
 
+  const onboardingSkip = document.getElementById("onboarding-skip");
+  if (onboardingSkip) {
+    onboardingSkip.addEventListener("click", skipPetSetupForNow);
+  }
+
+  if (onboardingModal) {
+    onboardingModal.addEventListener("click", (event) => {
+      if (event.target === onboardingModal) {
+        skipPetSetupForNow();
+      }
+    });
+  }
+
+  const pawPointsTriggers = document.querySelectorAll(".paw-points-trigger");
+  pawPointsTriggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      showTab("points");
+    });
+  });
+
   const parentLevelModal = document.getElementById("parent-level-modal");
   const parentLevelClose = document.getElementById("parent-level-close");
   const parentLevelTriggers = document.querySelectorAll(".parent-level-trigger");
@@ -680,7 +719,14 @@
   }
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && parentLevelModal && !parentLevelModal.hidden) {
+    if (event.key !== "Escape") {
+      return;
+    }
+    if (onboardingModal && !onboardingModal.hidden) {
+      skipPetSetupForNow();
+      return;
+    }
+    if (parentLevelModal && !parentLevelModal.hidden) {
       closeParentLevelModal();
     }
   });

@@ -1,4 +1,5 @@
 :root {
+  --paw-cursor: url("/images/paw-cursor.png") 33 50, auto;
   --pink-bg: #fac8dd;
   --pink-card: #f2b8d4;
   --pink-surface: rgba(255, 205, 225, 0.52);
@@ -33,6 +34,7 @@ body {
   font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
   background: var(--pink-bg);
   color: var(--ink);
+  cursor: var(--paw-cursor);
 }
 
 a[href],
@@ -47,7 +49,54 @@ summary,
 .dashboard-tab,
 .admin-logout-btn,
 .password-toggle {
-  cursor: pointer;
+  cursor: var(--paw-cursor);
+}
+
+.paw-tap-pop {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  pointer-events: none;
+  z-index: 10000;
+  background: url("/images/paw-cursor.png") center / contain no-repeat;
+  transform: translate(-50%, -50%) scale(0.55);
+  opacity: 0.95;
+  animation: paw-tap-pop 0.55s ease-out forwards;
+}
+
+@keyframes paw-tap-pop {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+  35% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.12);
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  body,
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  summary,
+  [role="button"],
+  .home-download-btn,
+  .dashboard-tab,
+  .admin-logout-btn,
+  .password-toggle {
+    cursor: auto;
+  }
 }
 
 html:has(.dashboard-body) {
@@ -714,8 +763,20 @@ html:has(.homepage) {
 .auth-success {
   min-height: 1.2rem;
   margin: 0 0 0.6rem;
-  color: #2f6b3f;
+  color: var(--pink-dark);
   font-weight: 700;
+}
+
+.status-flash {
+  transition: opacity 0.3s ease, max-height 0.3s ease, margin 0.3s ease;
+}
+
+.status-flash-hiding {
+  opacity: 0;
+  max-height: 0;
+  margin: 0 !important;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .task-complete-toast {
@@ -1131,7 +1192,6 @@ footer p {
   min-height: -webkit-fill-available;
   min-height: 100dvh;
   min-height: 100svh;
-  padding-top: env(safe-area-inset-top, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
@@ -1149,10 +1209,26 @@ footer p {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
-  background: rgba(240, 168, 200, 0.96);
-  backdrop-filter: blur(10px);
+  padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+  padding-right: max(2rem, env(safe-area-inset-right, 0px));
+  padding-bottom: 1rem;
+  padding-left: max(2rem, env(safe-area-inset-left, 0px));
+  background: #fac8dd;
+  backdrop-filter: none;
   border-bottom: 2px solid rgba(80, 40, 60, 0.12);
+}
+
+.homepage-topbar::before,
+.dashboard-topbar::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: #fac8dd;
+  z-index: 11;
+  pointer-events: none;
 }
 
 .dashboard-greeting {
@@ -1551,6 +1627,7 @@ footer p {
   transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
+.stat-chip-button.paw-points-trigger .stat-value,
 .stat-chip-button.parent-level-trigger .stat-value,
 .parent-level-trigger .stat-value {
   color: #b85a82;
@@ -2042,8 +2119,17 @@ footer p {
   cursor: pointer;
   padding: 0.9rem 1rem;
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.forum-thread-summary-text {
+  display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .forum-thread-summary::-webkit-details-marker {
@@ -2061,6 +2147,58 @@ footer p {
   font-size: 0.85rem;
   color: var(--muted);
   margin: 0;
+}
+
+.forum-reply-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.forum-delete-form {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.forum-delete-btn {
+  border: 1px solid rgba(120, 40, 60, 0.28);
+  background: rgba(255, 235, 242, 0.9);
+  color: #6b3048;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.forum-delete-btn:hover {
+  background: #f5c4d8;
+}
+
+.forum-delete-form-question {
+  margin-top: 0.1rem;
+}
+
+.forum-delete-minus {
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 1px solid rgba(120, 40, 60, 0.28);
+  background: rgba(255, 235, 242, 0.9);
+  color: #6b3048;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 1.15rem;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.forum-delete-minus:hover {
+  background: #f5c4d8;
 }
 
 .forum-thread-body {
@@ -2125,7 +2263,10 @@ footer p {
   .dashboard-topbar {
     flex-direction: column;
     gap: 0.7rem;
-    padding: 1rem 1.2rem;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+    padding-right: max(1.2rem, env(safe-area-inset-right, 0px));
+    padding-bottom: 1rem;
+    padding-left: max(1.2rem, env(safe-area-inset-left, 0px));
   }
 
   .dashboard-nav {
@@ -2167,7 +2308,7 @@ footer p {
     grid-template-columns: 1fr;
   }
 
-  .topbar {
+  .topbar:not(.homepage-topbar) {
     flex-direction: column;
     gap: 0.8rem;
     padding: 1rem 1.2rem;
@@ -2323,6 +2464,32 @@ body.modal-open {
 .onboarding-intro {
   margin: 0 0 1rem;
   color: var(--muted);
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+}
+
+.onboarding-skip-btn {
+  border: none;
+  background: transparent;
+  color: var(--pink-dark);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: var(--paw-cursor);
+  padding: 0.25rem 0.5rem;
+}
+
+.onboarding-skip-btn:hover,
+.onboarding-skip-btn:focus-visible {
+  color: var(--pink-accent);
 }
 
 .onboarding-form textarea {
