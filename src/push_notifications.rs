@@ -5,6 +5,7 @@ use std::io::Cursor;
 use crate::UserProfile;
 
 pub const DEFAULT_CHECKIN_MINUTES: u16 = 9 * 60;
+pub const MAX_DAILY_CHECKINS: usize = 5;
 const VET_ALERT_MINUTES: u16 = 10 * 60;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -17,8 +18,11 @@ pub struct NotificationPrefs {
     pub vet_alerts: bool,
     #[serde(default = "default_pref_true")]
     pub daily_checkin: bool,
+    /// Legacy single time — migrated into `daily_checkin_times` on load.
     #[serde(default = "default_checkin_minutes")]
     pub daily_checkin_minutes: u16,
+    #[serde(default = "default_checkin_times")]
+    pub daily_checkin_times: Vec<u16>,
 }
 
 fn default_pref_true() -> bool {
@@ -29,6 +33,33 @@ fn default_checkin_minutes() -> u16 {
     DEFAULT_CHECKIN_MINUTES
 }
 
+fn default_checkin_times() -> Vec<u16> {
+    vec![DEFAULT_CHECKIN_MINUTES]
+}
+
+pub fn normalize_notification_prefs(prefs: &mut NotificationPrefs) {
+    if prefs.daily_checkin_times.is_empty() && prefs.daily_checkin_minutes > 0 {
+        prefs.daily_checkin_times.push(prefs.daily_checkin_minutes);
+    }
+    if prefs.daily_checkin_times.is_empty() {
+        prefs.daily_checkin_times = default_checkin_times();
+    }
+    prefs.daily_checkin_times.sort_unstable();
+    prefs.daily_checkin_times.dedup();
+    prefs.daily_checkin_times.truncate(MAX_DAILY_CHECKINS);
+    prefs.daily_checkin_minutes = prefs
+        .daily_checkin_times
+        .first()
+        .copied()
+        .unwrap_or(DEFAULT_CHECKIN_MINUTES);
+}
+
+pub fn effective_checkin_times(prefs: &NotificationPrefs) -> Vec<u16> {
+    let mut prefs = prefs.clone();
+    normalize_notification_prefs(&mut prefs);
+    prefs.daily_checkin_times
+}
+
 impl Default for NotificationPrefs {
     fn default() -> Self {
         Self {
@@ -37,6 +68,7 @@ impl Default for NotificationPrefs {
             vet_alerts: true,
             daily_checkin: true,
             daily_checkin_minutes: DEFAULT_CHECKIN_MINUTES,
+            daily_checkin_times: default_checkin_times(),
         }
     }
 }
@@ -81,7 +113,8 @@ pub struct NotificationPrefsForm {
     pub vet_alerts: String,
     #[serde(default)]
     pub daily_checkin: String,
-    pub daily_checkin_minutes: String,
+    #[serde(default)]
+    pub daily_checkin_times: Vec<String>,
 }
 
 pub fn push_configured() -> bool {
@@ -150,9 +183,7 @@ fn any_daily_task_completed_today(profile: &UserProfile, today: NaiveDate) -> bo
             && task
                 .due_year
                 .is_some_and(|year| year == today.year() as u32)
-            && task
-                .due_month
-                .is_some_and(|month| month == today.month())
+            && task.due_month.is_some_and(|month| month == today.month())
             && task.due_day.is_some_and(|day| day == today.day())
     })
 }
@@ -206,10 +237,7 @@ pub fn pending_notifications_for_profile(profile: &UserProfile) -> Vec<PendingNo
     }
 
     if profile.notification_prefs.vet_alerts
-        && crate::entitlements::can_access_health_records(
-            profile.premium_unlocked,
-            &profile.email,
-        )
+        && crate::entitlements::can_access_health_records(profile.premium_unlocked, &profile.email)
         && crate::needs_vet_appointment_asap(profile, today)
         && minutes_match_target(now_minutes, VET_ALERT_MINUTES)
     {
@@ -218,24 +246,27 @@ pub fn pending_notifications_for_profile(profile: &UserProfile) -> Vec<PendingNo
             pending.push(PendingNotification {
                 tag,
                 title: "Vet visit reminder".to_string(),
-                body: format!(
-                    "{pet} may need a vet checkup soon. Log a visit in your Health tab."
-                ),
+                body: format!("{pet} may need a vet checkup soon. Log a visit in your Health tab."),
                 url: "/home?tab=health".to_string(),
             });
         }
     }
 
-    if profile.notification_prefs.daily_checkin
-        && minutes_match_target(now_minutes, profile.notification_prefs.daily_checkin_minutes)
-        && !any_daily_task_completed_today(profile, today)
+    if profile.notification_prefs.daily_checkin && !any_daily_task_completed_today(profile, today)
     {
-        let tag = format!("daily:checkin:{}", today_key());
-        if !already_sent(profile, &tag) {
+        for minutes in effective_checkin_times(&profile.notification_prefs) {
+            if !minutes_match_target(now_minutes, minutes) {
+                continue;
+            }
+            let tag = format!("daily:checkin:{minutes}:{}", today_key());
+            if already_sent(profile, &tag) {
+                continue;
+            }
             pending.push(PendingNotification {
                 tag,
-                title: format!("Good morning! {pet} is waiting"),
-                body: "Complete a care task today to keep your streak and earn paw points.".to_string(),
+                title: format!("Check in on {pet}"),
+                body: "Complete a care task today to keep your streak and earn paw points."
+                    .to_string(),
                 url: "/home?tab=tasks".to_string(),
             });
         }
@@ -309,10 +340,7 @@ pub fn upcoming_reminders_for_profile(profile: &UserProfile) -> Vec<ScheduledRem
     }
 
     if profile.notification_prefs.vet_alerts
-        && crate::entitlements::can_access_health_records(
-            profile.premium_unlocked,
-            &profile.email,
-        )
+        && crate::entitlements::can_access_health_records(profile.premium_unlocked, &profile.email)
         && crate::needs_vet_appointment_asap(profile, today)
     {
         let tag = format!("vet:alert:{}", today_key());
@@ -326,18 +354,18 @@ pub fn upcoming_reminders_for_profile(profile: &UserProfile) -> Vec<ScheduledRem
         );
     }
 
-    if profile.notification_prefs.daily_checkin
-        && !any_daily_task_completed_today(profile, today)
-    {
-        let tag = format!("daily:checkin:{}", today_key());
-        push_one(
-            &mut reminders,
-            profile.notification_prefs.daily_checkin_minutes,
-            &tag,
-            format!("Good morning! {pet} is waiting"),
-            "Complete a care task today to keep your streak and earn paw points.".to_string(),
-            "/home?tab=tasks",
-        );
+    if profile.notification_prefs.daily_checkin && !any_daily_task_completed_today(profile, today) {
+        for minutes in effective_checkin_times(&profile.notification_prefs) {
+            let tag = format!("daily:checkin:{minutes}:{}", today_key());
+            push_one(
+                &mut reminders,
+                minutes,
+                &tag,
+                format!("Check in on {pet}"),
+                "Complete a care task today to keep your streak and earn paw points.".to_string(),
+                "/home?tab=tasks",
+            );
+        }
     }
 
     reminders.sort_by(|left, right| left.at.cmp(&right.at));
@@ -355,8 +383,10 @@ pub fn render_account_notifications_section(profile: &UserProfile) -> String {
     let enabled = checkbox(profile.notification_prefs.enabled);
     let task_reminders = checkbox(profile.notification_prefs.task_reminders);
     let vet_alerts = checkbox(profile.notification_prefs.vet_alerts);
-    let daily_checkin = checkbox(profile.notification_prefs.daily_checkin);
-    let checkin_time = format_time_value(profile.notification_prefs.daily_checkin_minutes);
+    let mut prefs = profile.notification_prefs.clone();
+    normalize_notification_prefs(&mut prefs);
+    let daily_checkin = checkbox(prefs.daily_checkin);
+    let checkin_rows = render_checkin_time_rows(&prefs.daily_checkin_times);
 
     format!(
         r##"<article class="dashboard-card push-notifications-card" id="push-notifications-card">
@@ -370,9 +400,10 @@ pub fn render_account_notifications_section(profile: &UserProfile) -> String {
     <label class="checkbox-pill"><input type="checkbox" name="enabled" value="on"{enabled} /> Send notifications</label>
     <label class="checkbox-pill"><input type="checkbox" name="task_reminders" value="on"{task_reminders} /> Task reminders at scheduled times</label>
     <label class="checkbox-pill"><input type="checkbox" name="vet_alerts" value="on"{vet_alerts} /> Vet appointment alerts (WhiskerWatch Plus)</label>
-    <label class="checkbox-pill"><input type="checkbox" name="daily_checkin" value="on"{daily_checkin} /> Daily morning check-in</label>
-    <label for="daily_checkin_minutes">Daily check-in time</label>
-    <input id="daily_checkin_minutes" name="daily_checkin_minutes" type="time" value="{checkin_time}" />
+    <label class="checkbox-pill"><input type="checkbox" name="daily_checkin" value="on"{daily_checkin} /> Daily check-ins</label>
+    <p class="field-hint checkin-times-hint">Add up to {max_checkins} reminder times per day. Each nudges you if no care task is done yet.</p>
+    <div class="checkin-times-list" id="checkin-times-list">{checkin_rows}</div>
+    <button type="button" class="download-btn checkin-time-add" id="checkin-time-add">Add check-in time</button>
     <button type="submit" class="download-btn login-submit">Save notification settings</button>
   </form>
 </article>"##,
@@ -381,7 +412,32 @@ pub fn render_account_notifications_section(profile: &UserProfile) -> String {
         task_reminders = task_reminders,
         vet_alerts = vet_alerts,
         daily_checkin = daily_checkin,
-        checkin_time = checkin_time,
+        checkin_rows = checkin_rows,
+        max_checkins = MAX_DAILY_CHECKINS,
+    )
+}
+
+fn render_checkin_time_rows(times: &[u16]) -> String {
+    let rows: Vec<String> = times
+        .iter()
+        .enumerate()
+        .map(|(index, minutes)| render_checkin_time_row(*minutes, index + 1))
+        .collect();
+    if rows.is_empty() {
+        return render_checkin_time_row(DEFAULT_CHECKIN_MINUTES, 1);
+    }
+    rows.join("")
+}
+
+fn render_checkin_time_row(minutes: u16, label_index: usize) -> String {
+    format!(
+        r#"<div class="checkin-time-row">
+  <label class="checkin-time-label" for="checkin-time-{label_index}">Check-in {label_index}</label>
+  <input id="checkin-time-{label_index}" name="daily_checkin_times" type="time" value="{time}" required />
+  <button type="button" class="checkin-time-remove onboarding-skip-btn">Remove</button>
+</div>"#,
+        label_index = label_index,
+        time = format_time_value(minutes),
     )
 }
 
@@ -411,18 +467,47 @@ pub fn parse_checkin_minutes_input(value: &str) -> Option<u16> {
     Some((hour as u16) * 60 + minute as u16)
 }
 
+pub fn parse_checkin_times_input(values: &[String]) -> Result<Vec<u16>, ()> {
+    let mut times = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Some(minutes) = parse_checkin_minutes_input(trimmed) else {
+            return Err(());
+        };
+        times.push(minutes);
+    }
+    if times.is_empty() {
+        times.push(DEFAULT_CHECKIN_MINUTES);
+    }
+    times.sort_unstable();
+    times.dedup();
+    if times.len() > MAX_DAILY_CHECKINS {
+        return Err(());
+    }
+    Ok(times)
+}
+
 pub fn apply_notification_prefs_form(
     profile: &mut UserProfile,
     form: &NotificationPrefsForm,
 ) -> Result<(), ()> {
-    let checkin = parse_checkin_minutes_input(&form.daily_checkin_minutes).ok_or(())?;
+    let checkin_times = parse_checkin_times_input(&form.daily_checkin_times)?;
+    let first = checkin_times
+        .first()
+        .copied()
+        .unwrap_or(DEFAULT_CHECKIN_MINUTES);
     profile.notification_prefs = NotificationPrefs {
         enabled: form.enabled == "on",
         task_reminders: form.task_reminders == "on",
         vet_alerts: form.vet_alerts == "on",
         daily_checkin: form.daily_checkin == "on",
-        daily_checkin_minutes: checkin,
+        daily_checkin_minutes: first,
+        daily_checkin_times: checkin_times,
     };
+    normalize_notification_prefs(&mut profile.notification_prefs);
     Ok(())
 }
 
@@ -442,11 +527,9 @@ pub async fn send_web_push(
     let private_key = std::env::var("VAPID_PRIVATE_KEY").map_err(|_| "missing private key")?;
     let subscription = web_push::SubscriptionInfo::new(endpoint, p256dh, auth);
 
-    let mut sig_builder = VapidSignatureBuilder::from_pem(
-        Cursor::new(private_key.as_bytes()),
-        &subscription,
-    )
-    .map_err(|e| format!("{e:?}"))?;
+    let mut sig_builder =
+        VapidSignatureBuilder::from_pem(Cursor::new(private_key.as_bytes()), &subscription)
+            .map_err(|e| format!("{e:?}"))?;
     sig_builder.add_claim("sub", vapid_subject());
     let vapid_signature = sig_builder.build().map_err(|e| format!("{e:?}"))?;
 
@@ -533,10 +616,7 @@ async fn dispatch_all(state: &crate::AppState) -> Result<(), String> {
                             .storage
                             .delete_push_subscription(&subscription.endpoint);
                     }
-                    eprintln!(
-                        "push to {} failed: {error}",
-                        subscription.email
-                    );
+                    eprintln!("push to {} failed: {error}", subscription.email);
                 }
             }
         }
@@ -557,6 +637,7 @@ mod tests {
     #[test]
     fn pending_task_reminder_fires_at_task_time() {
         let mut profile = default_profile("user@example.com");
+        profile.notification_prefs.daily_checkin = false;
         profile.pet_name = "Mochi".to_string();
         profile.pet_breed = "Persian".to_string();
         profile.pet_age_years = Some(2);
@@ -571,6 +652,7 @@ mod tests {
             due_year: Some(Local::now().year() as u32),
             time_minutes: current_minutes(),
             reward: 10,
+            pet_id: crate::PRIMARY_PET_ID.to_string(),
         });
 
         let pending = pending_notifications_for_profile(&profile);
@@ -595,6 +677,7 @@ mod tests {
             due_year: Some(Local::now().year() as u32),
             time_minutes: current_minutes(),
             reward: 10,
+            pet_id: crate::PRIMARY_PET_ID.to_string(),
         });
 
         assert!(pending_notifications_for_profile(&profile).is_empty());
@@ -604,5 +687,37 @@ mod tests {
     fn parse_checkin_minutes_from_time_input() {
         assert_eq!(parse_checkin_minutes_input("09:30"), Some(570));
         assert!(parse_checkin_minutes_input("25:00").is_none());
+    }
+
+    #[test]
+    fn parse_multiple_checkin_times_dedupes_and_sorts() {
+        let times = parse_checkin_times_input(&[
+            "18:00".to_string(),
+            "09:00".to_string(),
+            "09:00".to_string(),
+        ])
+        .expect("times");
+        assert_eq!(times, vec![9 * 60, 18 * 60]);
+    }
+
+    #[test]
+    fn normalize_migrates_legacy_single_checkin_minutes() {
+        let mut prefs = NotificationPrefs {
+            daily_checkin_times: vec![],
+            daily_checkin_minutes: 17 * 60 + 30,
+            ..NotificationPrefs::default()
+        };
+        normalize_notification_prefs(&mut prefs);
+        assert_eq!(prefs.daily_checkin_times, vec![17 * 60 + 30]);
+    }
+
+    #[test]
+    fn account_notifications_section_renders_multiple_checkin_rows() {
+        let mut profile = default_profile("user@example.com");
+        profile.notification_prefs.daily_checkin_times = vec![8 * 60, 20 * 60];
+        let html = render_account_notifications_section(&profile);
+        assert!(html.contains("value=\"08:00\""));
+        assert!(html.contains("value=\"20:00\""));
+        assert!(html.contains("checkin-time-add"));
     }
 }

@@ -3358,6 +3358,68 @@ html:has(.cat-home-body) {
   box-shadow: var(--shadow-xs);
 }
 
+.task-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.task-item-actions form {
+  margin: 0;
+}
+
+.task-delete-btn {
+  border: 1.5px solid rgba(0, 0, 0, 0.14);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  cursor: var(--paw-cursor);
+}
+
+.task-delete-btn:hover {
+  color: #8b2f2f;
+  border-color: rgba(139, 47, 47, 0.35);
+  background: rgba(139, 47, 47, 0.06);
+}
+
+.task-add-row {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+}
+
+.task-add-form {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  margin: 0 0 0.35rem;
+}
+
+.task-add-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  border: 1.5px solid rgba(0, 0, 0, 0.14);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  background: #fff;
+}
+
+.task-add-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.task-add-hint {
+  margin: 0;
+}
+
 .task-item.completed {
   opacity: 0.72;
 }
@@ -4599,6 +4661,11 @@ body.modal-open .dashboard-shell {
   margin: 1.2rem 0 1.5rem;
 }
 
+.breed-catalog > .breed-category:first-child,
+.public-breed-catalog > .breed-category:first-child {
+  padding-top: 2rem;
+}
+
 .breed-category h2 {
   margin: 0 0 0.75rem;
   font-size: 1.2rem;
@@ -4744,6 +4811,11 @@ body.modal-open .dashboard-shell {
   margin: 0;
 }
 
+.breed-guide-card > .field-hint {
+  margin-top: 1rem;
+  margin-bottom: 0.75rem;
+}
+
 .breed-guide-badge {
   display: inline-block;
   padding: 0.2rem 0.55rem;
@@ -4775,7 +4847,29 @@ body.modal-open .dashboard-shell {
 }
 
 .breed-guide-preview-link {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.7rem 1.25rem;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 182, 212, 0.85);
+  background: linear-gradient(180deg, #fff5fa 0%, #ffe8f3 100%);
+  color: var(--pink-dark);
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  box-shadow: 0 3px 0 rgba(208, 112, 152, 0.14), 0 6px 14px rgba(255, 182, 212, 0.22);
+  transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.breed-guide-preview-link:hover,
+.breed-guide-preview-link:focus-visible {
+  background: linear-gradient(180deg, #ffeef7 0%, #ffd9eb 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(208, 112, 152, 0.12), 0 10px 18px rgba(255, 182, 212, 0.28);
 }
 
 .public-breed-page-body {
@@ -4871,13 +4965,50 @@ body.modal-open .dashboard-shell {
 }
 
 .health-breed-guides-link {
-  margin: 0;
+  margin: 0.75rem 0 0;
   grid-column: 1 / -1;
+  text-align: center;
+}
+
+.health-breed-guides-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.75rem 1.45rem;
+  border-radius: 999px;
+  border: 2px solid rgba(208, 112, 152, 0.35);
+  background: linear-gradient(180deg, #fff8fc 0%, #ffe0f0 55%, #ffd4ea 100%);
+  color: var(--pink-dark);
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  box-shadow: 0 3px 0 rgba(208, 112, 152, 0.16), 0 8px 16px rgba(255, 182, 212, 0.24);
+  transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.health-breed-guides-btn:hover,
+.health-breed-guides-btn:focus-visible {
+  background: linear-gradient(180deg, #fff0f8 0%, #ffd6eb 55%, #ffc4e2 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(208, 112, 152, 0.14), 0 12px 20px rgba(255, 182, 212, 0.3);
+}
+
+.breed-shop-intro {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
 }
 
 .breed-shop-shell {
   display: grid;
   gap: 2rem;
+  padding-top: 2.25rem;
+}
+
+.breed-shop-shell > .breed-category:first-child {
+  padding-top: 1rem;
 }
 
 .breed-shop-grid {
@@ -4925,6 +5056,36 @@ body.modal-open .dashboard-shell {
 .breed-guide-back-wrap {
   margin-top: 1.5rem;
   text-align: center;
+}
+
+.breed-guide-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.7rem 1.35rem;
+  border-radius: 999px;
+  border: 2px solid rgba(208, 112, 152, 0.3);
+  background: linear-gradient(180deg, #fff9fc 0%, #ffecf5 100%);
+  color: var(--pink-dark);
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  box-shadow: 0 3px 0 rgba(208, 112, 152, 0.12), 0 6px 14px rgba(255, 182, 212, 0.2);
+  transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.breed-guide-back-btn:hover,
+.breed-guide-back-btn:focus-visible {
+  background: linear-gradient(180deg, #fff3f9 0%, #ffe3f0 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 0 rgba(208, 112, 152, 0.1), 0 10px 18px rgba(255, 182, 212, 0.26);
+}
+
+.breed-guide-paywall .breed-guide-back-wrap {
+  margin-top: 1rem;
 }
 
 .premium-upsell-card {
@@ -5005,6 +5166,117 @@ body.modal-open .dashboard-shell {
   border-radius: 0.65rem;
   background: rgba(255, 248, 252, 0.9);
   border: 1px solid rgba(208, 112, 152, 0.2);
+}
+
+.add-cat-action {
+  margin: 0.75rem 0 0;
+}
+
+.premium-multi-pet-card .add-cat-action .download-btn {
+  width: auto;
+}
+
+.add-cat-modal .onboarding-actions {
+  margin-top: 1rem;
+}
+
+.pet-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.pet-switcher-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.pet-switcher-tab {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(208, 112, 152, 0.35);
+  background: rgba(255, 248, 252, 0.85);
+  color: var(--text);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+
+.pet-switcher-tab-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pet-switcher-nav {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 1px solid rgba(208, 112, 152, 0.35);
+  background: #fff;
+  color: var(--accent);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pet-switcher-count {
+  width: 100%;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.shared-pet-banner {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  background: rgba(208, 112, 152, 0.1);
+  border: 1px solid rgba(208, 112, 152, 0.25);
+  font-size: 0.9rem;
+}
+
+.friends-sharing-card .friends-subhead {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.friend-list,
+.friend-request-list,
+.share-request-list,
+.shared-pet-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.friend-list-item,
+.friend-request-item,
+.share-request-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(208, 112, 152, 0.15);
+}
+
+.inline-action-form {
+  display: inline;
+  margin: 0;
+}
+
+.add-friend-form,
+.share-cat-form {
+  margin-top: 1rem;
+}
+
+.task-pet-label {
+  margin: 0 0 0.5rem;
 }
 
 .additional-pet-form {
@@ -5463,9 +5735,175 @@ body.modal-open .dashboard-shell {
   }
 
   .health-notes-card,
-  .health-vet-visit-card {
+  .health-vet-visit-card,
+  .symptom-checker-card {
     grid-column: 1 / -1;
   }
+}
+
+.symptom-disclaimer {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: #fff4f8;
+  border: 1.5px solid rgba(184, 90, 130, 0.35);
+  color: var(--pink-dark);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.symptom-disclaimer strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.95rem;
+}
+
+.symptom-quick-picks {
+  margin: 0.85rem 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: var(--pink-surface-soft);
+}
+
+.symptom-quick-picks legend {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 0 0.25rem;
+}
+
+.symptom-quick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.symptom-quick-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: var(--pink-input);
+  border: 1px solid rgba(184, 90, 130, 0.25);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: var(--paw-cursor);
+}
+
+.symptom-quick-option input {
+  accent-color: var(--pink-accent);
+}
+
+.symptom-checker-results {
+  margin-top: 1.1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.symptom-urgency-banner {
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  box-shadow: var(--shadow-xs);
+}
+
+.symptom-urgency-banner h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.02rem;
+}
+
+.symptom-urgency-banner p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.symptom-urgency-emergency {
+  background: #ffe8ec;
+  border-color: #d64056;
+  color: #7a1020;
+}
+
+.symptom-urgency-today {
+  background: #fff0e8;
+  border-color: #d97940;
+  color: #7a3b12;
+}
+
+.symptom-urgency-soon {
+  background: #fff8e8;
+  border-color: #c9a030;
+  color: #6a4f08;
+}
+
+.symptom-urgency-monitor {
+  background: #eef8ff;
+  border-color: #5a9fd4;
+  color: #1f4f73;
+}
+
+.symptom-urgency-wellness {
+  background: var(--pink-surface-soft);
+  border-color: rgba(184, 90, 130, 0.35);
+  color: var(--pink-dark);
+}
+
+.symptom-results-section {
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: var(--pink-input);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.symptom-results-section h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+  color: var(--pink-dark);
+}
+
+.symptom-results-section ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.symptom-results-section p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.symptom-possibility-card {
+  padding: 0.8rem 0.95rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(184, 90, 130, 0.2);
+}
+
+.symptom-possibility-card h5 {
+  margin: 0 0 0.35rem;
+  font-size: 0.94rem;
+  color: var(--pink-dark);
+}
+
+.symptom-possibility-card p {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.symptom-results-disclaimer {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.symptom-checker-submit[disabled] {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .health-vet-disclosure {
@@ -5929,6 +6367,44 @@ body.modal-open .dashboard-shell {
 
 .push-notifications-card .notification-prefs-form {
   margin-top: 0.75rem;
+}
+
+.checkin-times-hint {
+  margin: 0.35rem 0 0.5rem;
+}
+
+.checkin-times-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.checkin-time-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr auto;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+.checkin-time-label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.checkin-time-row input[type="time"] {
+  width: 100%;
+  max-width: 10rem;
+}
+
+.checkin-time-remove {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+}
+
+.checkin-time-add {
+  margin-bottom: 0.75rem;
+  width: auto;
 }
 
 .onboarding-emails-card .onboarding-email-prefs-form {

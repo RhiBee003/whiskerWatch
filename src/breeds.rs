@@ -213,7 +213,7 @@ fn escape_html(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub fn render_catalog_html() -> String {
+pub fn render_catalog_html(return_params: &str) -> String {
     CATALOG
         .iter()
         .map(|category| {
@@ -223,9 +223,10 @@ pub fn render_catalog_html() -> String {
                 .map(|breed| {
                     let encoded = urlencoding::encode(breed.name);
                     format!(
-                        r#"<a class="breed-option" href="/home?setup=pet&amp;breed={encoded}"><span class="breed-option-name">{}</span><span class="breed-option-desc">{}</span><span class="breed-option-premium">Premium care guide</span></a>"#,
+                        r#"<a class="breed-option" href="/home?{return_params}&amp;breed={encoded}"><span class="breed-option-name">{}</span><span class="breed-option-desc">{}</span><span class="breed-option-premium">Premium care guide</span></a>"#,
                         escape_html(breed.name),
                         escape_html(breed.description),
+                        return_params = return_params,
                     )
                 })
                 .collect::<String>();

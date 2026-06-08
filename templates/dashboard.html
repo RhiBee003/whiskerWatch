@@ -43,7 +43,6 @@
       <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true" aria-label="My Pet"><span class="dashboard-tab-label-long" aria-hidden="true">My Pet</span><span class="dashboard-tab-label-short" aria-hidden="true">Pet</span></button>
         <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false" aria-label="Paw Points"><span class="dashboard-tab-label-long" aria-hidden="true">Paw Points</span><span class="dashboard-tab-label-short" aria-hidden="true">Points</span></button>
-        <button type="button" class="dashboard-tab" data-tab="outfits" role="tab" aria-selected="false">Outfits</button>
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
@@ -57,6 +56,8 @@
             <div class="pet-showcase">
             {{PET_AVATAR}}
             <div class="pet-details">
+              {{PET_SWITCHER}}
+              {{SHARED_PET_BANNER}}
               <h1>{{PET_NAME}}</h1>
               <p class="pet-meta">{{PET_META}}</p>
               <p class="pet-outfit">Wearing: <strong>{{EQUIPPED_OUTFIT}}</strong></p>
@@ -96,14 +97,6 @@
           </article>
         </section>
 
-        <section id="panel-outfits" class="dashboard-panel" role="tabpanel" hidden>
-          <h1>Outfit Shop</h1>
-          <p class="panel-intro">Spend paw points on cute looks for {{PET_NAME}}.</p>
-          <div class="outfit-grid">
-            {{OUTFIT_CARDS}}
-          </div>
-        </section>
-
         <section id="panel-account" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Account</h1>
           <div class="account-grid">
@@ -127,6 +120,7 @@
             {{ACCOUNT_PASSWORD_SECTION}}
             {{ACCOUNT_PREMIUM_SECTION}}
             {{COMMUNITY_VISIBILITY_SECTION}}
+            {{FRIENDS_AND_SHARING_SECTION}}
             {{ACCOUNT_NOTIFICATIONS_SECTION}}
             {{ACCOUNT_ONBOARDING_EMAILS_SECTION}}
             <article class="dashboard-card">
@@ -147,6 +141,7 @@
           <ul class="task-list" id="tasks-panel-list">
             {{TASK_LIST}}
           </ul>
+          {{TASK_ADD_SECTION}}
         </section>
 
         <section id="panel-health" class="dashboard-panel" role="tabpanel" hidden>
@@ -197,6 +192,7 @@
     </div>
 
     {{ONBOARDING_MODAL}}
+    {{ADD_CAT_MODAL}}
     {{PET_VIDEO_MODAL}}
     {{ACCOUNT_PET_PHOTO_MODAL}}
     {{VET_FOLLOWUP_MODAL}}

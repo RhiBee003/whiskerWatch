@@ -16,6 +16,7 @@ pub struct PublicCatCard {
     pub care_streak_days: u32,
     pub pet_photo_url: Option<String>,
     pub equipped_outfit: String,
+    #[allow(dead_code)]
     pub breed_slug: String,
 }
 
@@ -123,7 +124,10 @@ fn escape_html_attr(value: &str) -> String {
 }
 
 pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
-    let photo = if let Some(url) = card.pet_photo_url.as_deref().filter(|value| !value.is_empty())
+    let photo = if let Some(url) = card
+        .pet_photo_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
     {
         format!(
             r#"<img class="community-cat-photo" src="{url}" alt="" loading="lazy" />"#,
@@ -197,11 +201,7 @@ pub fn render_breed_filter_options(selected_slug: &str, profile: &UserProfile) -
             if !seen.insert(slug.clone()) {
                 continue;
             }
-            let is_selected = if selected == slug {
-                " selected"
-            } else {
-                ""
-            };
+            let is_selected = if selected == slug { " selected" } else { "" };
             options.push(format!(
                 r#"<option value="{slug}"{is_selected}>{name}</option>"#,
                 slug = escape_html_attr(&slug),
@@ -213,11 +213,7 @@ pub fn render_breed_filter_options(selected_slug: &str, profile: &UserProfile) -
     if profile_has_pet(profile) {
         let mine = breed_slug_for_name(&profile.pet_breed);
         if seen.insert(mine.clone()) {
-            let is_selected = if selected == mine {
-                " selected"
-            } else {
-                ""
-            };
+            let is_selected = if selected == mine { " selected" } else { "" };
             options.push(format!(
                 r#"<option value="{slug}"{is_selected}>{name} (your breed)</option>"#,
                 slug = escape_html_attr(&mine),
@@ -250,10 +246,7 @@ pub fn render_cat_feed_section(
     } else {
         format!(
             r#"<div class="community-cat-grid">{cards}</div>"#,
-            cards = cards
-                .iter()
-                .map(render_cat_feed_card)
-                .collect::<String>(),
+            cards = cards.iter().map(render_cat_feed_card).collect::<String>(),
         )
     };
 
@@ -277,7 +270,11 @@ pub fn render_cat_feed_section(
 }
 
 pub fn render_account_visibility_section(profile: &UserProfile) -> String {
-    let checked = if profile.community_visible { " checked" } else { "" };
+    let checked = if profile.community_visible {
+        " checked"
+    } else {
+        ""
+    };
     let status = if profile.community_visible {
         "Your cat can appear in the community feed."
     } else {
@@ -303,7 +300,8 @@ pub fn render_account_visibility_section(profile: &UserProfile) -> String {
 
 pub fn render_breed_badge(breed_slug: &str) -> String {
     if breed_slug.trim().is_empty() {
-        return r#"<span class="forum-breed-badge forum-breed-badge-general">General</span>"#.to_string();
+        return r#"<span class="forum-breed-badge forum-breed-badge-general">General</span>"#
+            .to_string();
     }
 
     format!(

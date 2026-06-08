@@ -38,7 +38,8 @@ pub fn can_add_pet(
     additional_pet_count: usize,
 ) -> bool {
     has_premium(premium_unlocked, email)
-        && total_pet_count(has_primary_pet, additional_pet_count) < max_pets(premium_unlocked, email)
+        && total_pet_count(has_primary_pet, additional_pet_count)
+            < max_pets(premium_unlocked, email)
 }
 
 fn escape_html(text: &str) -> String {
@@ -54,31 +55,6 @@ pub fn render_premium_checkout_button(stripe_enabled: bool) -> String {
     }
 
     r#"<form action="/home/premium/checkout" method="post"><button type="submit" class="download-btn premium-upgrade-btn">Upgrade to WhiskerWatch Plus</button></form>"#.to_string()
-}
-
-pub fn render_health_tab_upsell(stripe_enabled: bool) -> String {
-    let checkout = render_premium_checkout_button(stripe_enabled);
-    format!(
-        r#"<p class="panel-intro">Your basic pet profile is free. Upgrade to unlock full health history, vet records, and multi-cat support.</p>
-<article class="dashboard-card premium-upsell-card premium-upsell-card-health">
-  <div class="premium-upsell-header">
-    <span class="premium-upsell-badge" aria-hidden="true">WhiskerWatch Plus</span>
-    <h2>Health &amp; vet records</h2>
-  </div>
-  <p class="field-hint">Premium includes vaccine history, vet visit logging, health notes, automated vet reminders on your calendar, and up to 3 cats.</p>
-  <ul class="premium-feature-list">
-    <li>Vaccine history &amp; visit notes</li>
-    <li>Vet appointment logging</li>
-    <li>Health conditions &amp; medications tracking</li>
-    <li>Calendar vet &amp; vaccine reminders</li>
-    <li>Add up to 3 cats</li>
-  </ul>
-  <p class="premium-price-line"><strong>{price}</strong> one-time · lifetime access</p>
-  <div class="premium-upsell-actions">{checkout}</div>
-</article>"#,
-        price = PREMIUM_PRICE_LABEL,
-        checkout = checkout,
-    )
 }
 
 pub fn render_health_records_upsell_compact(stripe_enabled: bool) -> String {
@@ -158,18 +134,15 @@ pub fn render_multi_pet_section(
     }
 
     let pet_count = total_pet_count(has_primary_pet, additional_pet_count);
-    let can_add = can_add_pet(premium_unlocked, email, has_primary_pet, additional_pet_count);
+    let can_add = can_add_pet(
+        premium_unlocked,
+        email,
+        has_primary_pet,
+        additional_pet_count,
+    );
 
-    let add_form = if can_add {
-        r#"<form class="login-form additional-pet-form" action="/home/pets/add" method="post">
-  <label for="additional_pet_name">Cat's name</label>
-  <input id="additional_pet_name" name="pet_name" type="text" required maxlength="40" />
-  <label for="additional_pet_breed">Breed</label>
-  <input id="additional_pet_breed" name="pet_breed" type="text" class="breed-picker-input" required readonly />
-  <label for="additional_pet_color">Color / markings</label>
-  <input id="additional_pet_color" name="pet_color" type="text" placeholder="e.g. tabby" />
-  <button type="submit" class="download-btn login-submit">Add cat</button>
-</form>"#
+    let add_action = if can_add {
+        r#"<p class="add-cat-action"><button type="button" class="download-btn add-cat-trigger">Add cat</button></p>"#
     } else {
         "<p class=\"field-hint\">You've reached the 3-cat limit on WhiskerWatch Plus.</p>"
     };
@@ -179,14 +152,52 @@ pub fn render_multi_pet_section(
   <h2>Your cats</h2>
   <p class="field-hint">{pet_count} of {max_pets} profiles · Primary: <strong>{primary}</strong></p>
   <div class="additional-pet-list">{additional_pets_html}</div>
-  {add_form}
+  {add_action}
 </article>"#,
         pet_count = pet_count,
         max_pets = MAX_PETS_PREMIUM,
         primary = escape_html(primary_pet_name),
         additional_pets_html = additional_pets_html,
-        add_form = add_form,
+        add_action = add_action,
     )
+}
+
+pub fn should_render_add_cat_modal(
+    premium_unlocked: bool,
+    email: &str,
+    has_primary_pet: bool,
+    additional_pet_count: usize,
+) -> bool {
+    has_primary_pet
+        && has_premium(premium_unlocked, email)
+        && can_add_pet(
+            premium_unlocked,
+            email,
+            has_primary_pet,
+            additional_pet_count,
+        )
+}
+
+pub fn render_add_cat_modal() -> String {
+    r#"<div class="onboarding-backdrop" id="add-cat-modal" role="dialog" aria-modal="true" aria-labelledby="add-cat-title" hidden>
+  <div class="onboarding-modal add-cat-modal">
+    <h2 id="add-cat-title">Add another cat</h2>
+    <p class="onboarding-intro">Add a household kitty to your WhiskerWatch Plus account.</p>
+    <form class="login-form additional-pet-form" action="/home/pets/add" method="post">
+      <label for="additional_pet_name">Cat's name</label>
+      <input id="additional_pet_name" name="pet_name" type="text" required maxlength="40" autocomplete="off" />
+      <label for="additional_pet_breed">Breed</label>
+      <input id="additional_pet_breed" name="pet_breed" type="text" class="breed-picker-input" placeholder="Tap to choose a breed" required readonly />
+      <label for="additional_pet_color">Color / markings</label>
+      <input id="additional_pet_color" name="pet_color" type="text" placeholder="e.g. tabby" />
+      <div class="onboarding-actions">
+        <button type="submit" class="download-btn login-submit">Save cat</button>
+        <button type="button" class="onboarding-skip-btn add-cat-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>"#
+        .to_string()
 }
 
 pub fn render_additional_pet_cards(pets: &[(String, String, String)]) -> String {

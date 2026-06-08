@@ -38,7 +38,250 @@ pub fn breed_slug(name: &str) -> String {
 
 pub fn user_owns_guide(owned: &[String], slug: &str) -> bool {
     let target = slug.trim().to_lowercase();
-    owned.iter().any(|entry| entry.trim().eq_ignore_ascii_case(&target))
+    owned
+        .iter()
+        .any(|entry| entry.trim().eq_ignore_ascii_case(&target))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreedGuideTaskTemplate {
+    pub key: &'static str,
+    pub title: String,
+    pub time_minutes: u16,
+    pub reward: u32,
+}
+
+pub fn breed_guide_task_id(slug: &str, key: &str) -> String {
+    format!("breed_guide_{slug}_{key}")
+}
+
+pub fn is_breed_guide_task_id(task_id: &str) -> bool {
+    task_id.starts_with("breed_guide_")
+}
+
+pub fn slug_from_breed_guide_task_id(task_id: &str) -> Option<String> {
+    let rest = task_id.strip_prefix("breed_guide_")?;
+    let split_at = rest.rfind('_')?;
+    if split_at == 0 {
+        return None;
+    }
+    Some(rest[..split_at].to_string())
+}
+
+pub fn task_templates_for_guide(guide: &BreedGuide) -> Vec<BreedGuideTaskTemplate> {
+    if let Some(tasks) = specialty_task_templates(&guide.slug, &guide.breed_name) {
+        return tasks;
+    }
+
+    match guide.category.as_str() {
+        "Long-Haired Breeds" => vec![
+            task_template(
+                "groom",
+                format!("Brush {} — daily coat care", guide.breed_name),
+                660,
+                18,
+            ),
+            task_template(
+                "coat_check",
+                format!("Check {} for mats & tangles", guide.breed_name),
+                1080,
+                15,
+            ),
+            task_template(
+                "enrichment",
+                format!("{} grooming & bonding time", guide.breed_name),
+                840,
+                15,
+            ),
+        ],
+        "Unique / Specialty Breeds" => vec![
+            task_template(
+                "groom",
+                format!("{} specialty coat & skin check", guide.breed_name),
+                690,
+                16,
+            ),
+            task_template(
+                "enrichment",
+                format!("{} enrichment & sensory play", guide.breed_name),
+                930,
+                20,
+            ),
+            task_template(
+                "health_check",
+                format!("Log {} breed health watch-outs", guide.breed_name),
+                1140,
+                12,
+            ),
+        ],
+        "Colorpoint Breeds (Siamese-derived)" => vec![
+            task_template(
+                "enrichment",
+                format!("Social play session with {}", guide.breed_name),
+                870,
+                20,
+            ),
+            task_template(
+                "groom",
+                format!("Coat & points check — {}", guide.breed_name),
+                660,
+                15,
+            ),
+            task_template(
+                "health_check",
+                format!("Note {} behavior & appetite", guide.breed_name),
+                1110,
+                12,
+            ),
+        ],
+        _ => vec![
+            task_template(
+                "enrichment",
+                format!("Breed enrichment play — {}", guide.breed_name),
+                900,
+                20,
+            ),
+            task_template(
+                "groom",
+                format!("Brush & nail check — {}", guide.breed_name),
+                780,
+                15,
+            ),
+            task_template(
+                "health_check",
+                format!("Review {} health watch-outs", guide.breed_name),
+                1170,
+                12,
+            ),
+        ],
+    }
+}
+
+pub fn wellness_exam_interval_months(guide: &BreedGuide) -> u32 {
+    if guide.category.contains("Unique")
+        || guide.breed_name == "Persian"
+        || guide.breed_name == "Maine Coon"
+        || guide.breed_name == "Scottish Fold"
+    {
+        6
+    } else {
+        12
+    }
+}
+
+fn task_template(key: &'static str, title: String, time_minutes: u16, reward: u32) -> BreedGuideTaskTemplate {
+    BreedGuideTaskTemplate {
+        key,
+        title,
+        time_minutes,
+        reward,
+    }
+}
+
+fn specialty_task_templates(slug: &str, breed_name: &str) -> Option<Vec<BreedGuideTaskTemplate>> {
+    match slug {
+        "sphynx" => Some(vec![
+            task_template(
+                "skin_wipe",
+                format!("Wipe {} skin folds & check oil", breed_name),
+                630,
+                16,
+            ),
+            task_template(
+                "warmth_check",
+                format!("{} warmth & bedding check", breed_name),
+                1080,
+                12,
+            ),
+            task_template(
+                "enrichment",
+                format!("{} gentle play & bonding", breed_name),
+                900,
+                18,
+            ),
+        ]),
+        "scottish-fold" => Some(vec![
+            task_template(
+                "ear_check",
+                format!("Clean {} ears & mobility check", breed_name),
+                690,
+                16,
+            ),
+            task_template(
+                "groom",
+                format!("Brush {} — coat & joints", breed_name),
+                960,
+                15,
+            ),
+            task_template(
+                "health_check",
+                format!("Log {} mobility notes", breed_name),
+                1140,
+                12,
+            ),
+        ]),
+        "bengal" | "savannah" | "chausie" => Some(vec![
+            task_template(
+                "enrichment",
+                format!("High-energy play — {}", breed_name),
+                870,
+                22,
+            ),
+            task_template(
+                "climb",
+                format!("{} climbing & puzzle feeder", breed_name),
+                1020,
+                18,
+            ),
+            task_template(
+                "health_check",
+                format!("Check {} stress & litter habits", breed_name),
+                1170,
+                12,
+            ),
+        ]),
+        "persian" | "himalayan" => Some(vec![
+            task_template(
+                "eye_clean",
+                format!("Clean {} eyes & face folds", breed_name),
+                630,
+                16,
+            ),
+            task_template(
+                "groom",
+                format!("Brush {} — daily coat care", breed_name),
+                660,
+                18,
+            ),
+            task_template(
+                "coat_check",
+                format!("Check {} for mats under coat", breed_name),
+                1080,
+                15,
+            ),
+        ]),
+        "siamese" | "balinese" | "oriental" => Some(vec![
+            task_template(
+                "enrichment",
+                format!("Interactive play with {}", breed_name),
+                870,
+                20,
+            ),
+            task_template(
+                "social",
+                format!("{} social time & chatter check", breed_name),
+                1050,
+                15,
+            ),
+            task_template(
+                "health_check",
+                format!("Note {} appetite & mood", breed_name),
+                1170,
+                12,
+            ),
+        ]),
+        _ => None,
+    }
 }
 
 fn build_guide(category: &str, breed: &BreedEntry) -> BreedGuide {
@@ -207,11 +450,12 @@ fn enrichment_body(category: &str, breed: &BreedEntry) -> String {
         "climbing structures, chase toys, and rotating enrichment boxes"
     };
 
-    let outdoor = if category.contains("Unique") && (breed.name == "Savannah" || breed.name == "Bengal") {
-        " If you allow outdoor time, use a secure catio — never unsupervised free roaming."
-    } else {
-        " Indoor enrichment is safest; rotate toys weekly to prevent boredom."
-    };
+    let outdoor =
+        if category.contains("Unique") && (breed.name == "Savannah" || breed.name == "Bengal") {
+            " If you allow outdoor time, use a secure catio — never unsupervised free roaming."
+        } else {
+            " Indoor enrichment is safest; rotate toys weekly to prevent boredom."
+        };
 
     format!(
         "{} enjoys mental stimulation. Offer {}. Scratching posts should be tall and sturdy.\
@@ -221,7 +465,10 @@ fn enrichment_body(category: &str, breed: &BreedEntry) -> String {
 }
 
 fn vet_body(category: &str, breed: &BreedEntry) -> String {
-    let cadence = if category.contains("Unique") || breed.name == "Persian" || breed.name == "Maine Coon" {
+    let cadence = if category.contains("Unique")
+        || breed.name == "Persian"
+        || breed.name == "Maine Coon"
+    {
         "Book a wellness exam at least every 6–12 months; earlier if any breathing, mobility, or coat changes appear."
     } else {
         "Annual wellness exams are the baseline; cats over seven benefit from twice-yearly senior checks."
@@ -345,7 +592,7 @@ pub fn render_health_tab_card(
     <li>Enrichment &amp; vet schedule</li>
   </ul>
   <div class="breed-guide-actions">
-    <a href="/home/breed-guide/{slug}" class="auth-link-btn breed-guide-preview-link">Preview free section</a>
+    <a href="/home/breed-guide/{slug}" class="breed-guide-preview-link">Preview free section 🐾</a>
     {checkout}
   </div>
 </article>"#,
@@ -421,7 +668,7 @@ pub fn render_breed_guides_shop(
   </div>
   <p class="field-hint">{tagline}</p>
   <div class="breed-guide-actions">
-    <a href="/home/breed-guide/{slug}" class="auth-link-btn breed-guide-preview-link">Preview</a>
+    <a href="/home/breed-guide/{slug}" class="breed-guide-preview-link">Peek inside 🐾</a>
     {checkout}
   </div>
 </article>"#,
@@ -443,9 +690,9 @@ pub fn render_breed_guides_shop(
     }
 
     format!(
-        r#"<p class="panel-intro">In-depth care guides for 40+ breeds — grooming, nutrition, health watch-outs, enrichment, and vet schedules. <strong>{price}</strong> per breed, one-time unlock.</p>
+        r#"<p class="panel-intro breed-shop-intro">In-depth care guides for 40+ breeds — grooming, nutrition, health watch-outs, enrichment, and vet schedules. <strong>{price}</strong> per breed, one-time unlock.</p>
 <div class="breed-shop-shell">{sections}</div>
-<p class="breed-guide-back-wrap"><a href="/home?tab=health" class="auth-link-btn">Back to Health tab</a></p>"#,
+<p class="breed-guide-back-wrap"><a href="/home?tab=health" class="breed-guide-back-btn">Back to Health tab 💗</a></p>"#,
         price = PRICE_LABEL,
         sections = sections,
     )
@@ -480,7 +727,7 @@ pub fn render_guide_page_html(
     <input type="hidden" name="breed_slug" value="{slug}" />
     <button type="submit" class="download-btn breed-guide-buy-btn">Unlock for {price}</button>
   </form>
-  <p class="field-hint"><a href="/home?tab=health">Back to Health tab</a></p>
+  <p class="breed-guide-back-wrap"><a href="/home?tab=health" class="breed-guide-back-btn">Back to Health tab 💗</a></p>
 </aside>"#,
             breed = breed,
             slug = slug,
@@ -525,5 +772,25 @@ mod tests {
     fn slug_normalizes_spaces() {
         assert_eq!(breed_slug("Maine Coon"), "maine-coon");
         assert_eq!(breed_slug("Norwegian Forest Cat"), "norwegian-forest-cat");
+    }
+
+    #[test]
+    fn persian_guide_tasks_include_eye_care() {
+        let guide = guide_for_breed_name("Persian").expect("persian");
+        let tasks = task_templates_for_guide(&guide);
+        assert_eq!(tasks.len(), 3);
+        assert!(tasks.iter().any(|task| task.key == "eye_clean"));
+        assert_eq!(
+            slug_from_breed_guide_task_id("breed_guide_persian_groom").as_deref(),
+            Some("persian")
+        );
+    }
+
+    #[test]
+    fn wellness_interval_shorter_for_persian() {
+        let guide = guide_for_breed_name("Persian").expect("persian");
+        assert_eq!(wellness_exam_interval_months(&guide), 6);
+        let siamese = guide_for_breed_name("Siamese").expect("siamese");
+        assert_eq!(wellness_exam_interval_months(&siamese), 12);
     }
 }

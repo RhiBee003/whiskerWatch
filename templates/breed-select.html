@@ -25,12 +25,12 @@
 
     <main class="breed-select-shell section">
       <h1>Choose your cat's breed</h1>
-      <p class="panel-intro">Browse breeds by type. Tap one to return to pet setup with your choice filled in.</p>
+      <p class="panel-intro">{{BREED_INTRO}}</p>
       <div class="breed-catalog">
         {{BREED_CATALOG}}
       </div>
       <p class="breed-back-wrap">
-        <a href="/home?setup=pet" class="download-btn auth-link-btn breed-back-btn">Back to pet setup</a>
+        <a href="{{BREED_BACK_URL}}" class="download-btn auth-link-btn breed-back-btn">Back</a>
       </p>
     </main>
     <script src="/paw-cursor.js"></script>

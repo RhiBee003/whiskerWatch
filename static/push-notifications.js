@@ -185,6 +185,85 @@
     });
   }
 
+  const checkinList = document.getElementById("checkin-times-list");
+  const checkinAdd = document.getElementById("checkin-time-add");
+  const maxCheckins = 5;
+
+  function renumberCheckinRows() {
+    if (!(checkinList instanceof HTMLElement)) {
+      return;
+    }
+    const rows = checkinList.querySelectorAll(".checkin-time-row");
+    rows.forEach((row, index) => {
+      const label = row.querySelector(".checkin-time-label");
+      const input = row.querySelector('input[name="daily_checkin_times"]');
+      const number = index + 1;
+      if (label instanceof HTMLLabelElement) {
+        label.textContent = `Check-in ${number}`;
+        if (input instanceof HTMLInputElement) {
+          label.htmlFor = `checkin-time-${number}`;
+          input.id = `checkin-time-${number}`;
+        }
+      }
+      const removeBtn = row.querySelector(".checkin-time-remove");
+      if (removeBtn instanceof HTMLButtonElement) {
+        removeBtn.hidden = rows.length <= 1;
+      }
+    });
+    if (checkinAdd instanceof HTMLButtonElement) {
+      checkinAdd.disabled = rows.length >= maxCheckins;
+    }
+  }
+
+  if (checkinAdd instanceof HTMLButtonElement) {
+    checkinAdd.addEventListener("click", () => {
+      if (!(checkinList instanceof HTMLElement)) {
+        return;
+      }
+      const rows = checkinList.querySelectorAll(".checkin-time-row");
+      if (rows.length >= maxCheckins) {
+        return;
+      }
+      const template = rows[rows.length - 1];
+      if (!(template instanceof HTMLElement)) {
+        return;
+      }
+      const clone = template.cloneNode(true);
+      if (!(clone instanceof HTMLElement)) {
+        return;
+      }
+      const input = clone.querySelector('input[name="daily_checkin_times"]');
+      if (input instanceof HTMLInputElement) {
+        input.value = "12:00";
+      }
+      checkinList.appendChild(clone);
+      renumberCheckinRows();
+    });
+  }
+
+  if (checkinList instanceof HTMLElement) {
+    checkinList.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const removeBtn = target.closest(".checkin-time-remove");
+      if (!(removeBtn instanceof HTMLButtonElement)) {
+        return;
+      }
+      const row = removeBtn.closest(".checkin-time-row");
+      if (!(row instanceof HTMLElement) || !(row.parentElement instanceof HTMLElement)) {
+        return;
+      }
+      if (row.parentElement.querySelectorAll(".checkin-time-row").length <= 1) {
+        return;
+      }
+      row.remove();
+      renumberCheckinRows();
+    });
+    renumberCheckinRows();
+  }
+
   refreshLocalSchedule();
   window.setInterval(refreshLocalSchedule, 60 * 1000);
 })();

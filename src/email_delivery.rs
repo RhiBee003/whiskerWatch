@@ -40,10 +40,7 @@ fn smtp_from_name() -> String {
 
 pub async fn send_email(email: &OutboundEmail) -> Result<(), String> {
     if !smtp_configured() {
-        eprintln!(
-            "Email (dev log) to {} — {}",
-            email.to, email.subject
-        );
+        eprintln!("Email (dev log) to {} — {}", email.to, email.subject);
         eprintln!("{}", email.text_body);
         return Ok(());
     }
@@ -51,7 +48,10 @@ pub async fn send_email(email: &OutboundEmail) -> Result<(), String> {
     let host = std::env::var("SMTP_HOST").map_err(|_| "SMTP_HOST missing")?;
     let from = format!("{} <{}>", smtp_from_name(), smtp_from_address());
     let mail = Message::builder()
-        .from(from.parse().map_err(|e| format!("invalid from address: {e}"))?)
+        .from(
+            from.parse()
+                .map_err(|e| format!("invalid from address: {e}"))?,
+        )
         .to(email
             .to
             .parse()
@@ -65,15 +65,10 @@ pub async fn send_email(email: &OutboundEmail) -> Result<(), String> {
         .map_err(|e| format!("smtp relay: {e}"))?
         .port(smtp_port());
 
-    if let (Ok(user), Ok(password)) = (
-        std::env::var("SMTP_USER"),
-        std::env::var("SMTP_PASSWORD"),
-    ) {
+    if let (Ok(user), Ok(password)) = (std::env::var("SMTP_USER"), std::env::var("SMTP_PASSWORD")) {
         if !user.trim().is_empty() && !password.trim().is_empty() {
-            mailer_builder = mailer_builder.credentials(Credentials::new(
-                user.trim().to_string(),
-                password,
-            ));
+            mailer_builder =
+                mailer_builder.credentials(Credentials::new(user.trim().to_string(), password));
         }
     }
 

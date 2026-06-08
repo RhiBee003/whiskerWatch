@@ -10,6 +10,7 @@ pub struct FeedbackForumEntry {
     pub upvotes: u32,
     pub downvotes: u32,
     pub user_vote: Option<i8>,
+    #[allow(dead_code)]
     pub reward_granted: bool,
 }
 
@@ -19,6 +20,7 @@ pub struct PushSubscription {
     pub endpoint: String,
     pub p256dh: String,
     pub auth: String,
+    #[allow(dead_code)]
     pub created_at: u64,
 }
 
@@ -34,6 +36,30 @@ pub enum ForumDeleteOutcome {
     Deleted,
     NotFound,
     NotAuthorized,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFriendRequest {
+    pub id: String,
+    pub from_email: String,
+    pub to_email: String,
+    pub status: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFriendSummary {
+    pub friend_email: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredPetShare {
+    pub id: String,
+    pub owner_email: String,
+    pub shared_with_email: String,
+    pub pet_id: String,
+    pub status: String,
+    pub created_at: u64,
 }
 
 #[derive(Debug)]
@@ -203,9 +229,7 @@ fn is_unique_constraint(error: &rusqlite::Error) -> bool {
 }
 
 fn is_bcrypt_hash(password: &str) -> bool {
-    password.starts_with("$2a$")
-        || password.starts_with("$2b$")
-        || password.starts_with("$2y$")
+    password.starts_with("$2a$") || password.starts_with("$2b$") || password.starts_with("$2y$")
 }
 
 fn hash_password(plain: &str) -> Result<String, StorageError> {
@@ -304,11 +328,13 @@ impl Storage {
         storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
         storage.migrate_push_subscriptions_table()?;
+        storage.migrate_social_tables()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
     }
 
+    #[allow(dead_code)]
     pub fn open_at(data_dir: PathBuf) -> Result<Self, StorageError> {
         std::fs::create_dir_all(&data_dir)?;
         let db_path = data_dir.join("whiskerwatch.db");
@@ -343,9 +369,40 @@ impl Storage {
         storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
         storage.migrate_push_subscriptions_table()?;
+        storage.migrate_social_tables()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
+    }
+
+    fn migrate_social_tables(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS friend_requests (
+                 id TEXT PRIMARY KEY,
+                 from_email TEXT NOT NULL COLLATE NOCASE,
+                 to_email TEXT NOT NULL COLLATE NOCASE,
+                 status TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_friend_requests_to_email
+                 ON friend_requests(to_email);
+             CREATE INDEX IF NOT EXISTS idx_friend_requests_from_email
+                 ON friend_requests(from_email);
+             CREATE TABLE IF NOT EXISTS pet_shares (
+                 id TEXT PRIMARY KEY,
+                 owner_email TEXT NOT NULL COLLATE NOCASE,
+                 shared_with_email TEXT NOT NULL COLLATE NOCASE,
+                 pet_id TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_pet_shares_recipient
+                 ON pet_shares(shared_with_email);
+             CREATE INDEX IF NOT EXISTS idx_pet_shares_owner
+                 ON pet_shares(owner_email);",
+        )?;
+        Ok(())
     }
 
     fn migrate_push_subscriptions_table(&self) -> Result<(), StorageError> {
@@ -582,7 +639,11 @@ impl Storage {
         Ok(())
     }
 
-    fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, StorageError> {
+    fn table_has_column(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+    ) -> Result<bool, StorageError> {
         let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let columns = stmt
             .query_map([], |row| row.get::<_, String>(1))?
@@ -591,12 +652,7 @@ impl Storage {
     }
 
     fn email_local_part(email: &str) -> String {
-        email
-            .split('@')
-            .next()
-            .unwrap_or(email)
-            .trim()
-            .to_string()
+        email.split('@').next().unwrap_or(email).trim().to_string()
     }
 
     fn unique_username_from_base(conn: &Connection, base: &str) -> Result<String, StorageError> {
@@ -660,9 +716,8 @@ impl Storage {
             )?;
 
             if has_name {
-                let mut stmt = conn.prepare(
-                    "SELECT email, name, username, first_name, last_name FROM users",
-                )?;
+                let mut stmt =
+                    conn.prepare("SELECT email, name, username, first_name, last_name FROM users")?;
                 let rows = stmt
                     .query_map([], |row| {
                         Ok((
@@ -686,8 +741,7 @@ impl Storage {
                                 legacy_name.trim().to_string()
                             }
                         });
-                    let username =
-                        Self::unique_username_from_base(&conn, &username_base)?;
+                    let username = Self::unique_username_from_base(&conn, &username_base)?;
                     let first = first_name
                         .filter(|value| !value.trim().is_empty())
                         .unwrap_or_else(|| legacy_name.trim().to_string());
@@ -927,9 +981,8 @@ impl Storage {
 
     pub fn load_profile(&self, email: &str) -> Result<Option<UserProfile>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
-        let mut stmt = conn.prepare(
-            "SELECT profile_json FROM user_profiles WHERE email = ?1 COLLATE NOCASE",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT profile_json FROM user_profiles WHERE email = ?1 COLLATE NOCASE")?;
         let mut rows = stmt.query(params![email])?;
         if let Some(row) = rows.next()? {
             let json: String = row.get(0)?;
@@ -1083,9 +1136,12 @@ impl Storage {
         entries.sort_by(|left, right| {
             let left_score = left.upvotes as i32 - left.downvotes as i32;
             let right_score = right.upvotes as i32 - right.downvotes as i32;
-            right_score
-                .cmp(&left_score)
-                .then_with(|| right.submission.submitted_at.cmp(&left.submission.submitted_at))
+            right_score.cmp(&left_score).then_with(|| {
+                right
+                    .submission
+                    .submitted_at
+                    .cmp(&left.submission.submitted_at)
+            })
         });
 
         Ok(entries)
@@ -1125,7 +1181,10 @@ impl Storage {
         }
     }
 
-    pub fn get_feedback_submission(&self, feedback_id: i64) -> Result<Option<FeedbackSubmission>, StorageError> {
+    pub fn get_feedback_submission(
+        &self,
+        feedback_id: i64,
+    ) -> Result<Option<FeedbackSubmission>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let row = conn.query_row(
             "SELECT id, name, email, category, message, submitted_at, user_id, author_username
@@ -1164,16 +1223,19 @@ impl Storage {
         vote: i8,
     ) -> Result<FeedbackVoteCounts, StorageError> {
         if vote != 1 && vote != -1 {
-            return Err(StorageError::InvalidInput("vote must be 1 or -1".to_string()));
+            return Err(StorageError::InvalidInput(
+                "vote must be 1 or -1".to_string(),
+            ));
         }
 
         let conn = self.conn.lock().expect("storage lock");
-        let exists: bool = conn.query_row(
-            "SELECT 1 FROM feedback WHERE id = ?1",
-            [feedback_id],
-            |_| Ok(()),
-        )
-        .is_ok();
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM feedback WHERE id = ?1",
+                [feedback_id],
+                |_| Ok(()),
+            )
+            .is_ok();
         if !exists {
             return Err(StorageError::InvalidInput("feedback not found".to_string()));
         }
@@ -1248,7 +1310,10 @@ impl Storage {
         Ok(conn.last_insert_rowid())
     }
 
-    pub fn list_forum_posts(&self, breed_slug: Option<&str>) -> Result<Vec<ForumPost>, StorageError> {
+    pub fn list_forum_posts(
+        &self,
+        breed_slug: Option<&str>,
+    ) -> Result<Vec<ForumPost>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let filter = breed_slug.map(str::trim).filter(|value| !value.is_empty());
         let posts = if let Some(slug) = filter {
@@ -1384,13 +1449,7 @@ impl Storage {
         conn.execute(
             "INSERT INTO forum_replies (post_id, user_id, author_username, body, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                post_id,
-                user_id,
-                author_username,
-                body,
-                created_at as i64,
-            ],
+            params![post_id, user_id, author_username, body, created_at as i64,],
         )?;
         Ok(())
     }
@@ -1513,10 +1572,7 @@ impl Storage {
                     let _ = self.save_user(&user);
                 }
             }
-            eprintln!(
-                "Migrated users from {} into SQLite",
-                users_path.display()
-            );
+            eprintln!("Migrated users from {} into SQLite", users_path.display());
         }
 
         let profiles_path = self.data_dir.join("user_profiles.jsonl");
@@ -1574,9 +1630,11 @@ impl Storage {
             conn.query_row("SELECT COUNT(*) FROM forum_posts", [], |row| row.get(0))?;
         let forum_replies: i64 =
             conn.query_row("SELECT COUNT(*) FROM forum_replies", [], |row| row.get(0))?;
-        let feedback: i64 = conn.query_row("SELECT COUNT(*) FROM feedback", [], |row| row.get(0))?;
-        let contacts: i64 =
-            conn.query_row("SELECT COUNT(*) FROM contact_messages", [], |row| row.get(0))?;
+        let feedback: i64 =
+            conn.query_row("SELECT COUNT(*) FROM feedback", [], |row| row.get(0))?;
+        let contacts: i64 = conn.query_row("SELECT COUNT(*) FROM contact_messages", [], |row| {
+            row.get(0)
+        })?;
         Ok((
             users as usize,
             forum_posts as usize,
@@ -1584,6 +1642,266 @@ impl Storage {
             feedback as usize,
             contacts as usize,
         ))
+    }
+
+    fn normalize_social_email(email: &str) -> String {
+        email.trim().to_lowercase()
+    }
+
+    pub fn are_friends(&self, left: &str, right: &str) -> Result<bool, StorageError> {
+        let left = Self::normalize_social_email(left);
+        let right = Self::normalize_social_email(right);
+        if left == right {
+            return Ok(false);
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM friend_requests
+             WHERE status = 'accepted'
+               AND ((from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1))",
+            params![left, right],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn has_pending_friend_request(&self, left: &str, right: &str) -> Result<bool, StorageError> {
+        let left = Self::normalize_social_email(left);
+        let right = Self::normalize_social_email(right);
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM friend_requests
+             WHERE status = 'pending'
+               AND ((from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1))",
+            params![left, right],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn create_friend_request(
+        &self,
+        from_email: &str,
+        to_email: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let from_email = Self::normalize_social_email(from_email);
+        let to_email = Self::normalize_social_email(to_email);
+        if from_email == to_email {
+            return Err(StorageError::InvalidInput("cannot friend yourself".into()));
+        }
+        if !self.user_exists(&to_email)? {
+            return Err(StorageError::InvalidInput("user not found".into()));
+        }
+        if self.are_friends(&from_email, &to_email)? {
+            return Err(StorageError::InvalidInput("already friends".into()));
+        }
+        if self.has_pending_friend_request(&from_email, &to_email)? {
+            return Err(StorageError::InvalidInput("request already pending".into()));
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO friend_requests (id, from_email, to_email, status, created_at)
+             VALUES (?1, ?2, ?3, 'pending', ?4)",
+            params![id, from_email, to_email, created_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn respond_friend_request(
+        &self,
+        request_id: &str,
+        recipient_email: &str,
+        accept: bool,
+    ) -> Result<(), StorageError> {
+        let recipient_email = Self::normalize_social_email(recipient_email);
+        let status = if accept { "accepted" } else { "declined" };
+        let conn = self.conn.lock().expect("storage lock");
+        let updated = conn.execute(
+            "UPDATE friend_requests SET status = ?1
+             WHERE id = ?2 AND to_email = ?3 COLLATE NOCASE AND status = 'pending'",
+            params![status, request_id, recipient_email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::InvalidInput("request not found".into()));
+        }
+        Ok(())
+    }
+
+    pub fn list_incoming_friend_requests(
+        &self,
+        email: &str,
+    ) -> Result<Vec<StoredFriendRequest>, StorageError> {
+        let email = Self::normalize_social_email(email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, from_email, to_email, status, created_at
+             FROM friend_requests
+             WHERE to_email = ?1 COLLATE NOCASE AND status = 'pending'
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![email], |row| {
+            Ok(StoredFriendRequest {
+                id: row.get(0)?,
+                from_email: row.get(1)?,
+                to_email: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn list_friends(&self, email: &str) -> Result<Vec<StoredFriendSummary>, StorageError> {
+        let email = Self::normalize_social_email(email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT from_email, to_email FROM friend_requests
+             WHERE status = 'accepted' AND (from_email = ?1 OR to_email = ?1)
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![email], |row| {
+            let from_email: String = row.get(0)?;
+            let to_email: String = row.get(1)?;
+            let friend_email = if from_email.eq_ignore_ascii_case(&email) {
+                to_email
+            } else {
+                from_email
+            };
+            Ok(StoredFriendSummary { friend_email })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn create_pet_share(
+        &self,
+        owner_email: &str,
+        shared_with_email: &str,
+        pet_id: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let owner_email = Self::normalize_social_email(owner_email);
+        let shared_with_email = Self::normalize_social_email(shared_with_email);
+        let pet_id = pet_id.trim();
+        if owner_email == shared_with_email {
+            return Err(StorageError::InvalidInput("cannot share with yourself".into()));
+        }
+        if pet_id.is_empty() {
+            return Err(StorageError::InvalidInput("pet required".into()));
+        }
+        if !self.are_friends(&owner_email, &shared_with_email)? {
+            return Err(StorageError::InvalidInput("not friends".into()));
+        }
+
+        let conn = self.conn.lock().expect("storage lock");
+        let existing: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pet_shares
+             WHERE owner_email = ?1 AND shared_with_email = ?2 AND pet_id = ?3
+               AND status IN ('pending', 'accepted')",
+            params![owner_email, shared_with_email, pet_id],
+            |row| row.get(0),
+        )?;
+        if existing > 0 {
+            return Err(StorageError::InvalidInput("already shared".into()));
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO pet_shares (id, owner_email, shared_with_email, pet_id, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
+            params![id, owner_email, shared_with_email, pet_id, created_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn respond_pet_share(
+        &self,
+        share_id: &str,
+        recipient_email: &str,
+        accept: bool,
+    ) -> Result<(), StorageError> {
+        let recipient_email = Self::normalize_social_email(recipient_email);
+        let status = if accept { "accepted" } else { "declined" };
+        let conn = self.conn.lock().expect("storage lock");
+        let updated = conn.execute(
+            "UPDATE pet_shares SET status = ?1
+             WHERE id = ?2 AND shared_with_email = ?3 COLLATE NOCASE AND status = 'pending'",
+            params![status, share_id, recipient_email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::InvalidInput("share not found".into()));
+        }
+        Ok(())
+    }
+
+    pub fn list_incoming_pet_shares(
+        &self,
+        email: &str,
+    ) -> Result<Vec<StoredPetShare>, StorageError> {
+        let email = Self::normalize_social_email(email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, owner_email, shared_with_email, pet_id, status, created_at
+             FROM pet_shares
+             WHERE shared_with_email = ?1 COLLATE NOCASE AND status = 'pending'
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![email], |row| {
+            Ok(StoredPetShare {
+                id: row.get(0)?,
+                owner_email: row.get(1)?,
+                shared_with_email: row.get(2)?,
+                pet_id: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get::<_, i64>(5)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn list_accepted_pet_shares_for_recipient(
+        &self,
+        email: &str,
+    ) -> Result<Vec<StoredPetShare>, StorageError> {
+        let email = Self::normalize_social_email(email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, owner_email, shared_with_email, pet_id, status, created_at
+             FROM pet_shares
+             WHERE shared_with_email = ?1 COLLATE NOCASE AND status = 'accepted'
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![email], |row| {
+            Ok(StoredPetShare {
+                id: row.get(0)?,
+                owner_email: row.get(1)?,
+                shared_with_email: row.get(2)?,
+                pet_id: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get::<_, i64>(5)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn has_accepted_pet_share(
+        &self,
+        owner_email: &str,
+        recipient_email: &str,
+        pet_id: &str,
+    ) -> Result<bool, StorageError> {
+        let owner_email = Self::normalize_social_email(owner_email);
+        let recipient_email = Self::normalize_social_email(recipient_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pet_shares
+             WHERE owner_email = ?1 AND shared_with_email = ?2 AND pet_id = ?3 AND status = 'accepted'",
+            params![owner_email, recipient_email, pet_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 }
 
@@ -1612,14 +1930,20 @@ mod tests {
         storage
             .save_user(&test_user(email, "SecretPass1!"))
             .expect("save user");
-        assert!(storage.validate_login(email, "SecretPass1!").expect("validate"));
-        assert!(!storage.validate_login(email, "wrong").expect("validate wrong"));
+        assert!(storage
+            .validate_login(email, "SecretPass1!")
+            .expect("validate"));
+        assert!(!storage
+            .validate_login(email, "wrong")
+            .expect("validate wrong"));
 
         drop(storage);
 
         let storage = Storage::open_at(temp.path().to_path_buf()).expect("reopen storage");
         assert!(storage.user_exists(email).expect("exists"));
-        assert!(storage.validate_login(email, "SecretPass1!").expect("validate after reopen"));
+        assert!(storage
+            .validate_login(email, "SecretPass1!")
+            .expect("validate after reopen"));
     }
 
     #[test]
@@ -1700,8 +2024,12 @@ mod tests {
             !Storage::table_has_column(&conn, "users", "name").expect("check name column"),
             "legacy name column should be removed"
         );
-        assert!(storage.user_exists("new@test.local").expect("new user exists"));
-        assert!(storage.validate_login("legacy@test.local", "plainpass").expect("legacy login"));
+        assert!(storage
+            .user_exists("new@test.local")
+            .expect("new user exists"));
+        assert!(storage
+            .validate_login("legacy@test.local", "plainpass")
+            .expect("legacy login"));
     }
 
     #[test]
@@ -1727,7 +2055,9 @@ mod tests {
             .reset_password_with_token(&token, "NewSecure1!")
             .expect("reset password");
 
-        assert!(storage.validate_login(email, "NewSecure1!").expect("new login"));
+        assert!(storage
+            .validate_login(email, "NewSecure1!")
+            .expect("new login"));
         assert!(!storage.validate_login(email, original).expect("old login"));
         assert!(storage
             .find_valid_reset_token(&token)
@@ -1799,11 +2129,9 @@ mod tests {
                 .as_deref(),
             Some(email)
         );
-        assert!(
-            storage
-                .admin_session_valid("admin-session")
-                .expect("lookup admin session")
-        );
+        assert!(storage
+            .admin_session_valid("admin-session")
+            .expect("lookup admin session"));
     }
 
     #[test]
@@ -1814,12 +2142,10 @@ mod tests {
             .save_auth_session("expired", "user", Some("user@test.local"), 1, 2)
             .expect("save expired session");
 
-        assert!(
-            storage
-                .lookup_user_session("expired")
-                .expect("lookup")
-                .is_none()
-        );
+        assert!(storage
+            .lookup_user_session("expired")
+            .expect("lookup")
+            .is_none());
     }
 
     #[test]
@@ -2140,5 +2466,59 @@ mod tests {
         assert_eq!(down.downvotes, 1);
         assert_eq!(down.user_vote, Some(-1));
     }
-}
 
+    #[test]
+    fn friend_requests_and_pet_shares_round_trip() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let owner = User {
+            username: "owner".to_string(),
+            first_name: "Cat".to_string(),
+            last_name: "Owner".to_string(),
+            email: "owner@example.com".to_string(),
+            password: "secret1!".to_string(),
+            created_at: 1_700_000_000,
+        };
+        let friend = User {
+            username: "friend".to_string(),
+            first_name: "Cat".to_string(),
+            last_name: "Friend".to_string(),
+            email: "friend@example.com".to_string(),
+            password: "secret2!".to_string(),
+            created_at: 1_700_000_001,
+        };
+        storage.save_user(&owner).expect("save owner");
+        storage.save_user(&friend).expect("save friend");
+
+        storage
+            .create_friend_request("owner@example.com", "friend@example.com", 1)
+            .expect("create friend request");
+        let incoming = storage
+            .list_incoming_friend_requests("friend@example.com")
+            .expect("incoming");
+        assert_eq!(incoming.len(), 1);
+        storage
+            .respond_friend_request(&incoming[0].id, "friend@example.com", true)
+            .expect("accept friend");
+        assert!(storage
+            .are_friends("owner@example.com", "friend@example.com")
+            .expect("friends"));
+        let friends = storage.list_friends("owner@example.com").expect("friends");
+        assert_eq!(friends.len(), 1);
+        assert_eq!(friends[0].friend_email, "friend@example.com");
+
+        storage
+            .create_pet_share("owner@example.com", "friend@example.com", "primary", 2)
+            .expect("share pet");
+        let share_invites = storage
+            .list_incoming_pet_shares("friend@example.com")
+            .expect("share invites");
+        assert_eq!(share_invites.len(), 1);
+        storage
+            .respond_pet_share(&share_invites[0].id, "friend@example.com", true)
+            .expect("accept share");
+        assert!(storage
+            .has_accepted_pet_share("owner@example.com", "friend@example.com", "primary")
+            .expect("accepted share"));
+    }
+}

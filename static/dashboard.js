@@ -53,7 +53,7 @@
 
   const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
   const dashboardTabStorageKey = "whiskerDashboardTab";
-  const validTabs = ["pet", "points", "outfits", "account", "tasks", "health", "forum", "calendar", "feedback"];
+  const validTabs = ["pet", "points", "account", "tasks", "health", "forum", "calendar", "feedback"];
   let calendarReadyForUrlSync = false;
 
   function rememberDashboardTab(tabId) {
@@ -85,6 +85,11 @@
   }
 
   function resolveInitialTab(params) {
+    if (params.get("tab") === "outfits") {
+      window.location.replace("/home/cat-home");
+      return "pet";
+    }
+
     if (window.location.pathname === "/home" && !window.location.search) {
       return "pet";
     }
@@ -622,7 +627,12 @@
     if (!(form instanceof HTMLFormElement)) {
       return;
     }
-    if (!form.action.includes("/home/tasks/toggle")) {
+
+    const action = form.action || "";
+    const isTaskToggle = action.includes("/home/tasks/toggle");
+    const isTaskAdd = action.includes("/home/tasks/add");
+    const isTaskDelete = action.includes("/home/tasks/delete");
+    if (!isTaskToggle && !isTaskAdd && !isTaskDelete) {
       return;
     }
 
@@ -633,8 +643,14 @@
       submitButton.disabled = true;
     }
 
+    const endpoint = isTaskAdd
+      ? "/home/tasks/add"
+      : isTaskDelete
+        ? "/home/tasks/delete"
+        : "/home/tasks/toggle";
+
     try {
-      const response = await fetch("/home/tasks/toggle", {
+      const response = await fetch(endpoint, {
         method: "POST",
         body: postUrlEncodedFromForm(form),
         headers: {
@@ -655,7 +671,13 @@
         if (handleTaskApiAuthFailure(data)) {
           return;
         }
-        showStatusToast("Could not update that task. Refresh the page and try again.");
+        if (isTaskAdd) {
+          showStatusToast("Could not add that task. Enter a short name and try again.");
+        } else if (isTaskDelete) {
+          showStatusToast("Only custom tasks can be deleted.");
+        } else {
+          showStatusToast("Could not update that task. Refresh the page and try again.");
+        }
         return;
       }
 
@@ -665,7 +687,16 @@
         window.location.reload();
         return;
       }
-      if (data.status === "completed") {
+
+      if (isTaskAdd) {
+        const titleInput = form.querySelector('input[name="task_title"]');
+        if (titleInput instanceof HTMLInputElement) {
+          titleInput.value = "";
+        }
+        showStatusToast("Custom task added (+10 paw points).");
+      } else if (isTaskDelete) {
+        showStatusToast("Custom task removed.");
+      } else if (data.status === "completed") {
         showTaskCompleteToast();
         if (data.share_card) {
           openShareCardModal(data.share_card);
@@ -675,11 +706,12 @@
       } else if (data.status === "time_updated") {
         showStatusToast("Task time updated.");
       }
+
       if (data.show_vet_followup) {
         openVetFollowupModal();
       }
     } catch (_error) {
-      showStatusToast("Could not update that task. Refresh the page and try again.");
+      showStatusToast("Could not update tasks right now. Refresh and try again.");
     } finally {
       if (submitButton instanceof HTMLButtonElement) {
         submitButton.disabled = false;
@@ -714,6 +746,7 @@
   const taskTimeCancel = document.getElementById("task-time-cancel");
   const taskTimeDialog = taskTimeModal?.querySelector(".task-time-modal");
   let activeTaskTimeId = "";
+  let activeTaskTimePetId = "";
 
   function snapToQuarterHour(minutes) {
     const snapped = Math.round(minutes / 15) * 15;
@@ -740,6 +773,7 @@
     taskTimeModal.setAttribute("hidden", "");
     document.body.classList.remove("modal-open");
     activeTaskTimeId = "";
+    activeTaskTimePetId = "";
   }
 
   function openTaskTimeModal(timeBtn) {
@@ -761,6 +795,7 @@
     const minutes = snapToQuarterHour(Number(timeBtn.dataset.timeMinutes || 720));
 
     activeTaskTimeId = taskId;
+    activeTaskTimePetId = timeBtn.dataset.petId || "";
     taskTimeTaskName.textContent = taskTitle;
     taskTimeSlider.value = String(minutes);
     updateTaskTimeLabel();
@@ -792,6 +827,7 @@
 
     const body = postUrlEncodedFields({
       task_id: activeTaskTimeId,
+      pet_id: activeTaskTimePetId,
       task_time: minutesToTimeValue(Number(taskTimeSlider.value)),
     });
 
@@ -959,6 +995,15 @@
     return taskId === "play_session" ? "Today" : "Daily";
   }
 
+  function sortTasksByTime(tasks) {
+    return [...tasks].sort(
+      (left, right) =>
+        (left.time_minutes ?? 600) - (right.time_minutes ?? 600) ||
+        String(left.title).localeCompare(String(right.title)) ||
+        String(left.id).localeCompare(String(right.id))
+    );
+  }
+
   function renderTaskDueHtml(task) {
     if (!task.adjustable_time) {
       return `${escapeHtml(task.due_label)} · +${task.reward} pts`;
@@ -968,7 +1013,8 @@
     const timeValue = task.time_value || "08:00";
     const timeMinutes = task.time_minutes ?? 480;
     const timeLabel = formatTimeLabelFromMinutes(timeMinutes);
-    return `<span class="task-schedule-prefix">${prefix}</span> · <button type="button" class="task-time-btn" data-task-id="${escapeHtml(task.id)}" data-time="${escapeHtml(timeValue)}" data-time-minutes="${timeMinutes}" data-task-title="${escapeHtml(task.title)}" aria-label="Change time for ${escapeHtml(task.title)}">${escapeHtml(timeLabel)}</button> · +${task.reward} pts`;
+    const petId = task.pet_id || "";
+    return `<span class="task-schedule-prefix">${prefix}</span> · <button type="button" class="task-time-btn" data-task-id="${escapeHtml(task.id)}" data-pet-id="${escapeHtml(petId)}" data-time="${escapeHtml(timeValue)}" data-time-minutes="${timeMinutes}" data-task-title="${escapeHtml(task.title)}" aria-label="Change time for ${escapeHtml(task.title)}">${escapeHtml(timeLabel)}</button> · +${task.reward} pts`;
   }
 
   function renderDayTasks(tasks) {
@@ -985,11 +1031,12 @@
 
     tasksHeading.hidden = false;
     taskList.hidden = false;
-    taskList.innerHTML = tasks
+    taskList.innerHTML = sortTasksByTime(tasks)
       .map((task) => {
         const completedClass = task.completed ? " completed" : "";
         const buttonLabel = task.completed ? "Mark incomplete" : "Complete";
-        return `<li class="task-item${completedClass}"><div><p class="task-title">${escapeHtml(task.title)}</p><p class="task-due">${renderTaskDueHtml(task)}</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="${escapeHtml(task.id)}" /><button type="submit" class="download-btn task-toggle-btn">${buttonLabel}</button></form></li>`;
+        const petId = task.pet_id || "";
+        return `<li class="task-item${completedClass}"><div><p class="task-title">${escapeHtml(task.title)}</p><p class="task-due">${renderTaskDueHtml(task)}</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="${escapeHtml(task.id)}" /><input type="hidden" name="pet_id" value="${escapeHtml(petId)}" /><button type="submit" class="download-btn task-toggle-btn">${buttonLabel}</button></form></li>`;
       })
       .join("");
   }
@@ -1899,11 +1946,6 @@
       accountStage.dataset.petName = trimmedName;
     }
 
-    const outfitsIntro = document.querySelector("#panel-outfits .panel-intro");
-    if (outfitsIntro) {
-      outfitsIntro.textContent = `Spend paw points on cute looks for ${trimmedName}.`;
-    }
-
     const petBlurb = document.querySelector("#panel-pet .pet-blurb");
     if (petBlurb) {
       petBlurb.textContent = `${trimmedName} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!`;
@@ -2245,9 +2287,57 @@
     });
   });
 
+  const addCatModal = document.getElementById("add-cat-modal");
+  const addCatTriggers = document.querySelectorAll(".add-cat-trigger");
+  const addCatCancelButtons = document.querySelectorAll(".add-cat-cancel");
+
+  function openAddCatModal(focusId) {
+    if (!(addCatModal instanceof HTMLElement)) {
+      return;
+    }
+    addCatModal.hidden = false;
+    document.body.classList.add("modal-open");
+    if (focusId) {
+      const field = document.getElementById(focusId);
+      if (field instanceof HTMLElement) {
+        field.focus();
+      }
+    }
+  }
+
+  function closeAddCatModal() {
+    if (!(addCatModal instanceof HTMLElement)) {
+      return;
+    }
+    addCatModal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  addCatTriggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => {
+      showTab("pet");
+      openAddCatModal("add_cat_name");
+    });
+  });
+
+  addCatCancelButtons.forEach((button) => {
+    button.addEventListener("click", closeAddCatModal);
+  });
+
+  if (addCatModal instanceof HTMLElement) {
+    addCatModal.addEventListener("click", (event) => {
+      if (event.target === addCatModal) {
+        closeAddCatModal();
+      }
+    });
+  }
+
   const petBreedInput = document.getElementById("pet_breed");
+  const addCatBreedInput = document.getElementById("add_cat_breed");
   const selectedBreed = params.get("breed");
-  const returningToPetSetup = params.get("setup") === "pet" || Boolean(selectedBreed);
+  const returningToAddCat = params.get("add_cat") === "1";
+  const returningToPetSetup =
+    !returningToAddCat && (params.get("setup") === "pet" || Boolean(selectedBreed));
   const needsPetSetup = document.body.dataset.needsPetSetup === "true";
 
   if (needsPetSetup) {
@@ -2257,6 +2347,10 @@
 
   if (selectedBreed && petBreedInput instanceof HTMLInputElement) {
     petBreedInput.value = selectedBreed;
+  }
+
+  if (selectedBreed && addCatBreedInput instanceof HTMLInputElement) {
+    addCatBreedInput.value = selectedBreed;
   }
 
   if (petBreedInput instanceof HTMLInputElement) {
@@ -2273,7 +2367,44 @@
     });
   }
 
-  if (returningToPetSetup) {
+  if (addCatBreedInput instanceof HTMLInputElement) {
+    const goToAddCatBreedPicker = () => {
+      window.location.href = "/home/breeds?add_cat=1";
+    };
+    addCatBreedInput.addEventListener("click", goToAddCatBreedPicker);
+    addCatBreedInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        goToAddCatBreedPicker();
+      }
+    });
+  }
+
+  document.querySelectorAll(".pet-switcher-nav[data-pet-target]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const petId = button.getAttribute("data-pet-target");
+      if (!petId) {
+        return;
+      }
+      const petOwner = button.getAttribute("data-pet-owner");
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", "pet");
+      url.searchParams.set("pet", petId);
+      if (petOwner) {
+        url.searchParams.set("pet_owner", petOwner);
+      } else {
+        url.searchParams.delete("pet_owner");
+      }
+      url.searchParams.delete("add_cat");
+      url.searchParams.delete("breed");
+      window.location.href = url.toString();
+    });
+  });
+
+  if (returningToAddCat) {
+    showTab("pet");
+    openAddCatModal(selectedBreed ? "add_cat_color" : "add_cat_name");
+  } else if (returningToPetSetup) {
     openOnboardingModal(selectedBreed ? "pet_color" : undefined);
   } else {
     maybePromptPetSetup();
@@ -2359,6 +2490,10 @@
       skipPetSetupForNow();
       return;
     }
+    if (addCatModal instanceof HTMLElement && !addCatModal.hidden) {
+      closeAddCatModal();
+      return;
+    }
     if (parentLevelModal && !parentLevelModal.hidden) {
       closeParentLevelModal();
     }
@@ -2426,6 +2561,123 @@
   if (accountConfirmPasswordInput) {
     accountConfirmPasswordInput.addEventListener("input", updateAccountPasswordFormValidity);
     accountConfirmPasswordInput.addEventListener("blur", updateAccountPasswordFormValidity);
+  }
+
+  const symptomCheckerForm = document.getElementById("symptom-checker-form");
+  const symptomCheckerResults = document.getElementById("symptom-checker-results");
+
+  function escapeSymptomHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  function renderSymptomList(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return "";
+    }
+    return `<ul>${items.map((item) => `<li>${escapeSymptomHtml(item)}</li>`).join("")}</ul>`;
+  }
+
+  function urgencyClassFor(value) {
+    const map = {
+      emergency: "symptom-urgency-emergency",
+      vet_today: "symptom-urgency-today",
+      vet_soon: "symptom-urgency-soon",
+      monitor: "symptom-urgency-monitor",
+      wellness: "symptom-urgency-wellness",
+    };
+    return map[value] || "symptom-urgency-wellness";
+  }
+
+  function renderSymptomCheckerResults(data) {
+    if (!symptomCheckerResults) {
+      return;
+    }
+
+    const possibilities = Array.isArray(data.possibilities) ? data.possibilities : [];
+    const signals = Array.isArray(data.signals) ? data.signals : [];
+    const homeCare = Array.isArray(data.home_care) ? data.home_care : [];
+    const urgencyClass = urgencyClassFor(data.urgency);
+
+    const possibilityHtml = possibilities
+      .map((item) => {
+        const tips = Array.isArray(item.home_care) ? item.home_care : [];
+        return `<article class="symptom-possibility-card">
+          <h5>${escapeSymptomHtml(item.name || "Possible concern")}</h5>
+          <p>${escapeSymptomHtml(item.summary || "")}</p>
+          ${renderSymptomList(tips)}
+        </article>`;
+      })
+      .join("");
+
+    symptomCheckerResults.innerHTML = `
+      <div class="symptom-urgency-banner ${urgencyClass}">
+        <h3>${escapeSymptomHtml(data.urgency_label || "Guidance")}</h3>
+        <p>${escapeSymptomHtml(data.urgency_message || "")}</p>
+      </div>
+      ${
+        signals.length
+          ? `<section class="symptom-results-section"><h4>Signals we noticed</h4>${renderSymptomList(signals)}</section>`
+          : ""
+      }
+      ${
+        possibilities.length
+          ? `<section class="symptom-results-section"><h4>Possible explanations to discuss with your vet</h4>${possibilityHtml}</section>`
+          : ""
+      }
+      ${
+        homeCare.length
+          ? `<section class="symptom-results-section"><h4>Home care while you decide next steps</h4>${renderSymptomList(homeCare)}</section>`
+          : ""
+      }
+      <section class="symptom-results-section">
+        <h4>When to call your vet</h4>
+        <p>${escapeSymptomHtml(data.vet_guidance || "")}</p>
+      </section>
+      <p class="symptom-results-disclaimer">${escapeSymptomHtml(data.disclaimer || "")}</p>
+    `;
+    symptomCheckerResults.hidden = false;
+    symptomCheckerResults.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  if (symptomCheckerForm instanceof HTMLFormElement) {
+    symptomCheckerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitButton = symptomCheckerForm.querySelector(".symptom-checker-submit");
+
+      if (submitButton instanceof HTMLButtonElement) {
+        submitButton.disabled = true;
+      }
+
+      try {
+        const formData = new FormData(symptomCheckerForm);
+        const response = await fetch("/home/health/symptoms", {
+          method: "POST",
+          body: formData,
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.status || "request_failed");
+        }
+        renderSymptomCheckerResults(data);
+      } catch (_error) {
+        if (symptomCheckerResults) {
+          symptomCheckerResults.hidden = false;
+          symptomCheckerResults.innerHTML =
+            '<p class="symptom-results-disclaimer">We could not load guidance right now. Please try again, or contact your veterinarian directly.</p>';
+        }
+      } finally {
+        if (submitButton instanceof HTMLButtonElement) {
+          submitButton.disabled = false;
+        }
+      }
+    });
   }
 
   if (accountPasswordForm instanceof HTMLFormElement) {

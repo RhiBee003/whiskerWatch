@@ -182,6 +182,7 @@ struct SavedCardDisplay {
 #[derive(Debug)]
 pub enum CheckoutError {
     NotConfigured,
+    #[allow(dead_code)]
     StripeApi(String),
     MissingUrl,
 }
@@ -385,9 +386,8 @@ pub async fn create_checkout_session(
     let customer_id = ensure_stripe_customer(state, &mut profile).await?;
 
     let base = public_app_url();
-    let success_url = format!(
-        "{base}/home?tab=account&status=points_bought&session_id={{CHECKOUT_SESSION_ID}}"
-    );
+    let success_url =
+        format!("{base}/home?tab=account&status=points_bought&session_id={{CHECKOUT_SESSION_ID}}");
     let cancel_url = format!("{base}/home?tab=account&status=points_cancelled");
 
     let product_name = format!("{} Paw Points", package.points);
@@ -446,7 +446,7 @@ pub async fn create_checkout_session(
 }
 
 #[derive(Deserialize)]
-struct CheckoutSession {
+pub(crate) struct CheckoutSession {
     id: String,
     payment_status: Option<String>,
     status: Option<String>,
@@ -509,7 +509,9 @@ pub fn verify_webhook_signature(payload: &[u8], signature_header: &str, secret: 
     mac.update(signed_payload.as_bytes());
     let expected = hex::encode(mac.finalize().into_bytes());
 
-    signatures.iter().any(|sig| constant_time_eq(sig, &expected))
+    signatures
+        .iter()
+        .any(|sig| constant_time_eq(sig, &expected))
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -647,9 +649,8 @@ pub async fn create_premium_checkout_session(
     let customer_id = ensure_stripe_customer(state, &mut profile).await?;
 
     let base = public_app_url();
-    let success_url = format!(
-        "{base}/home?tab=account&status=premium_bought&session_id={{CHECKOUT_SESSION_ID}}"
-    );
+    let success_url =
+        format!("{base}/home?tab=account&status=premium_bought&session_id={{CHECKOUT_SESSION_ID}}");
     let cancel_url = format!("{base}/home?tab=account&status=premium_cancelled");
 
     let product_name = "WhiskerWatch Plus";
@@ -761,13 +762,30 @@ pub async fn unlock_breed_guide_if_new(
     let mut profile = crate::get_or_create_profile(state, email).await;
     if !crate::breed_guides::user_owns_guide(&profile.owned_breed_guides, &guide.slug) {
         profile.owned_breed_guides.push(guide.slug.clone());
+        let today = chrono::Local::now().date_naive();
+        let _ = crate::ensure_breed_guide_tasks(&mut profile);
+        profile.calendar_events = crate::merge_calendar_events(&profile, today);
         crate::push_activity(
             &mut profile,
-            &format!(
-                "Unlocked the {} premium care guide.",
-                guide.breed_name
-            ),
+            &format!("Unlocked the {} premium care guide.", guide.breed_name),
         );
+        if crate::pet_ids_for_breed_name(&profile, &guide.breed_name).is_empty() {
+            crate::push_activity(
+                &mut profile,
+                &format!(
+                    "Set {} as your cat's breed on My Pet to add guide care tasks automatically.",
+                    guide.breed_name
+                ),
+            );
+        } else {
+            crate::push_activity(
+                &mut profile,
+                &format!(
+                    "Added {}-specific daily tasks and wellness calendar reminders.",
+                    guide.breed_name
+                ),
+            );
+        }
         state
             .storage
             .save_profile(&profile)

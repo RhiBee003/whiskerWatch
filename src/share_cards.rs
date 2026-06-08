@@ -44,6 +44,10 @@ const FEEDING_TASK_IDS: &[&str] = &[
 ];
 
 pub fn is_care_streak_task(task_id: &str) -> bool {
+    if task_id.starts_with("custom_") {
+        return true;
+    }
+
     if task_id == VET_APPOINTMENT_TASK_ID || task_id == "replace_litter" {
         return false;
     }
@@ -82,7 +86,10 @@ pub fn update_care_streak(profile: &mut UserProfile, today: NaiveDate) -> Option
 }
 
 fn streak_milestone_hit(days: u32) -> Option<u32> {
-    STREAK_MILESTONES.iter().copied().find(|milestone| *milestone == days)
+    STREAK_MILESTONES
+        .iter()
+        .copied()
+        .find(|milestone| *milestone == days)
 }
 
 pub fn share_pet_name(profile: &UserProfile) -> String {
@@ -150,10 +157,20 @@ pub fn share_offer_for_task_completion(
     created_at: u64,
 ) -> Option<ShareCardOffer> {
     if let Some(level) = level_up {
-        return create_share_offer(profile, ShareCardKind::LevelUp(level), app_base_url, created_at);
+        return create_share_offer(
+            profile,
+            ShareCardKind::LevelUp(level),
+            app_base_url,
+            created_at,
+        );
     }
     if let Some(days) = streak_milestone {
-        return create_share_offer(profile, ShareCardKind::Streak(days), app_base_url, created_at);
+        return create_share_offer(
+            profile,
+            ShareCardKind::Streak(days),
+            app_base_url,
+            created_at,
+        );
     }
     None
 }
@@ -204,7 +221,10 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
     let headline = escape_html(&payload.headline);
     let subline = escape_html(&payload.subline);
     let badge = if payload.kind == "streak" {
-        format!(r#"<span class="share-card-badge share-card-badge-streak">{days}-day streak</span>"#, days = payload.value)
+        format!(
+            r#"<span class="share-card-badge share-card-badge-streak">{days}-day streak</span>"#,
+            days = payload.value
+        )
     } else {
         format!(
             r#"<span class="share-card-badge share-card-badge-level">Level {level}</span>"#,
@@ -263,7 +283,15 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
 
 pub fn render_streak_card(profile: &UserProfile, app_base_url: &str, created_at: u64) -> String {
     if profile.care_streak_days == 0 {
-        return String::new();
+        return format!(
+            r#"<article class="dashboard-card care-streak-card care-streak-card--empty">
+  <h2>Care streak</h2>
+  <p class="care-streak-big">Start today</p>
+  <p class="field-hint">Complete at least one daily care task each day to start your streak.</p>
+  <div class="care-streak-actions"><p class="field-hint">Hit a {next}-day streak to unlock a shareable card.</p></div>
+</article>"#,
+            next = STREAK_MILESTONES[0],
+        );
     }
 
     let streak_label = if profile.care_streak_days == 1 {

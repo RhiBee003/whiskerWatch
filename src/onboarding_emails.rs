@@ -55,8 +55,7 @@ pub fn due_onboarding_email_ids(
     ONBOARDING_SEQUENCE
         .iter()
         .filter(|step| {
-            !sent.contains(step.id)
-                && age_secs >= step.delay_hours.saturating_mul(SECONDS_PER_HOUR)
+            !sent.contains(step.id) && age_secs >= step.delay_hours.saturating_mul(SECONDS_PER_HOUR)
         })
         .map(|step| step.id)
         .collect()
@@ -93,7 +92,13 @@ fn app_url(path: &str) -> String {
     }
 }
 
-fn email_shell(first_name: &str, headline: &str, body_html: &str, cta_label: &str, cta_url: &str) -> OutboundEmail {
+fn email_shell(
+    first_name: &str,
+    headline: &str,
+    body_html: &str,
+    cta_label: &str,
+    cta_url: &str,
+) -> OutboundEmail {
     let greeting = display_first_name(first_name);
     let html_body = format!(
         r#"<!DOCTYPE html>
@@ -156,11 +161,7 @@ fn strip_html_tags(value: &str) -> String {
         .join(" ")
 }
 
-fn build_email(
-    step_id: &str,
-    first_name: &str,
-    profile: &UserProfile,
-) -> OutboundEmail {
+fn build_email(step_id: &str, first_name: &str, profile: &UserProfile) -> OutboundEmail {
     let pet = pet_label(profile);
     let has_pet = crate::profile_has_pet(profile);
 
@@ -321,7 +322,10 @@ pub fn spawn_dispatcher(state: crate::AppState) {
 }
 
 async fn dispatch_all(state: &crate::AppState) -> Result<(), String> {
-    let users = state.storage.load_users().map_err(|error| format!("{error}"))?;
+    let users = state
+        .storage
+        .load_users()
+        .map_err(|error| format!("{error}"))?;
     let now = crate::timestamp_now();
 
     for user in users {
@@ -334,7 +338,10 @@ async fn dispatch_all(state: &crate::AppState) -> Result<(), String> {
                 Ok(Some(profile)) => profile,
                 Ok(None) => crate::default_profile(&user.email),
                 Err(error) => {
-                    eprintln!("onboarding email profile load failed for {}: {error}", user.email);
+                    eprintln!(
+                        "onboarding email profile load failed for {}: {error}",
+                        user.email
+                    );
                     continue;
                 }
             };
@@ -351,13 +358,8 @@ async fn dispatch_all(state: &crate::AppState) -> Result<(), String> {
             continue;
         }
 
-        if let Err(error) = try_send_due_for_email(
-            state,
-            &user.email,
-            &user.first_name,
-            user.created_at,
-        )
-        .await
+        if let Err(error) =
+            try_send_due_for_email(state, &user.email, &user.first_name, user.created_at).await
         {
             eprintln!("onboarding email failed for {}: {error}", user.email);
         }
@@ -378,13 +380,15 @@ mod tests {
 
     #[test]
     fn day1_not_due_before_24_hours() {
-        let due = due_onboarding_email_ids(0, 23 * SECONDS_PER_HOUR, &["welcome".to_string()], true);
+        let due =
+            due_onboarding_email_ids(0, 23 * SECONDS_PER_HOUR, &["welcome".to_string()], true);
         assert!(due.is_empty());
     }
 
     #[test]
     fn day1_due_after_24_hours() {
-        let due = due_onboarding_email_ids(0, 24 * SECONDS_PER_HOUR, &["welcome".to_string()], true);
+        let due =
+            due_onboarding_email_ids(0, 24 * SECONDS_PER_HOUR, &["welcome".to_string()], true);
         assert_eq!(due, vec!["day1_tasks"]);
     }
 
