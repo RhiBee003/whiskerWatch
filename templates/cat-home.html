@@ -32,7 +32,7 @@
           <p class="panel-intro">Visit your cat's virtual play area and decorate it with paw points.</p>
         </div>
         <div class="cat-home-header-actions">
-          <p class="cat-home-balance"><span class="stat-label">Paw Points</span> <strong>{{PAW_POINTS}}</strong></p>
+          <p class="cat-home-balance"><span class="stat-label stat-label-paw-points" aria-hidden="true">{{PAW_POINTS_ICON}}</span> <strong>{{PAW_POINTS}}</strong></p>
           <a href="/home?tab=pet" class="cat-home-back-link">🐾 Back to My Pet</a>
         </div>
       </div>
@@ -40,6 +40,9 @@
       <div class="cat-home-layout">
         <section class="dashboard-card cat-home-stage-card" aria-label="{{PET_NAME}}'s play area">
           {{CAT_HOME_SCENE}}
+          {{CAT_HOME_OUTFIT_SHOP}}
+          {{CAT_HOME_TAP_BOOST_SHOP}}
+          {{CAT_HOME_PETTING_BONUS_SHOP}}
         </section>
 
         <article class="dashboard-card cat-home-shop">
@@ -52,7 +55,11 @@
       </div>
     </main>
 
+    {{NEED_PAW_POINTS_MODAL}}
+
     <script src="/paw-cursor.js"></script>
+    <script src="/alerts.js"></script>
+    <script src="/shop-affordance.js"></script>
     <script src="/cinder-pet.js"></script>
     <script src="/cat-home.js"></script>
   </body>

@@ -3,6 +3,25 @@
   const panels = document.querySelectorAll(".dashboard-panel");
   const tabList = document.querySelector(".dashboard-tabs");
 
+  function updateDashboardTabsEdgeFade() {
+    if (!(tabList instanceof HTMLElement)) {
+      return;
+    }
+
+    if (window.matchMedia("(min-width: 901px)").matches) {
+      tabList.classList.remove("is-scroll-start", "is-scroll-end");
+      return;
+    }
+
+    const maxScroll = Math.max(0, tabList.scrollWidth - tabList.clientWidth);
+    const noScroll = maxScroll <= 4;
+    const atStart = tabList.scrollLeft <= 4;
+    const atEnd = tabList.scrollLeft >= maxScroll - 4;
+
+    tabList.classList.toggle("is-scroll-start", atStart || noScroll);
+    tabList.classList.toggle("is-scroll-end", atEnd || noScroll);
+  }
+
   function scrollActiveTabIntoView(tabId) {
     if (!tabList) {
       return;
@@ -28,6 +47,8 @@
     } else if (tabRect.right > listRect.right - inset) {
       tabList.scrollLeft += tabRect.right - listRect.right + inset;
     }
+
+    updateDashboardTabsEdgeFade();
   }
 
   const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
@@ -108,6 +129,8 @@
 
     if (tabId !== "forum") {
       cleanParams.delete("thread");
+      cleanParams.delete("community");
+      cleanParams.delete("breed");
     }
 
     if (tabId !== "feedback") {
@@ -143,7 +166,12 @@
 
   const params = new URLSearchParams(window.location.search);
 
-  function showStatusToast(message) {
+  function showStatusToast(message, isError) {
+    if (typeof window.whiskerShowToast === "function") {
+      window.whiskerShowToast(message, { error: isError === true });
+      return;
+    }
+
     const toast = document.createElement("div");
     toast.className = "task-complete-toast";
     toast.setAttribute("role", "status");
@@ -166,9 +194,176 @@
     showStatusToast("Task completed! Paw Points and XP added.");
   }
 
+  const shareCardModal = document.getElementById("share-card-modal");
+  const shareCardPreview = document.getElementById("share-card-preview");
+  const shareCardCopyBtn = document.getElementById("share-card-copy");
+  const shareCardNativeBtn = document.getElementById("share-card-native");
+  const shareCardTweetBtn = document.getElementById("share-card-tweet");
+  const shareCardCloseBtn = document.getElementById("share-card-close");
+  const shareCardDismissBtn = document.getElementById("share-card-dismiss");
+  let activeShareCard = null;
+
+  function formatCareStreakLabel(days) {
+    if (typeof days !== "number" || days <= 0) {
+      return "Start today";
+    }
+    return days === 1 ? "1 day" : `${days} days`;
+  }
+
+  function updateCareStreakDisplays(days) {
+    const label = formatCareStreakLabel(days);
+    document.querySelectorAll(".care-streak-chip .stat-value").forEach((element) => {
+      element.textContent = label;
+    });
+    document.querySelectorAll(".care-streak-chip").forEach((element) => {
+      element.setAttribute("aria-label", days > 0 ? `Care streak: ${label}` : "Care streak");
+    });
+
+    const streakBig = document.querySelector(".care-streak-card .care-streak-big");
+    if (streakBig && days > 0) {
+      streakBig.textContent = label;
+    }
+  }
+
+  function renderShareCardPreview(card) {
+    if (!(shareCardPreview instanceof HTMLElement) || !card) {
+      return;
+    }
+
+    const badge =
+      card.kind === "streak"
+        ? `${card.value}-day streak`
+        : `Level ${card.value}`;
+    shareCardPreview.innerHTML = `
+      <span class="share-card-preview-badge">${badge}</span>
+      <p class="share-card-preview-emoji" aria-hidden="true">🐾</p>
+      <p class="share-card-preview-headline">${card.headline}</p>
+      <p class="share-card-preview-subline">${card.subline}</p>
+    `;
+  }
+
+  function closeShareCardModal() {
+    if (!(shareCardModal instanceof HTMLElement)) {
+      return;
+    }
+    shareCardModal.hidden = true;
+    activeShareCard = null;
+  }
+
+  function openShareCardModal(card) {
+    if (!(shareCardModal instanceof HTMLElement) || !card?.url) {
+      return;
+    }
+
+    activeShareCard = card;
+    renderShareCardPreview(card);
+
+    if (shareCardTweetBtn instanceof HTMLAnchorElement) {
+      const text = `${card.headline} ${card.url}`;
+      shareCardTweetBtn.href = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
+    }
+
+    if (shareCardNativeBtn instanceof HTMLButtonElement) {
+      const canShare = typeof navigator.share === "function";
+      shareCardNativeBtn.hidden = !canShare;
+    }
+
+    shareCardModal.hidden = false;
+  }
+
+  async function copyActiveShareLink() {
+    if (!activeShareCard?.url) {
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(activeShareCard.url);
+      } else {
+        throw new Error("clipboard unavailable");
+      }
+      showStatusToast("Share link copied!");
+    } catch (_error) {
+      showStatusToast("Could not copy the link. Try again.", true);
+    }
+  }
+
+  async function nativeShareActiveCard() {
+    if (!activeShareCard?.url || typeof navigator.share !== "function") {
+      return;
+    }
+
+    try {
+      await navigator.share({
+        title: activeShareCard.headline,
+        text: activeShareCard.subline,
+        url: activeShareCard.url,
+      });
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        showStatusToast("Could not open the share sheet.", true);
+      }
+    }
+  }
+
+  if (shareCardCopyBtn instanceof HTMLButtonElement) {
+    shareCardCopyBtn.addEventListener("click", () => {
+      copyActiveShareLink();
+    });
+  }
+
+  if (shareCardNativeBtn instanceof HTMLButtonElement) {
+    shareCardNativeBtn.addEventListener("click", () => {
+      nativeShareActiveCard();
+    });
+  }
+
+  if (shareCardCloseBtn instanceof HTMLButtonElement) {
+    shareCardCloseBtn.addEventListener("click", closeShareCardModal);
+  }
+
+  if (shareCardDismissBtn instanceof HTMLButtonElement) {
+    shareCardDismissBtn.addEventListener("click", closeShareCardModal);
+  }
+
+  if (shareCardModal instanceof HTMLElement) {
+    shareCardModal.addEventListener("click", (event) => {
+      if (event.target === shareCardModal) {
+        closeShareCardModal();
+      }
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const shareBtn = target.closest(".share-streak-btn");
+    if (!(shareBtn instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    openShareCardModal({
+      url: shareBtn.dataset.shareUrl || "",
+      headline: shareBtn.dataset.shareHeadline || "",
+      subline: "Daily cat care on WhiskerWatch",
+      kind: shareBtn.dataset.shareKind || "streak",
+      value: Number(shareBtn.dataset.shareValue || 0),
+    });
+  });
+
   const requestedTab = params.get("tab");
   const initialTab = resolveInitialTab(params);
   showTab(initialTab);
+  updateDashboardTabsEdgeFade();
+
+  if (tabList) {
+    tabList.addEventListener("scroll", updateDashboardTabsEdgeFade, { passive: true });
+  }
+
+  window.addEventListener("resize", updateDashboardTabsEdgeFade);
 
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) {
@@ -292,6 +487,13 @@
     return false;
   }
 
+  const PAW_POINTS_ICON_HTML =
+    '<img src="/images/paw-points-icon.png" alt="" class="paw-points-icon" width="40" height="21" decoding="async" aria-hidden="true" />';
+
+  function formatPawPointsBalance(pawPoints) {
+    return `<span class="paw-points-amount">${pawPoints} ${PAW_POINTS_ICON_HTML}</span>`;
+  }
+
   function updatePawPointsDisplays(pawPoints) {
     if (typeof pawPoints !== "number") {
       return;
@@ -303,14 +505,18 @@
 
     const pointsBig = document.querySelector("#panel-points .points-big");
     if (pointsBig) {
-      pointsBig.textContent = `${pawPoints} paw points`;
+      pointsBig.innerHTML = formatPawPointsBalance(pawPoints);
     }
 
     const modalBalance = document.querySelector(
       "#parent-level-modal .parent-level-section:nth-of-type(2) .parent-level-dl dd a.parent-level-shop-link"
     );
     if (modalBalance) {
-      modalBalance.textContent = `${pawPoints} paw points`;
+      modalBalance.innerHTML = formatPawPointsBalance(pawPoints);
+    }
+
+    if (typeof window.whiskerRefreshShopAffordance === "function") {
+      window.whiskerRefreshShopAffordance(pawPoints);
     }
   }
 
@@ -405,6 +611,10 @@
       }
       refreshCalendarView();
     }
+
+    if (typeof data.care_streak_days === "number") {
+      updateCareStreakDisplays(data.care_streak_days);
+    }
   }
 
   document.addEventListener("submit", async (event) => {
@@ -457,6 +667,9 @@
       }
       if (data.status === "completed") {
         showTaskCompleteToast();
+        if (data.share_card) {
+          openShareCardModal(data.share_card);
+        }
       } else if (data.status === "reopened") {
         showStatusToast("Task marked incomplete. Paw points for that task were deducted.");
       } else if (data.status === "time_updated") {
@@ -1704,20 +1917,7 @@
   }
 
   function showAccountPetNameFlash(message, isError) {
-    const shell = document.querySelector(".dashboard-shell");
-    if (!(shell instanceof HTMLElement)) {
-      return;
-    }
-
-    shell.querySelectorAll(".account-pet-name-flash").forEach((element) => element.remove());
-
-    const flash = document.createElement("p");
-    flash.className = isError
-      ? "auth-error status-flash account-pet-name-flash"
-      : "auth-success status-flash account-pet-name-flash";
-    flash.setAttribute("role", isError ? "alert" : "status");
-    flash.textContent = message;
-    shell.insertBefore(flash, shell.firstChild);
+    showStatusToast(message, isError);
   }
 
   function openAccountPetNameForm() {

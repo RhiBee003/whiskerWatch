@@ -537,12 +537,244 @@ pub async fn fulfill_checkout_session(state: &AppState, session_id: &str) -> Res
         .get("user_email")
         .cloned()
         .ok_or_else(|| "missing user_email metadata".to_string())?;
+
+    if metadata.get("product_type").map(String::as_str) == Some("breed_guide") {
+        let breed_slug = metadata
+            .get("breed_slug")
+            .cloned()
+            .ok_or_else(|| "missing breed_slug metadata".to_string())?;
+        return unlock_breed_guide_if_new(state, &session.id, &email, &breed_slug).await;
+    }
+
+    if metadata.get("product_type").map(String::as_str) == Some("premium_plus") {
+        return unlock_premium_if_new(state, &session.id, &email).await;
+    }
+
     let points: u32 = metadata
         .get("paw_points")
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| "missing paw_points metadata".to_string())?;
 
     credit_points_if_new(state, &session.id, &email, points).await
+}
+
+pub async fn create_breed_guide_checkout_session(
+    state: &AppState,
+    user_email: &str,
+    breed_slug: &str,
+    breed_name: &str,
+) -> Result<String, CheckoutError> {
+    let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let mut profile = crate::get_or_create_profile(state, user_email).await;
+    let customer_id = ensure_stripe_customer(state, &mut profile).await?;
+
+    let base = public_app_url();
+    let success_url = format!(
+        "{base}/home/breed-guide/{slug}?status=guide_bought&session_id={{CHECKOUT_SESSION_ID}}",
+        slug = urlencoding::encode(breed_slug),
+    );
+    let cancel_url = format!(
+        "{base}/home/breed-guide/{slug}?status=guide_cancelled",
+        slug = urlencoding::encode(breed_slug),
+    );
+
+    let product_name = format!("{breed_name} Premium Care Guide");
+    let cents = crate::breed_guides::PRICE_CENTS;
+    let client = Client::new();
+    let response = client
+        .post("https://api.stripe.com/v1/checkout/sessions")
+        .basic_auth(&secret, None::<&str>)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "mode=payment\
+&customer={customer}\
+&client_reference_id={email}\
+&success_url={success}\
+&cancel_url={cancel}\
+&metadata[user_email]={email}\
+&metadata[product_type]=breed_guide\
+&metadata[breed_slug]={breed_slug}\
+&metadata[paw_points]=0\
+&payment_intent_data[setup_future_usage]=off_session\
+&saved_payment_method_options[payment_method_save]=enabled\
+&line_items[0][quantity]=1\
+&line_items[0][price_data][currency]=usd\
+&line_items[0][price_data][unit_amount]={cents}\
+&line_items[0][price_data][product_data][name]={name}",
+            customer = urlencoding::encode(&customer_id),
+            email = urlencoding::encode(user_email),
+            success = urlencoding::encode(&success_url),
+            cancel = urlencoding::encode(&cancel_url),
+            breed_slug = urlencoding::encode(breed_slug),
+            cents = cents,
+            name = urlencoding::encode(&product_name),
+        ))
+        .send()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    if !status.is_success() {
+        return Err(CheckoutError::StripeApi(body));
+    }
+
+    #[derive(Deserialize)]
+    struct SessionResponse {
+        url: Option<String>,
+    }
+
+    let parsed: SessionResponse =
+        serde_json::from_str(&body).map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    parsed.url.ok_or(CheckoutError::MissingUrl)
+}
+
+pub async fn create_premium_checkout_session(
+    state: &AppState,
+    user_email: &str,
+) -> Result<String, CheckoutError> {
+    let secret = stripe_secret_key().ok_or(CheckoutError::NotConfigured)?;
+    let mut profile = crate::get_or_create_profile(state, user_email).await;
+    if crate::entitlements::has_premium(profile.premium_unlocked, user_email) {
+        return Err(CheckoutError::StripeApi("already premium".to_string()));
+    }
+
+    let customer_id = ensure_stripe_customer(state, &mut profile).await?;
+
+    let base = public_app_url();
+    let success_url = format!(
+        "{base}/home?tab=account&status=premium_bought&session_id={{CHECKOUT_SESSION_ID}}"
+    );
+    let cancel_url = format!("{base}/home?tab=account&status=premium_cancelled");
+
+    let product_name = "WhiskerWatch Plus";
+    let cents = crate::entitlements::PREMIUM_PRICE_CENTS;
+    let client = Client::new();
+    let response = client
+        .post("https://api.stripe.com/v1/checkout/sessions")
+        .basic_auth(&secret, None::<&str>)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "mode=payment\
+&customer={customer}\
+&client_reference_id={email}\
+&success_url={success}\
+&cancel_url={cancel}\
+&metadata[user_email]={email}\
+&metadata[product_type]=premium_plus\
+&metadata[paw_points]=0\
+&payment_intent_data[setup_future_usage]=off_session\
+&saved_payment_method_options[payment_method_save]=enabled\
+&line_items[0][quantity]=1\
+&line_items[0][price_data][currency]=usd\
+&line_items[0][price_data][unit_amount]={cents}\
+&line_items[0][price_data][product_data][name]={name}",
+            customer = urlencoding::encode(&customer_id),
+            email = urlencoding::encode(user_email),
+            success = urlencoding::encode(&success_url),
+            cancel = urlencoding::encode(&cancel_url),
+            cents = cents,
+            name = urlencoding::encode(product_name),
+        ))
+        .send()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    if !status.is_success() {
+        return Err(CheckoutError::StripeApi(body));
+    }
+
+    #[derive(Deserialize)]
+    struct SessionResponse {
+        url: Option<String>,
+    }
+
+    let parsed: SessionResponse =
+        serde_json::from_str(&body).map_err(|e| CheckoutError::StripeApi(e.to_string()))?;
+
+    parsed.url.ok_or(CheckoutError::MissingUrl)
+}
+
+pub async fn unlock_premium_if_new(
+    state: &AppState,
+    session_id: &str,
+    email: &str,
+) -> Result<bool, String> {
+    let inserted = state
+        .storage
+        .try_record_stripe_fulfillment(session_id, email, 0)
+        .map_err(|e| format!("{e:?}"))?;
+
+    if !inserted {
+        return Ok(false);
+    }
+
+    let mut profile = crate::get_or_create_profile(state, email).await;
+    if !profile.premium_unlocked {
+        profile.premium_unlocked = true;
+        crate::push_activity(
+            &mut profile,
+            "Unlocked WhiskerWatch Plus — health records, vet logging, and multi-pet support.",
+        );
+        let today = chrono::Local::now().date_naive();
+        profile.calendar_events = crate::merge_calendar_events(&profile, today);
+        let _ = crate::refresh_profile_tasks(&mut profile);
+        state
+            .storage
+            .save_profile(&profile)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+
+    Ok(true)
+}
+
+pub async fn unlock_breed_guide_if_new(
+    state: &AppState,
+    session_id: &str,
+    email: &str,
+    breed_slug: &str,
+) -> Result<bool, String> {
+    let inserted = state
+        .storage
+        .try_record_stripe_fulfillment(session_id, email, 0)
+        .map_err(|e| format!("{e:?}"))?;
+
+    if !inserted {
+        return Ok(false);
+    }
+
+    let Some(guide) = crate::breed_guides::guide_for_slug(breed_slug) else {
+        return Err("unknown breed guide".to_string());
+    };
+
+    let mut profile = crate::get_or_create_profile(state, email).await;
+    if !crate::breed_guides::user_owns_guide(&profile.owned_breed_guides, &guide.slug) {
+        profile.owned_breed_guides.push(guide.slug.clone());
+        crate::push_activity(
+            &mut profile,
+            &format!(
+                "Unlocked the {} premium care guide.",
+                guide.breed_name
+            ),
+        );
+        state
+            .storage
+            .save_profile(&profile)
+            .map_err(|e| format!("{e:?}"))?;
+    }
+
+    Ok(true)
 }
 
 pub async fn credit_points_if_new(

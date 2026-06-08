@@ -1,14 +1,14 @@
-struct BreedEntry {
-    name: &'static str,
-    description: &'static str,
+pub struct BreedEntry {
+    pub name: &'static str,
+    pub description: &'static str,
 }
 
-struct BreedCategory {
-    title: &'static str,
-    breeds: &'static [BreedEntry],
+pub struct BreedCategory {
+    pub title: &'static str,
+    pub breeds: &'static [BreedEntry],
 }
 
-const CATALOG: &[BreedCategory] = &[
+pub const CATALOG: &[BreedCategory] = &[
     BreedCategory {
         title: "Long-Haired Breeds",
         breeds: &[
@@ -187,6 +187,25 @@ const CATALOG: &[BreedCategory] = &[
     },
 ];
 
+pub fn breed_slug(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .replace([' ', '\''], "-")
+        .replace("--", "-")
+}
+
+pub fn find_breed(name: &str) -> Option<(&'static str, &'static BreedEntry)> {
+    let target = name.trim();
+    for category in CATALOG {
+        for breed in category.breeds {
+            if breed.name.eq_ignore_ascii_case(target) {
+                return Some((category.title, breed));
+            }
+        }
+    }
+    None
+}
+
 fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -204,7 +223,7 @@ pub fn render_catalog_html() -> String {
                 .map(|breed| {
                     let encoded = urlencoding::encode(breed.name);
                     format!(
-                        r#"<a class="breed-option" href="/home?setup=pet&amp;breed={encoded}"><span class="breed-option-name">{}</span><span class="breed-option-desc">{}</span></a>"#,
+                        r#"<a class="breed-option" href="/home?setup=pet&amp;breed={encoded}"><span class="breed-option-name">{}</span><span class="breed-option-desc">{}</span><span class="breed-option-premium">Premium care guide</span></a>"#,
                         escape_html(breed.name),
                         escape_html(breed.description),
                     )

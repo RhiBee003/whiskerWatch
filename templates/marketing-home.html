@@ -4,7 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#fac8dd" />
-    <title>WhiskerWatch</title>
+    <meta
+      name="description"
+      content="WhiskerWatch helps cat parents watch over their cat's health — vet reminders, vaccine tracking, daily care signals, and breed-specific guides."
+    />
+    <title>WhiskerWatch — Watch over your cat's health</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="homepage">
@@ -14,6 +18,7 @@
       </a>
       <nav>
         <a href="/">HOME</a>
+        <a href="/breeds">CAT BREEDS</a>
         <a href="/#features">FEATURES</a>
         <a href="/login">LOG IN</a>
         <a href="/feedback">FEEDBACK</a>
@@ -24,12 +29,21 @@
     <main id="home">
       <section class="home-hero section">
         <div class="home-hero-copy">
-          <h1>The app for cat owners, from a cat owner.</h1>
-          <a class="home-download-btn" href="#download" id="download">
+          <p class="home-hero-kicker">Cat health tracking for real life</p>
+          <h1>Watch over your cat's health — every day.</h1>
+          <p class="home-hero-lead">
+            WhiskerWatch turns daily care into health signals you can actually act on: feeding rhythms, litter habits, vet visits, vaccines, and breed-specific watch-outs.
+          </p>
+          <ul class="home-health-pillars">
+            <li>Vet &amp; vaccine reminders</li>
+            <li>Daily care task tracking</li>
+            <li>Breed-specific health guides</li>
+          </ul>
+          <a class="home-download-btn" href="/signup" id="download">
             <span class="home-app-icon" aria-hidden="true">
               <span class="home-app-icon-ww">WW</span>
             </span>
-            <span class="home-download-label">Download the App</span>
+            <span class="home-download-label">Start watching for free</span>
             <svg class="home-download-arrow" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 fill="currentColor"
@@ -43,83 +57,116 @@
             </svg>
           </a>
           <p class="home-hero-sub">
-            Get the app on your watch to stay updated on your kitties needs! ios and android compatible.
+            Built by a cat owner who wanted one calm place to track what matters — before small changes become emergencies.
+            <a href="/breeds" class="home-hero-link">Browse free breed care guides</a>
           </p>
         </div>
         <div class="home-hero-art">
           <img
             class="home-hero-tat-girl"
             src="/images/tat-girl-frame.png?v=2"
-            alt="A cat owner with tattoos playing with a black kitten"
+            alt="A cat owner keeping a gentle eye on their kitten's health and daily care"
           />
         </div>
       </section>
 
       <section class="home-features" id="features">
-        <article class="home-feature home-feature-play">
-          <figure class="home-feature-promo-figure">
-            <img
-              class="home-feature-promo-img"
-              src="/images/notif-play.png"
-              alt="Be notified when it's time to play! WhiskerWatch notification: Cinder needs attention — click to log quality time spent with your fur baby."
-            />
-          </figure>
-          <div class="home-feature-art home-feature-art-right">
-            <img src="/images/cat-leaping.png" alt="Black cat leaping through a cozy living room" />
+        <header class="home-features-intro section">
+          <h2>How WhiskerWatch watches over your cat</h2>
+          <p>Care routines, health records, and reminders in one dashboard — so you notice the quiet stuff early.</p>
+        </header>
+
+        <article class="home-feature home-feature-health">
+          <div class="home-feature-card home-feature-copy">
+            <h3>Vet visits &amp; health history</h3>
+            <p>Log appointments, vaccines, and notes. Get nudges when checkups are due and keep your cat's health story in one place.</p>
+          </div>
+          <div class="home-feature-media">
+            <figure class="home-feature-promo-figure">
+              <img
+                class="home-feature-promo-img"
+                src="/images/notif-health.png"
+                alt="Stay up to date on shots and check ups with health tracking. WhiskerWatch reminders for monthly health reports and vet appointments."
+              />
+            </figure>
+            <div class="home-feature-art home-feature-art-right">
+              <img
+                class="home-feature-art-img"
+                src="/images/vet-scene-feature.png"
+                alt="Veterinarian giving a black cat a vaccination at the clinic"
+              />
+            </div>
           </div>
         </article>
 
         <article class="home-feature home-feature-feed">
-          <div class="home-feature-art home-feature-art-left">
-            <img
-              class="home-feature-art-img"
-              src="/images/cat-eating-feature.png"
-              alt="Black cat eating from a bowl in a cozy living room"
-            />
+          <div class="home-feature-card home-feature-copy">
+            <h3>Daily care = daily health signals</h3>
+            <p>Feeding, water, litter, and play tasks aren't just chores — they're early warnings. WhiskerWatch helps you stay consistent and spot when habits shift.</p>
           </div>
-          <figure class="home-feature-promo-figure">
-            <img
-              class="home-feature-promo-img"
-              src="/images/notif-feed.png"
-              alt="Feeding reminders so your kitties are always on schedule! WhiskerWatch notification: Cinder is hangry — feed your fur babies and check in for paw points."
-            />
-          </figure>
+          <div class="home-feature-media">
+            <div class="home-feature-art home-feature-art-left">
+              <img
+                class="home-feature-art-img"
+                src="/images/cat-eating-feature.png"
+                alt="Black cat eating from a bowl — consistent feeding routines support better health monitoring"
+              />
+            </div>
+            <figure class="home-feature-promo-figure">
+              <img
+                class="home-feature-promo-img"
+                src="/images/notif-feed.png"
+                alt="Feeding reminders so your cat stays on schedule. WhiskerWatch notification: time to feed and check in on appetite."
+              />
+            </figure>
+          </div>
         </article>
 
-        <article class="home-feature home-feature-health">
-          <figure class="home-feature-promo-figure">
-            <img
-              class="home-feature-promo-img"
-              src="/images/notif-health.png"
-              alt="Stay up to date on shots and check ups with health tracking. WhiskerWatch reminders for monthly health reports and vet appointments."
-            />
-          </figure>
-          <div class="home-feature-art home-feature-art-right">
-            <img
-              class="home-feature-art-img"
-              src="/images/vet-scene-feature.png"
-              alt="Veterinarian giving a black cat a vaccination at the clinic"
-            />
+        <article class="home-feature home-feature-play">
+          <div class="home-feature-card home-feature-copy">
+            <h3>Wellness beyond the vet clinic</h3>
+            <p>Activity and enrichment matter for weight, mood, and stress. Gentle reminders help you keep your cat moving, playing, and thriving at home.</p>
+          </div>
+          <div class="home-feature-media">
+            <figure class="home-feature-promo-figure">
+              <img
+                class="home-feature-promo-img"
+                src="/images/notif-play.png"
+                alt="Be notified when it's time to play. WhiskerWatch notification: your cat needs attention — log quality time for their wellbeing."
+              />
+            </figure>
+            <div class="home-feature-art home-feature-art-right">
+              <img src="/images/cat-leaping.png" alt="Black cat leaping through a cozy living room during active play" />
+            </div>
           </div>
         </article>
       </section>
 
       <section class="home-pawpoints section">
+        <div class="home-pawpoints-copy">
+          <h2 class="home-serif-title">Small wins add up to better health habits</h2>
+          <p class="home-pawpoints-lead">Earn paw points when you complete care tasks — turning watchfulness into a routine you actually keep.</p>
+        </div>
         <figure class="home-pawpoints-promo-figure">
           <img
             class="home-pawpoints-promo-img"
             src="/images/paw-points-promo.png"
-            alt="Paw points! Earn rewards with paw-shaped treats and track your progress."
+            alt="Paw points reward consistent care tracking and healthy daily routines."
           />
         </figure>
       </section>
 
       <section class="home-earn section">
+        <div class="home-earn-copy home-feature-card">
+          <h2>Start watching over your cat today</h2>
+          <p>Create a free profile, add your cat's breed and age, and let WhiskerWatch build a care plan with health reminders from day one.</p>
+          <a class="download-btn home-earn-cta" href="/signup">Create your free account</a>
+        </div>
         <figure class="home-feature-promo-figure home-earn-promo-figure">
           <img
             class="home-feature-promo-img"
             src="/images/notif-earn.png"
-            alt="Earn paw points to customize your kitty. WhiskerWatch notification: you have paw points to spend on cat and environment customization."
+            alt="WhiskerWatch helps you track care and customize your cat's health dashboard."
           />
         </figure>
       </section>
@@ -129,9 +176,13 @@
       <div class="homepage-footer-brand">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
       </div>
-      <p>Keep your kitties happy ~ in home life, <strong>and virtual!</strong></p>
+      <p>Watch over your cat's health — with care tasks, vet records, and calm daily reminders.</p>
       <p class="homepage-footer-links">
+        <a href="/signup">Sign up free</a>
+        <span aria-hidden="true">·</span>
         <a href="/login">Log in</a>
+        <span aria-hidden="true">·</span>
+        <a href="/breeds">Breed guides</a>
         <span aria-hidden="true">·</span>
         <a href="/feedback">Feedback</a>
         <span aria-hidden="true">·</span>

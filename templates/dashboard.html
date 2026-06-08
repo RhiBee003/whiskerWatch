@@ -29,14 +29,15 @@
       {{STATUS_BLOCK}}
 
       <div class="dashboard-stats">
-        <button type="button" class="stat-chip stat-chip-button paw-points-trigger" aria-label="View paw points">
-          <span class="stat-label">Paw Points</span>
+        <button type="button" class="stat-chip stat-chip-button paw-points-trigger" aria-label="View paw points: {{PAW_POINTS}}">
+          <span class="stat-label stat-label-paw-points" aria-hidden="true">{{PAW_POINTS_ICON}}</span>
           <span class="stat-value">{{PAW_POINTS}}</span>
         </button>
         <button type="button" class="stat-chip stat-chip-button parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
           <span class="stat-label">Parent Level</span>
           <span class="stat-value">Level {{PARENT_LEVEL}}</span>
         </button>
+        {{CARE_STREAK_CHIP}}
       </div>
 
       <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
@@ -46,7 +47,7 @@
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
-        <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Forum</button>
+        <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Community</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
       </nav>
 
@@ -66,6 +67,7 @@
               {{PET_HEALTH_INFO}}
             </div>
           </div>
+          {{MULTI_PET_SECTION}}
         </section>
 
         <section id="panel-points" class="dashboard-panel" role="tabpanel" hidden>
@@ -73,7 +75,7 @@
           <div class="points-grid">
             <article class="dashboard-card">
               <h2>Your Balance</h2>
-              <p class="points-big">{{PAW_POINTS}} paw points</p>
+              <p class="points-big">{{PAW_POINTS_BALANCE}}</p>
               <p>Earn more by completing care tasks for your real cat.</p>
             </article>
             <button type="button" class="dashboard-card parent-level-card parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
@@ -84,6 +86,7 @@
               <p class="parent-level-progress-summary">{{LEVEL_PROGRESS_TEXT}}</p>
               <span class="parent-level-hint">Tap for XP &amp; paw points breakdown</span>
             </button>
+            {{STREAK_CARD_SECTION}}
           </div>
           <article class="dashboard-card">
             <h2>Recent Activity</h2>
@@ -122,6 +125,10 @@
               </dl>
             </article>
             {{ACCOUNT_PASSWORD_SECTION}}
+            {{ACCOUNT_PREMIUM_SECTION}}
+            {{COMMUNITY_VISIBILITY_SECTION}}
+            {{ACCOUNT_NOTIFICATIONS_SECTION}}
+            {{ACCOUNT_ONBOARDING_EMAILS_SECTION}}
             <article class="dashboard-card">
               <h2>Saved payment methods</h2>
               {{SAVED_PAYMENT_METHODS}}
@@ -194,6 +201,7 @@
     {{ACCOUNT_PET_PHOTO_MODAL}}
     {{VET_FOLLOWUP_MODAL}}
     {{PARENT_LEVEL_BREAKDOWN_MODAL}}
+    {{SHARE_CARD_MODAL}}
 
     <div class="onboarding-backdrop task-time-backdrop" id="task-time-modal" role="dialog" aria-modal="true" aria-labelledby="task-time-title" hidden>
       <div class="onboarding-modal task-time-modal">
@@ -217,8 +225,10 @@
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
+    <script src="/shop-affordance.js"></script>
     <script src="/alerts.js"></script>
     <script src="/dashboard.js"></script>
+    <script src="/push-notifications.js"></script>
     <script src="/password-toggle.js"></script>
     <script src="/feedback-forum.js"></script>
     <script src="/cinder-pet.js"></script>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{{PAGE_TITLE}}</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body breed-guide-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home?tab=pet">HOME</a>
+        <a href="/home?tab=health">HEALTH</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
+        {{ADMIN_NAV_LINK}}
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <main class="breed-guide-shell section">
+      {{STATUS_BLOCK}}
+      {{BREED_GUIDE_CONTENT}}
+      <p class="breed-guide-back-wrap">
+        <a href="/home?tab=health" class="download-btn auth-link-btn breed-guide-back-btn">Back to Health tab</a>
+      </p>
+    </main>
+
+    <script src="/paw-cursor.js"></script>
+    <script src="/alerts.js"></script>
+  </body>
+</html>

@@ -35,6 +35,8 @@ services:
         value: https://whiskerwatch.onrender.com
       - key: ADMIN_EMAIL
         value: rhibee003@gmail.com
+      - key: COMPANY_EMAIL
+        value: WhiskerWatch.official@gmail.com
       - key: ADMIN_PASSWORD
         generateValue: true
       - key: STRIPE_SECRET_KEY
@@ -43,3 +45,21 @@ services:
         sync: false
       - key: STRIPE_PUBLISHABLE_KEY
         sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: WhiskerWatch

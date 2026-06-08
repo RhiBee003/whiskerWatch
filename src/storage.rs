@@ -13,6 +13,15 @@ pub struct FeedbackForumEntry {
     pub reward_granted: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct PushSubscription {
+    pub email: String,
+    pub endpoint: String,
+    pub p256dh: String,
+    pub auth: String,
+    pub created_at: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FeedbackVoteCounts {
     pub upvotes: u32,
@@ -82,6 +91,18 @@ impl From<bcrypt::BcryptError> for StorageError {
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
     data_dir: PathBuf,
+}
+
+fn map_forum_post_row(row: &rusqlite::Row<'_>) -> Result<ForumPost, rusqlite::Error> {
+    Ok(ForumPost {
+        id: row.get(0)?,
+        user_id: row.get(1)?,
+        author_username: row.get(2)?,
+        title: row.get(3)?,
+        body: row.get(4)?,
+        created_at: row.get::<_, i64>(5)? as u64,
+        breed_slug: row.get(6)?,
+    })
 }
 
 fn find_project_root(mut start: PathBuf) -> Option<PathBuf> {
@@ -280,7 +301,9 @@ impl Storage {
         storage.migrate_password_reset_tokens_table()?;
         storage.migrate_auth_sessions_table()?;
         storage.migrate_forum_tables()?;
+        storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
+        storage.migrate_push_subscriptions_table()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
@@ -317,10 +340,53 @@ impl Storage {
         storage.migrate_password_reset_tokens_table()?;
         storage.migrate_auth_sessions_table()?;
         storage.migrate_forum_tables()?;
+        storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
+        storage.migrate_push_subscriptions_table()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
+    }
+
+    fn migrate_push_subscriptions_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS push_subscriptions (
+                 endpoint TEXT PRIMARY KEY,
+                 email TEXT NOT NULL COLLATE NOCASE,
+                 p256dh TEXT NOT NULL,
+                 auth TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_email
+                 ON push_subscriptions(email);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_forum_breed_slug(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare("PRAGMA table_info(forum_posts)")?;
+        let mut has_breed_slug = false;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for name in rows {
+            if name? == "breed_slug" {
+                has_breed_slug = true;
+                break;
+            }
+        }
+
+        if !has_breed_slug {
+            conn.execute(
+                "ALTER TABLE forum_posts ADD COLUMN breed_slug TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_forum_posts_breed_slug ON forum_posts(breed_slug)",
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     fn migrate_submission_tables(&self) -> Result<(), StorageError> {
@@ -1163,60 +1229,113 @@ impl Storage {
         author_username: &str,
         title: &str,
         body: &str,
+        breed_slug: &str,
         created_at: u64,
     ) -> Result<i64, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
-            "INSERT INTO forum_posts (user_id, author_username, title, body, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO forum_posts (user_id, author_username, title, body, breed_slug, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 user_id,
                 author_username,
                 title,
                 body,
+                breed_slug,
                 created_at as i64,
             ],
         )?;
         Ok(conn.last_insert_rowid())
     }
 
-    pub fn list_forum_posts(&self) -> Result<Vec<ForumPost>, StorageError> {
+    pub fn list_forum_posts(&self, breed_slug: Option<&str>) -> Result<Vec<ForumPost>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let filter = breed_slug.map(str::trim).filter(|value| !value.is_empty());
+        let posts = if let Some(slug) = filter {
+            let mut stmt = conn.prepare(
+                "SELECT id, user_id, author_username, title, body, created_at, breed_slug
+                 FROM forum_posts WHERE breed_slug = ?1 ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map(params![slug], map_forum_post_row)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, user_id, author_username, title, body, created_at, breed_slug
+                 FROM forum_posts ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], map_forum_post_row)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        Ok(posts)
+    }
+
+    pub fn list_profile_emails(&self) -> Result<Vec<String>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare("SELECT email FROM user_profiles ORDER BY email ASC")?;
+        let emails = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(emails)
+    }
+
+    pub fn upsert_push_subscription(
+        &self,
+        email: &str,
+        endpoint: &str,
+        p256dh: &str,
+        auth: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, email, p256dh, auth, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(endpoint) DO UPDATE SET
+                 email = excluded.email,
+                 p256dh = excluded.p256dh,
+                 auth = excluded.auth,
+                 created_at = excluded.created_at",
+            params![endpoint, email, p256dh, auth, created_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_push_subscription(&self, endpoint: &str) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "DELETE FROM push_subscriptions WHERE endpoint = ?1",
+            params![endpoint],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_push_subscriptions(&self) -> Result<Vec<PushSubscription>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT id, user_id, author_username, title, body, created_at
-             FROM forum_posts ORDER BY created_at DESC",
+            "SELECT email, endpoint, p256dh, auth, created_at
+             FROM push_subscriptions ORDER BY created_at ASC",
         )?;
-        let posts = stmt
-            .query_map([], |row| {
-                Ok(ForumPost {
-                    id: row.get(0)?,
-                    user_id: row.get(1)?,
-                    author_username: row.get(2)?,
-                    title: row.get(3)?,
-                    body: row.get(4)?,
-                    created_at: row.get::<_, i64>(5)? as u64,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(posts)
+        let rows = stmt.query_map([], |row| {
+            Ok(PushSubscription {
+                email: row.get(0)?,
+                endpoint: row.get(1)?,
+                p256dh: row.get(2)?,
+                auth: row.get(3)?,
+                created_at: row.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn get_forum_post(&self, post_id: i64) -> Result<Option<ForumPost>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT id, user_id, author_username, title, body, created_at
+            "SELECT id, user_id, author_username, title, body, created_at, breed_slug
              FROM forum_posts WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![post_id])?;
         if let Some(row) = rows.next()? {
-            Ok(Some(ForumPost {
-                id: row.get(0)?,
-                user_id: row.get(1)?,
-                author_username: row.get(2)?,
-                title: row.get(3)?,
-                body: row.get(4)?,
-                created_at: row.get::<_, i64>(5)? as u64,
-            }))
+            Ok(Some(map_forum_post_row(&row)?))
         } else {
             Ok(None)
         }
@@ -1782,6 +1901,7 @@ mod tests {
                 "catmom",
                 "How often should I brush?",
                 "My longhair sheds a lot.",
+                "persian",
                 now,
             )
             .expect("create post");
@@ -1796,9 +1916,19 @@ mod tests {
             )
             .expect("create reply");
 
-        let posts = storage.list_forum_posts().expect("list posts");
+        let posts = storage.list_forum_posts(None).expect("list posts");
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0].title, "How often should I brush?");
+        assert_eq!(posts[0].breed_slug, "persian");
+
+        let persian_posts = storage
+            .list_forum_posts(Some("persian"))
+            .expect("list persian posts");
+        assert_eq!(persian_posts.len(), 1);
+        assert!(storage
+            .list_forum_posts(Some("siamese"))
+            .expect("list siamese")
+            .is_empty());
 
         let replies = storage.list_forum_replies(post_id).expect("list replies");
         assert_eq!(replies.len(), 1);
@@ -1819,6 +1949,7 @@ mod tests {
                 "owner",
                 "Question?",
                 "Details.",
+                "",
                 now,
             )
             .expect("create post");
@@ -1879,7 +2010,10 @@ mod tests {
                 .expect("delete post as owner"),
             ForumDeleteOutcome::Deleted
         );
-        assert!(storage.list_forum_posts().expect("list posts").is_empty());
+        assert!(storage
+            .list_forum_posts(None)
+            .expect("list posts")
+            .is_empty());
     }
 
     #[test]

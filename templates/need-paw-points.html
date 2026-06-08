@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WhiskerWatch — Need Paw Points</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home?tab=pet">HOME</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
+        {{ADMIN_NAV_LINK}}
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <main class="section need-paw-points-page">
+      <article class="login-card need-paw-points-card" aria-labelledby="need-paw-points-title">
+        <h1 id="need-paw-points-title">You don't have enough paw points</h1>
+        <p class="need-paw-points-lead">Purchase some to get <strong>{{ITEM_NAME}}</strong> ({{ITEM_PRICE}} paw points).</p>
+        <p class="need-paw-points-balance">
+          Your balance: <strong>{{PAW_POINTS}}</strong> paw points ·
+          You need <strong>{{POINTS_NEEDED}}</strong> more.
+        </p>
+
+        <section class="need-paw-points-purchase" aria-labelledby="buy-paw-points-title">
+          <h2 id="buy-paw-points-title">Purchase paw points</h2>
+          {{BUY_POINTS_SECTION}}
+        </section>
+
+        <section class="need-paw-points-earn" aria-labelledby="earn-paw-points-title">
+          <h2 id="earn-paw-points-title">Or earn paw points</h2>
+          <ul class="need-paw-points-earn-list">
+            <li>Complete care tasks on the <a href="/home?tab=tasks">Tasks</a> tab.</li>
+            <li>Tap your cat in <a href="/home/cat-home">Cat Home</a> for +1 point per pet.</li>
+          </ul>
+        </section>
+
+        <p class="need-paw-points-back">
+          <a href="{{RETURN_URL}}" class="download-btn">Back to shop</a>
+        </p>
+      </article>
+    </main>
+
+    <script src="/paw-cursor.js"></script>
+  </body>
+</html>

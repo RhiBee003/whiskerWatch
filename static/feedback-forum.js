@@ -29,6 +29,11 @@
   }
 
   function showVoteToast(message) {
+    if (typeof window.whiskerShowToast === "function") {
+      window.whiskerShowToast(message);
+      return;
+    }
+
     const toast = document.createElement("div");
     toast.className = "task-complete-toast is-visible";
     toast.setAttribute("role", "status");
