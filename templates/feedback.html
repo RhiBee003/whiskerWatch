@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WhiskerWatch Feedback</title>
+    <title>WhiskerWatch Feedback Forum</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -20,42 +20,13 @@
       </nav>
     </header>
 
-    <main class="section login-page">
-      <section class="login-card" aria-labelledby="feedback-title">
-        <h1 id="feedback-title">Share Feedback</h1>
-        <p>Tell us what to fix, what to improve, or share a new idea for WhiskerWatch.</p>
-        {{FEEDBACK_SUCCESS_BLOCK}}
-        {{FEEDBACK_ERROR_BLOCK}}
-
-        <form class="login-form contact-form" action="/feedback" method="post">
-          <label for="name">Name</label>
-          <input id="name" name="name" type="text" placeholder="Your name" value="{{FORM_NAME}}" required />
-
-          <label for="email">Email</label>
-          <input id="email" name="email" type="email" placeholder="you@example.com" value="{{FORM_EMAIL}}" required />
-
-          <label for="category">Type</label>
-          <select id="category" name="category" required>
-            <option value="">Choose one...</option>
-            <option value="fix">Something to fix</option>
-            <option value="idea">New idea</option>
-            <option value="bug">Bug report</option>
-          </select>
-
-          <label for="message">Details</label>
-          <textarea
-            id="message"
-            name="message"
-            rows="5"
-            placeholder="What should we change or add?"
-            required
-          ></textarea>
-
-          <button type="submit" class="download-btn login-submit">Send Feedback</button>
-        </form>
-      </section>
+    <main class="section feedback-forum-page">
+      {{FEEDBACK_SUCCESS_BLOCK}}
+      {{FEEDBACK_ERROR_BLOCK}}
+      {{FEEDBACK_FORUM_CONTENT}}
     </main>
     <script src="/paw-cursor.js"></script>
     <script src="/alerts.js"></script>
+    <script src="/feedback-forum.js"></script>
   </body>
 </html>

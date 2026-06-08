@@ -1,20 +1,40 @@
 (function () {
-  const isTouchDevice =
-    window.matchMedia("(hover: none) and (pointer: coarse)").matches ||
-    "ontouchstart" in window;
+  const pawTapSelector = [
+    "a[href]",
+    "button",
+    '[role="button"]',
+    "input:not([type='hidden'])",
+    "select",
+    "textarea",
+    "label",
+    "summary",
+    ".dashboard-tab",
+    ".home-download-btn",
+    ".admin-logout-btn",
+    ".password-toggle",
+    ".pet-photo-paw-btn",
+    "#cinder-pet-stage",
+    ".cinder-pet-stage",
+    ".cat-home-pet-stage",
+    ".pet-cinder-stage",
+  ].join(", ");
 
-  if (!isTouchDevice) {
-    return;
+  function isPawTapTarget(target) {
+    return target instanceof Element && target.closest(pawTapSelector) !== null;
   }
 
   document.addEventListener(
-    "touchstart",
+    "pointerdown",
     (event) => {
-      const touch = event.touches[0];
-      if (!touch) {
+      if (event.button !== 0) {
         return;
       }
-      showPawPop(touch.clientX, touch.clientY);
+
+      if (!isPawTapTarget(event.target)) {
+        return;
+      }
+
+      showPawPop(event.clientX, event.clientY);
     },
     { passive: true }
   );

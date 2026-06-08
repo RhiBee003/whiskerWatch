@@ -14,7 +14,8 @@
         <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
       </div>
       <nav class="dashboard-nav">
-        <a href="/home">HOME</a>
+        <a href="/home?tab=pet">HOME</a>
+        {{CAT_HOME_NAV_LINK}}
         <a href="/home?tab=feedback">FEEDBACK</a>
         {{ADMIN_NAV_LINK}}
         <a href="/contact">CONTACT</a>
@@ -46,7 +47,6 @@
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Forum</button>
-        <button type="button" class="dashboard-tab" data-tab="feedback" role="tab" aria-selected="false">Feedback</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
       </nav>
 
@@ -60,6 +60,8 @@
               <p class="pet-meta">{{PET_META}}</p>
               <p class="pet-outfit">Wearing: <strong>{{EQUIPPED_OUTFIT}}</strong></p>
               <p class="pet-blurb">{{PET_BLURB}}</p>
+              {{PET_CHECK_CTA}}
+              {{PET_VIDEO_UPLOAD_CTA}}
               {{PET_SETUP_CTA}}
               {{PET_HEALTH_INFO}}
             </div>
@@ -102,9 +104,11 @@
         <section id="panel-account" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Account</h1>
           <div class="account-grid">
-            <article class="dashboard-card">
+            <article class="dashboard-card account-profile-card">
               <h2>Profile</h2>
+              {{ACCOUNT_PET_PHOTO}}
               <dl class="account-dl">
+                {{ACCOUNT_PET_NAME_FIELD}}
                 <dt>First name</dt>
                 <dd>{{USER_FIRST_NAME}}</dd>
                 <dt>Last name</dt>
@@ -117,6 +121,7 @@
                 <dd>{{MEMBER_SINCE}}</dd>
               </dl>
             </article>
+            {{ACCOUNT_PASSWORD_SECTION}}
             <article class="dashboard-card">
               <h2>Saved payment methods</h2>
               {{SAVED_PAYMENT_METHODS}}
@@ -131,8 +136,8 @@
         <section id="panel-tasks" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Care Tasks</h1>
           {{TASKS_PET_SETUP_PROMPT}}
-          <p class="panel-intro">Complete tasks to earn paw points and level up as a cat parent.</p>
-          <ul class="task-list">
+          <p class="panel-intro">Complete tasks to earn paw points. Feeding tasks adjust automatically for your cat's age. Tap any time to change it.</p>
+          <ul class="task-list" id="tasks-panel-list">
             {{TASK_LIST}}
           </ul>
         </section>
@@ -154,10 +159,17 @@
           <h1>Calendar</h1>
           {{CALENDAR_PET_SETUP_PROMPT}}
           {{CALENDAR_VET_ALERT}}
-          <p class="panel-intro">{{CALENDAR_MONTH_LABEL}}</p>
+          <p class="panel-intro">Browse months to see tasks and events, or add your own.</p>
           <div class="calendar-layout">
-            <div class="calendar-grid" aria-label="Month calendar">
-              {{CALENDAR_GRID}}
+            <div class="calendar-month-panel">
+              <div class="calendar-nav">
+                <button type="button" class="calendar-nav-btn" id="calendar-prev-month" aria-label="Previous month">‹</button>
+                <h2 class="calendar-month-label" id="calendar-month-label">{{CALENDAR_MONTH_LABEL}}</h2>
+                <button type="button" class="calendar-nav-btn" id="calendar-next-month" aria-label="Next month">›</button>
+              </div>
+              <div class="calendar-grid" id="calendar-grid" aria-label="Month calendar">
+                {{CALENDAR_GRID}}
+              </div>
             </div>
             <article class="dashboard-card calendar-events">
               <h2 id="calendar-events-heading">Select a date</h2>
@@ -168,6 +180,9 @@
               <ul class="event-list" id="event-list">
                 {{EVENT_LIST}}
               </ul>
+              <div class="calendar-add-event" id="calendar-add-event" hidden>
+                <a href="#" class="download-btn calendar-add-event-btn" id="calendar-add-event-btn">Add event</a>
+              </div>
             </article>
           </div>
         </section>
@@ -175,13 +190,37 @@
     </div>
 
     {{ONBOARDING_MODAL}}
+    {{PET_VIDEO_MODAL}}
+    {{ACCOUNT_PET_PHOTO_MODAL}}
     {{VET_FOLLOWUP_MODAL}}
     {{PARENT_LEVEL_BREAKDOWN_MODAL}}
+
+    <div class="onboarding-backdrop task-time-backdrop" id="task-time-modal" role="dialog" aria-modal="true" aria-labelledby="task-time-title" hidden>
+      <div class="onboarding-modal task-time-modal">
+        <h2 id="task-time-title">Change task time</h2>
+        <p class="task-time-task-name" id="task-time-task-name"></p>
+        <div class="calendar-time-picker">
+          <label for="task-time-slider">Time</label>
+          <output id="task-time-label" class="calendar-time-picker-value" for="task-time-slider">12:00 PM</output>
+          <input id="task-time-slider" type="range" min="360" max="1320" step="15" value="720" />
+          <div class="calendar-time-picker-scale" aria-hidden="true">
+            <span>6:00 AM</span>
+            <span>10:00 PM</span>
+          </div>
+        </div>
+        <div class="task-time-modal-actions">
+          <button type="button" class="download-btn" id="task-time-save">Save time</button>
+          <button type="button" class="task-time-cancel-btn" id="task-time-cancel">Never mind 🐾</button>
+        </div>
+      </div>
+    </div>
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
     <script src="/alerts.js"></script>
     <script src="/dashboard.js"></script>
+    <script src="/password-toggle.js"></script>
+    <script src="/feedback-forum.js"></script>
     <script src="/cinder-pet.js"></script>
   </body>
 </html>

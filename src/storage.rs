@@ -4,6 +4,22 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Clone)]
+pub struct FeedbackForumEntry {
+    pub submission: FeedbackSubmission,
+    pub upvotes: u32,
+    pub downvotes: u32,
+    pub user_vote: Option<i8>,
+    pub reward_granted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeedbackVoteCounts {
+    pub upvotes: u32,
+    pub downvotes: u32,
+    pub user_vote: Option<i8>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ForumDeleteOutcome {
     Deleted,
@@ -20,6 +36,7 @@ pub enum StorageError {
     EmailTaken,
     UsernameTaken,
     InvalidResetToken,
+    InvalidInput(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -32,6 +49,7 @@ impl std::fmt::Display for StorageError {
             Self::EmailTaken => write!(f, "email already registered"),
             Self::UsernameTaken => write!(f, "username already taken"),
             Self::InvalidResetToken => write!(f, "invalid or expired reset token"),
+            Self::InvalidInput(message) => write!(f, "{message}"),
         }
     }
 }
@@ -209,7 +227,16 @@ impl Storage {
                  category TEXT NOT NULL,
                  message TEXT NOT NULL,
                  submitted_at INTEGER NOT NULL,
-                 user_id TEXT
+                 user_id TEXT,
+                 author_username TEXT NOT NULL DEFAULT '',
+                 reward_granted INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS feedback_votes (
+                 feedback_id INTEGER NOT NULL,
+                 user_id TEXT NOT NULL,
+                 vote INTEGER NOT NULL,
+                 PRIMARY KEY (feedback_id, user_id),
+                 FOREIGN KEY (feedback_id) REFERENCES feedback(id)
              );
              CREATE TABLE IF NOT EXISTS forum_posts (
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -318,12 +345,35 @@ impl Storage {
                  category TEXT NOT NULL,
                  message TEXT NOT NULL,
                  submitted_at INTEGER NOT NULL,
-                 user_id TEXT
+                 user_id TEXT,
+                 author_username TEXT NOT NULL DEFAULT '',
+                 reward_granted INTEGER NOT NULL DEFAULT 0
              );",
         )?;
         if !Self::table_has_column(&conn, "feedback", "user_id")? {
             conn.execute("ALTER TABLE feedback ADD COLUMN user_id TEXT", [])?;
         }
+        if !Self::table_has_column(&conn, "feedback", "author_username")? {
+            conn.execute(
+                "ALTER TABLE feedback ADD COLUMN author_username TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
+        if !Self::table_has_column(&conn, "feedback", "reward_granted")? {
+            conn.execute(
+                "ALTER TABLE feedback ADD COLUMN reward_granted INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS feedback_votes (
+                 feedback_id INTEGER NOT NULL,
+                 user_id TEXT NOT NULL,
+                 vote INTEGER NOT NULL,
+                 PRIMARY KEY (feedback_id, user_id),
+                 FOREIGN KEY (feedback_id) REFERENCES feedback(id)
+             );",
+        )?;
         Ok(())
     }
 
@@ -870,11 +920,11 @@ impl Storage {
         Ok(contacts)
     }
 
-    pub fn save_feedback(&self, submission: &FeedbackSubmission) -> Result<(), StorageError> {
+    pub fn save_feedback(&self, submission: &FeedbackSubmission) -> Result<i64, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
-            "INSERT INTO feedback (name, email, category, message, submitted_at, user_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO feedback (name, email, category, message, submitted_at, user_id, author_username)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 submission.name,
                 submission.email,
@@ -882,30 +932,229 @@ impl Storage {
                 submission.message,
                 submission.submitted_at as i64,
                 submission.user_id,
+                submission.author_username,
             ],
         )?;
-        Ok(())
+        Ok(conn.last_insert_rowid())
     }
 
     pub fn load_feedback(&self) -> Result<Vec<FeedbackSubmission>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT name, email, category, message, submitted_at, user_id
+            "SELECT id, name, email, category, message, submitted_at, user_id, author_username
              FROM feedback ORDER BY submitted_at ASC",
         )?;
         let feedback = stmt
             .query_map([], |row| {
+                let author_username: String = row.get(7)?;
+                let name: String = row.get(1)?;
                 Ok(FeedbackSubmission {
-                    name: row.get(0)?,
-                    email: row.get(1)?,
-                    category: row.get(2)?,
-                    message: row.get(3)?,
-                    submitted_at: row.get::<_, i64>(4)? as u64,
-                    user_id: row.get(5)?,
+                    id: row.get(0)?,
+                    name: name.clone(),
+                    email: row.get(2)?,
+                    category: row.get(3)?,
+                    message: row.get(4)?,
+                    submitted_at: row.get::<_, i64>(5)? as u64,
+                    user_id: row.get(6)?,
+                    author_username: if author_username.is_empty() {
+                        name
+                    } else {
+                        author_username
+                    },
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(feedback)
+    }
+
+    pub fn load_feedback_forum(
+        &self,
+        viewer_email: Option<&str>,
+    ) -> Result<Vec<FeedbackForumEntry>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, email, category, message, submitted_at, user_id, author_username,
+                    reward_granted
+             FROM feedback ORDER BY submitted_at ASC",
+        )?;
+        let mut entries = stmt
+            .query_map([], |row| {
+                let author_username: String = row.get(7)?;
+                let name: String = row.get(1)?;
+                let reward_granted: i64 = row.get(8)?;
+                Ok(FeedbackForumEntry {
+                    submission: FeedbackSubmission {
+                        id: row.get(0)?,
+                        name: name.clone(),
+                        email: row.get(2)?,
+                        category: row.get(3)?,
+                        message: row.get(4)?,
+                        submitted_at: row.get::<_, i64>(5)? as u64,
+                        user_id: row.get(6)?,
+                        author_username: if author_username.is_empty() {
+                            name
+                        } else {
+                            author_username
+                        },
+                    },
+                    upvotes: 0,
+                    downvotes: 0,
+                    user_vote: None,
+                    reward_granted: reward_granted != 0,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for entry in &mut entries {
+            let (upvotes, downvotes) = Self::feedback_vote_totals(&conn, entry.submission.id)?;
+            entry.upvotes = upvotes;
+            entry.downvotes = downvotes;
+            if let Some(email) = viewer_email {
+                entry.user_vote = Self::feedback_user_vote(&conn, entry.submission.id, email)?;
+            }
+        }
+
+        entries.sort_by(|left, right| {
+            let left_score = left.upvotes as i32 - left.downvotes as i32;
+            let right_score = right.upvotes as i32 - right.downvotes as i32;
+            right_score
+                .cmp(&left_score)
+                .then_with(|| right.submission.submitted_at.cmp(&left.submission.submitted_at))
+        });
+
+        Ok(entries)
+    }
+
+    fn feedback_vote_totals(
+        conn: &rusqlite::Connection,
+        feedback_id: i64,
+    ) -> Result<(u32, u32), StorageError> {
+        let upvotes: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM feedback_votes WHERE feedback_id = ?1 AND vote = 1",
+            [feedback_id],
+            |row| row.get(0),
+        )?;
+        let downvotes: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM feedback_votes WHERE feedback_id = ?1 AND vote = -1",
+            [feedback_id],
+            |row| row.get(0),
+        )?;
+        Ok((upvotes, downvotes))
+    }
+
+    fn feedback_user_vote(
+        conn: &rusqlite::Connection,
+        feedback_id: i64,
+        user_id: &str,
+    ) -> Result<Option<i8>, StorageError> {
+        let vote: Result<i8, rusqlite::Error> = conn.query_row(
+            "SELECT vote FROM feedback_votes WHERE feedback_id = ?1 AND user_id = ?2",
+            params![feedback_id, user_id],
+            |row| row.get(0),
+        );
+        match vote {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn get_feedback_submission(&self, feedback_id: i64) -> Result<Option<FeedbackSubmission>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let row = conn.query_row(
+            "SELECT id, name, email, category, message, submitted_at, user_id, author_username
+             FROM feedback WHERE id = ?1",
+            [feedback_id],
+            |row| {
+                let author_username: String = row.get(7)?;
+                let name: String = row.get(1)?;
+                Ok(FeedbackSubmission {
+                    id: row.get(0)?,
+                    name: name.clone(),
+                    email: row.get(2)?,
+                    category: row.get(3)?,
+                    message: row.get(4)?,
+                    submitted_at: row.get::<_, i64>(5)? as u64,
+                    user_id: row.get(6)?,
+                    author_username: if author_username.is_empty() {
+                        name
+                    } else {
+                        author_username
+                    },
+                })
+            },
+        );
+        match row {
+            Ok(submission) => Ok(Some(submission)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn cast_feedback_vote(
+        &self,
+        feedback_id: i64,
+        user_id: &str,
+        vote: i8,
+    ) -> Result<FeedbackVoteCounts, StorageError> {
+        if vote != 1 && vote != -1 {
+            return Err(StorageError::InvalidInput("vote must be 1 or -1".to_string()));
+        }
+
+        let conn = self.conn.lock().expect("storage lock");
+        let exists: bool = conn.query_row(
+            "SELECT 1 FROM feedback WHERE id = ?1",
+            [feedback_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+        if !exists {
+            return Err(StorageError::InvalidInput("feedback not found".to_string()));
+        }
+
+        let existing = Self::feedback_user_vote(&conn, feedback_id, user_id)?;
+        match existing {
+            Some(current) if current == vote => {}
+            Some(_) => {
+                conn.execute(
+                    "UPDATE feedback_votes SET vote = ?1 WHERE feedback_id = ?2 AND user_id = ?3",
+                    params![vote, feedback_id, user_id],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO feedback_votes (feedback_id, user_id, vote) VALUES (?1, ?2, ?3)",
+                    params![feedback_id, user_id, vote],
+                )?;
+            }
+        }
+
+        let (upvotes, downvotes) = Self::feedback_vote_totals(&conn, feedback_id)?;
+        let user_vote = Self::feedback_user_vote(&conn, feedback_id, user_id)?;
+        Ok(FeedbackVoteCounts {
+            upvotes,
+            downvotes,
+            user_vote,
+        })
+    }
+
+    pub fn feedback_reward_granted(&self, feedback_id: i64) -> Result<bool, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let granted: i64 = conn.query_row(
+            "SELECT reward_granted FROM feedback WHERE id = ?1",
+            [feedback_id],
+            |row| row.get(0),
+        )?;
+        Ok(granted != 0)
+    }
+
+    pub fn mark_feedback_reward_granted(&self, feedback_id: i64) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE feedback SET reward_granted = 1 WHERE id = ?1",
+            [feedback_id],
+        )?;
+        Ok(())
     }
 
     pub fn create_forum_post(
@@ -1641,12 +1890,14 @@ mod tests {
             let storage = Storage::open_at(data_dir.clone()).expect("open storage");
             storage
                 .save_feedback(&FeedbackSubmission {
+                    id: 0,
                     name: "Tester".to_string(),
                     email: "tester@example.com".to_string(),
                     category: "idea".to_string(),
                     message: "Keep feedback after restart".to_string(),
                     submitted_at: 1_700_000_100,
                     user_id: Some("tester@example.com".to_string()),
+                    author_username: "Tester".to_string(),
                 })
                 .expect("save feedback");
         }
@@ -1662,12 +1913,14 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
         let submission = FeedbackSubmission {
+            id: 0,
             name: "Tester".to_string(),
             email: "tester@example.com".to_string(),
             category: "bug".to_string(),
             message: "Button does not click".to_string(),
             submitted_at: 1_700_000_100,
             user_id: Some("tester@example.com".to_string()),
+            author_username: "Tester".to_string(),
         };
 
         storage.save_feedback(&submission).expect("save feedback");
@@ -1675,6 +1928,83 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].message, "Button does not click");
         assert_eq!(loaded[0].user_id.as_deref(), Some("tester@example.com"));
+    }
+
+    #[test]
+    fn feedback_votes_toggle_and_count() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let post_id = storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Idea Cat".to_string(),
+                email: "idea@example.com".to_string(),
+                category: "idea".to_string(),
+                message: "Treat counter".to_string(),
+                submitted_at: 1_700_000_100,
+                user_id: Some("idea@example.com".to_string()),
+                author_username: "Idea Cat".to_string(),
+            })
+            .expect("save feedback");
+
+        let first = storage
+            .cast_feedback_vote(post_id, "voter@example.com", 1)
+            .expect("upvote");
+        assert_eq!(first.upvotes, 1);
+        assert_eq!(first.downvotes, 0);
+        assert_eq!(first.user_vote, Some(1));
+
+        let unchanged = storage
+            .cast_feedback_vote(post_id, "voter@example.com", 1)
+            .expect("repeat upvote");
+        assert_eq!(unchanged.upvotes, 1);
+        assert_eq!(unchanged.user_vote, Some(1));
+
+        let switched = storage
+            .cast_feedback_vote(post_id, "voter@example.com", -1)
+            .expect("downvote");
+        assert_eq!(switched.upvotes, 0);
+        assert_eq!(switched.downvotes, 1);
+        assert_eq!(switched.user_vote, Some(-1));
+
+        let forum = storage
+            .load_feedback_forum(Some("voter@example.com"))
+            .expect("load forum");
+        assert_eq!(forum.len(), 1);
+        assert_eq!(forum[0].downvotes, 1);
+        assert_eq!(forum[0].user_vote, Some(-1));
+    }
+
+    #[test]
+    fn feedback_author_can_vote_and_switch_on_own_post() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let author = "idea@example.com";
+        let post_id = storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Idea Cat".to_string(),
+                email: author.to_string(),
+                category: "idea".to_string(),
+                message: "Treat counter".to_string(),
+                submitted_at: 1_700_000_100,
+                user_id: Some(author.to_string()),
+                author_username: "Idea Cat".to_string(),
+            })
+            .expect("save feedback");
+
+        let up = storage
+            .cast_feedback_vote(post_id, author, 1)
+            .expect("author upvote");
+        assert_eq!(up.upvotes, 1);
+        assert_eq!(up.user_vote, Some(1));
+
+        let down = storage
+            .cast_feedback_vote(post_id, author, -1)
+            .expect("author switch to downvote");
+        assert_eq!(down.upvotes, 0);
+        assert_eq!(down.downvotes, 1);
+        assert_eq!(down.user_vote, Some(-1));
     }
 }
 

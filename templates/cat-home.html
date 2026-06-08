@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WhiskerWatch — {{PET_NAME}}'s Home</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body cat-home-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home?tab=pet">HOME</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
+        {{ADMIN_NAV_LINK}}
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <main class="cat-home-shell section">
+      {{STATUS_BLOCK}}
+
+      <div class="cat-home-header">
+        <div>
+          <h1>{{PET_NAME}}'s Home</h1>
+          <p class="panel-intro">Visit your cat's virtual play area and decorate it with paw points.</p>
+        </div>
+        <div class="cat-home-header-actions">
+          <p class="cat-home-balance"><span class="stat-label">Paw Points</span> <strong>{{PAW_POINTS}}</strong></p>
+          <a href="/home?tab=pet" class="cat-home-back-link">🐾 Back to My Pet</a>
+        </div>
+      </div>
+
+      <div class="cat-home-layout">
+        <section class="dashboard-card cat-home-stage-card" aria-label="{{PET_NAME}}'s play area">
+          {{CAT_HOME_SCENE}}
+        </section>
+
+        <article class="dashboard-card cat-home-shop">
+          <h2>Home decor shop</h2>
+          <p class="field-hint">Buy rugs, beds, toys, plants, and room themes. Each slot holds one item at a time.</p>
+          <div class="decor-grid">
+            {{DECOR_CARDS}}
+          </div>
+        </article>
+      </div>
+    </main>
+
+    <script src="/paw-cursor.js"></script>
+    <script src="/cinder-pet.js"></script>
+    <script src="/cat-home.js"></script>
+  </body>
+</html>

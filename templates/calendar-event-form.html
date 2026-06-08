@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WhiskerWatch — Add calendar event</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home?tab=pet">HOME</a>
+        <a href="/home?tab=feedback">FEEDBACK</a>
+        {{ADMIN_NAV_LINK}}
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <main class="calendar-event-form-shell section">
+      <article class="dashboard-card calendar-event-form-card">
+        <h1>Add event</h1>
+        <p class="panel-intro">Schedule something for <strong>{{DATE_LABEL}}</strong>.</p>
+
+        <form class="login-form calendar-event-form" action="/home/calendar/event" method="post">
+          <label for="calendar-event-title">Event name</label>
+          <input
+            id="calendar-event-title"
+            name="title"
+            type="text"
+            placeholder="e.g. Brush coat, refill water"
+            required
+            maxlength="120"
+            autofocus
+          />
+
+          <div class="calendar-time-picker">
+            <label for="calendar-event-time">Time</label>
+            <output id="calendar-event-time-label" class="calendar-time-picker-value" for="calendar-event-time">12:00 PM</output>
+            <input
+              id="calendar-event-time"
+              name="time_minutes"
+              type="range"
+              min="360"
+              max="1320"
+              step="15"
+              value="720"
+            />
+            <div class="calendar-time-picker-scale" aria-hidden="true">
+              <span>6:00 AM</span>
+              <span>10:00 PM</span>
+            </div>
+          </div>
+
+          <input type="hidden" name="day" value="{{EVENT_DAY}}" />
+          <input type="hidden" name="month" value="{{EVENT_MONTH}}" />
+          <input type="hidden" name="year" value="{{EVENT_YEAR}}" />
+
+          <div class="calendar-event-form-actions">
+            <button type="submit" class="download-btn login-submit">Save event</button>
+            <a href="{{BACK_URL}}" class="calendar-event-cancel">Cancel</a>
+          </div>
+        </form>
+      </article>
+    </main>
+
+    <script src="/paw-cursor.js"></script>
+    <script src="/calendar-event-form.js"></script>
+  </body>
+</html>

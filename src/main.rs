@@ -1,13 +1,13 @@
 use axum::{
     Form, Json, Router,
     body::Bytes,
-    extract::{Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode, header, header::ACCEPT},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
 use serde::{
     Deserialize, Serialize,
     de::{Deserializer, Error as DeError},
@@ -84,6 +84,18 @@ struct ResetPasswordForm {
     confirm_password: String,
 }
 
+#[derive(Deserialize)]
+struct ChangePasswordForm {
+    current_password: String,
+    new_password: String,
+    confirm_password: String,
+}
+
+#[derive(Deserialize)]
+struct ChangePetNameForm {
+    pet_name: String,
+}
+
 #[derive(Deserialize, Default)]
 struct SignupQuery {
     error: Option<String>,
@@ -96,6 +108,7 @@ struct SignupQuery {
 #[derive(Deserialize, Default)]
 struct FeedbackQuery {
     status: Option<String>,
+    feedback: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -118,6 +131,149 @@ struct User {
     created_at: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+struct CareSchedule {
+    feed_time_minutes: u16,
+    #[serde(default = "default_feed_lunch_time")]
+    feed_lunch_time_minutes: u16,
+    #[serde(default = "default_feed_afternoon_time")]
+    feed_afternoon_time_minutes: u16,
+    #[serde(default = "default_feed_dinner_time")]
+    feed_dinner_time_minutes: u16,
+    water_morning_time_minutes: u16,
+    water_evening_time_minutes: u16,
+    litter_time_minutes: u16,
+    #[serde(default = "default_play_time_minutes")]
+    play_time_minutes: u16,
+}
+
+const FEEDING_TASK_IDS: &[&str] = &[
+    "feed_breakfast",
+    "feed_lunch",
+    "feed_afternoon",
+    "feed_dinner",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FeedingPlan {
+    FourMeals,
+    ThreeMeals,
+    TwoMeals,
+}
+
+fn default_play_time_minutes() -> u16 {
+    17 * 60 + 30
+}
+
+fn default_feed_lunch_time() -> u16 {
+    13 * 60
+}
+
+fn default_feed_afternoon_time() -> u16 {
+    17 * 60
+}
+
+fn default_feed_dinner_time() -> u16 {
+    18 * 60
+}
+
+fn default_care_schedule() -> CareSchedule {
+    CareSchedule {
+        feed_time_minutes: 8 * 60,
+        feed_lunch_time_minutes: default_feed_lunch_time(),
+        feed_afternoon_time_minutes: default_feed_afternoon_time(),
+        feed_dinner_time_minutes: default_feed_dinner_time(),
+        water_morning_time_minutes: 8 * 60,
+        water_evening_time_minutes: 21 * 60,
+        litter_time_minutes: 10 * 60,
+        play_time_minutes: default_play_time_minutes(),
+    }
+}
+
+fn feeding_plan_for_profile(profile: &UserProfile, today: NaiveDate) -> FeedingPlan {
+    let Some(birth) = pet_birth_date(profile, today) else {
+        return FeedingPlan::TwoMeals;
+    };
+
+    let days = (today - birth).num_days().max(0);
+    if days < 182 {
+        return FeedingPlan::FourMeals;
+    }
+    if days < 365 {
+        return FeedingPlan::ThreeMeals;
+    }
+
+    FeedingPlan::TwoMeals
+}
+
+fn feeding_specs_for_plan(
+    plan: FeedingPlan,
+    schedule: &CareSchedule,
+) -> Vec<(&'static str, &'static str, u16, u32)> {
+    match plan {
+        FeedingPlan::FourMeals => vec![
+            (
+                "feed_breakfast",
+                "Morning feeding",
+                schedule.feed_time_minutes,
+                10,
+            ),
+            (
+                "feed_lunch",
+                "Lunch feeding",
+                schedule.feed_lunch_time_minutes,
+                10,
+            ),
+            (
+                "feed_afternoon",
+                "Afternoon feeding",
+                schedule.feed_afternoon_time_minutes,
+                10,
+            ),
+            (
+                "feed_dinner",
+                "Evening feeding",
+                schedule.feed_dinner_time_minutes,
+                10,
+            ),
+        ],
+        FeedingPlan::ThreeMeals => vec![
+            (
+                "feed_breakfast",
+                "Morning feeding",
+                schedule.feed_time_minutes,
+                12,
+            ),
+            (
+                "feed_lunch",
+                "Lunch feeding",
+                schedule.feed_lunch_time_minutes,
+                12,
+            ),
+            (
+                "feed_dinner",
+                "Evening feeding",
+                schedule.feed_dinner_time_minutes,
+                12,
+            ),
+        ],
+        FeedingPlan::TwoMeals => vec![
+            (
+                "feed_breakfast",
+                "Morning feeding",
+                schedule.feed_time_minutes,
+                15,
+            ),
+            (
+                "feed_dinner",
+                "Evening feeding",
+                schedule.feed_dinner_time_minutes,
+                15,
+            ),
+        ],
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct UserTask {
     id: String,
@@ -130,11 +286,19 @@ struct UserTask {
     due_month: Option<u32>,
     #[serde(default)]
     due_year: Option<u32>,
+    #[serde(default = "default_task_time_minutes")]
+    time_minutes: u16,
     reward: u32,
+}
+
+fn default_task_time_minutes() -> u16 {
+    600
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CalendarEvent {
+    #[serde(default)]
+    id: Option<String>,
     day: u32,
     #[serde(default = "default_calendar_month")]
     month: u32,
@@ -142,6 +306,12 @@ struct CalendarEvent {
     year: u32,
     title: String,
     time_label: String,
+    #[serde(default = "default_event_time_minutes")]
+    time_minutes: u16,
+}
+
+fn default_event_time_minutes() -> u16 {
+    600
 }
 
 fn default_calendar_month() -> u32 {
@@ -166,6 +336,10 @@ struct VeterinaryNote {
 
 const VET_APPOINTMENT_TASK_ID: &str = "vet_appointment_asap";
 const MAX_PET_PHOTO_BYTES: usize = 5 * 1024 * 1024;
+const MAX_PET_VIDEO_BYTES: usize = 50 * 1024 * 1024;
+const PET_VIDEO_CLIP_MIN_SECONDS: f32 = 3.0;
+const PET_VIDEO_CLIP_MAX_SECONDS: f32 = 6.0;
+const PET_PET_REWARD: u32 = 1;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ProfileActivity {
@@ -194,6 +368,8 @@ struct UserProfile {
     #[serde(default)]
     pet_age_years: Option<u32>,
     #[serde(default)]
+    pet_birth_date: Option<String>,
+    #[serde(default)]
     last_vet_date: Option<String>,
     #[serde(default)]
     never_been_to_vet: bool,
@@ -213,14 +389,30 @@ struct UserProfile {
     vaccine_history: Vec<VaccineRecord>,
     #[serde(default)]
     pet_vaccines_unknown: bool,
+    #[serde(default = "default_care_schedule")]
+    care_schedule: CareSchedule,
     tasks: Vec<UserTask>,
     calendar_events: Vec<CalendarEvent>,
+    #[serde(default)]
+    user_calendar_events: Vec<CalendarEvent>,
     activity: Vec<ProfileActivity>,
     /// Stripe Customer id (`cus_...`) only—never PAN/CVV. Card data stays at Stripe.
     #[serde(default)]
     stripe_customer_id: Option<String>,
     #[serde(default)]
     pet_photo_url: Option<String>,
+    #[serde(default)]
+    pet_video_url: Option<String>,
+    #[serde(default)]
+    pet_video_clip_start: Option<f32>,
+    #[serde(default)]
+    pet_video_clip_duration: Option<f32>,
+    #[serde(default)]
+    pending_purrfect_idea_ids: Vec<i64>,
+    #[serde(default = "default_owned_decor")]
+    owned_decor: Vec<String>,
+    #[serde(default = "default_equipped_decor")]
+    equipped_decor: HashMap<String, String>,
 }
 
 struct OutfitCatalogItem {
@@ -229,6 +421,87 @@ struct OutfitCatalogItem {
     emoji: &'static str,
     price: u32,
 }
+
+struct DecorCatalogItem {
+    id: &'static str,
+    name: &'static str,
+    emoji: &'static str,
+    price: u32,
+    slot: &'static str,
+}
+
+const DECOR_CATALOG: [DecorCatalogItem; 10] = [
+    DecorCatalogItem {
+        id: "sunny_nook",
+        name: "Sunny Window Nook",
+        emoji: "🪟",
+        price: 0,
+        slot: "room",
+    },
+    DecorCatalogItem {
+        id: "starry_night",
+        name: "Starry Night Room",
+        emoji: "🌙",
+        price: 80,
+        slot: "room",
+    },
+    DecorCatalogItem {
+        id: "garden_view",
+        name: "Garden View",
+        emoji: "🌿",
+        price: 100,
+        slot: "room",
+    },
+    DecorCatalogItem {
+        id: "soft_mat",
+        name: "Soft Mat",
+        emoji: "🧶",
+        price: 0,
+        slot: "rug",
+    },
+    DecorCatalogItem {
+        id: "plush_rug",
+        name: "Plush Rug",
+        emoji: "🟣",
+        price: 45,
+        slot: "rug",
+    },
+    DecorCatalogItem {
+        id: "cloud_bed",
+        name: "Cloud Bed",
+        emoji: "☁️",
+        price: 65,
+        slot: "bed",
+    },
+    DecorCatalogItem {
+        id: "hammock",
+        name: "Cozy Hammock",
+        emoji: "🏝️",
+        price: 55,
+        slot: "bed",
+    },
+    DecorCatalogItem {
+        id: "yarn_ball",
+        name: "Yarn Ball",
+        emoji: "🧵",
+        price: 30,
+        slot: "toy",
+    },
+    DecorCatalogItem {
+        id: "cat_tree",
+        name: "Mini Cat Tree",
+        emoji: "🌳",
+        price: 90,
+        slot: "toy",
+    },
+    DecorCatalogItem {
+        id: "potted_plant",
+        name: "Potted Plant",
+        emoji: "🪴",
+        price: 35,
+        slot: "plant",
+    },
+];
 
 const OUTFIT_CATALOG: [OutfitCatalogItem; 4] = [
     OutfitCatalogItem {
@@ -263,6 +536,10 @@ struct DashboardQuery {
     session_id: Option<String>,
     vet_followup: Option<String>,
     thread: Option<String>,
+    feedback: Option<String>,
+    cal_day: Option<String>,
+    cal_month: Option<String>,
+    cal_year: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -276,8 +553,45 @@ struct OutfitEquipForm {
 }
 
 #[derive(Deserialize)]
+struct DecorBuyForm {
+    decor_id: String,
+}
+
+#[derive(Deserialize)]
+struct DecorEquipForm {
+    decor_id: String,
+}
+
+#[derive(Deserialize, Default)]
+struct CatHomeQuery {
+    status: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct TaskToggleForm {
     task_id: String,
+}
+
+#[derive(Deserialize)]
+struct TaskTimeForm {
+    task_id: String,
+    task_time: String,
+}
+
+#[derive(Deserialize)]
+struct CalendarEventAddForm {
+    day: String,
+    month: String,
+    year: String,
+    title: String,
+    time_minutes: String,
+}
+
+#[derive(Deserialize)]
+struct CalendarEventFormQuery {
+    day: Option<String>,
+    month: Option<String>,
+    year: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -287,11 +601,34 @@ struct TaskToggleResponse {
     tasks_html: String,
     activity_html: String,
     paw_points: u32,
+    paw_from_tasks: u32,
+    xp_from_tasks: u32,
     parent_level: u32,
+    parent_xp: u32,
     level_progress: u32,
     level_progress_text: String,
     calendar_data: serde_json::Value,
     show_vet_followup: bool,
+}
+
+#[derive(Serialize)]
+struct CalendarEventAddResponse {
+    ok: bool,
+    status: &'static str,
+    calendar_data: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PetNameChangeResponse {
+    ok: bool,
+    status: &'static str,
+    pet_name: String,
+}
+
+#[derive(Serialize)]
+struct PetPetResponse {
+    ok: bool,
+    paw_points: u32,
 }
 
 fn group_form_fields(pairs: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
@@ -335,8 +672,7 @@ struct OnboardingForm {
     cat_name: String,
     pet_breed: String,
     pet_color: String,
-    age_value: String,
-    age_unit: String,
+    pet_birth_date: String,
     pet_indoor_outdoor: String,
     last_vet_date: String,
     never_been_to_vet: bool,
@@ -345,7 +681,9 @@ struct OnboardingForm {
     vaccine_names: Vec<String>,
     vaccine_dates: Vec<String>,
     pet_vaccines_unknown: bool,
-    skip_photo: bool,
+    skip_video: bool,
+    pet_video_clip_start: f32,
+    pet_video_clip_duration: f32,
 }
 
 impl OnboardingForm {
@@ -354,8 +692,7 @@ impl OnboardingForm {
             cat_name: form_scalar(fields, "cat_name")?,
             pet_breed: form_scalar(fields, "pet_breed")?,
             pet_color: form_optional_scalar(fields, "pet_color"),
-            age_value: form_scalar(fields, "age_value")?,
-            age_unit: form_scalar(fields, "age_unit")?,
+            pet_birth_date: form_scalar(fields, "pet_birth_date")?,
             pet_indoor_outdoor: form_scalar(fields, "pet_indoor_outdoor")?,
             last_vet_date: form_optional_scalar(fields, "last_vet_date"),
             never_been_to_vet: form_checkbox(fields, "never_been_to_vet"),
@@ -364,7 +701,15 @@ impl OnboardingForm {
             vaccine_names: form_vec(fields, "vaccine_names"),
             vaccine_dates: form_vec(fields, "vaccine_dates"),
             pet_vaccines_unknown: form_checkbox(fields, "pet_vaccines_unknown"),
-            skip_photo: form_checkbox(fields, "skip_photo"),
+            skip_video: form_checkbox(fields, "skip_video"),
+            pet_video_clip_start: parse_pet_video_clip_start(&form_optional_scalar(
+                fields,
+                "pet_video_clip_start",
+            )),
+            pet_video_clip_duration: parse_pet_video_clip_duration(&form_optional_scalar(
+                fields,
+                "pet_video_clip_duration",
+            )),
         })
     }
 }
@@ -439,8 +784,27 @@ struct FeedbackForm {
     message: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Deserialize)]
+struct FeedbackVoteForm {
+    feedback_id: String,
+    vote: String,
+}
+
+#[derive(Serialize)]
+struct FeedbackVoteResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'static str>,
+    feedback_id: i64,
+    upvotes: u32,
+    downvotes: u32,
+    user_vote: Option<i8>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct FeedbackSubmission {
+    #[serde(default)]
+    id: i64,
     name: String,
     email: String,
     category: String,
@@ -448,6 +812,8 @@ struct FeedbackSubmission {
     submitted_at: u64,
     #[serde(default)]
     user_id: Option<String>,
+    #[serde(default)]
+    author_username: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -640,11 +1006,19 @@ fn format_timestamp(timestamp: u64) -> String {
         return "Unknown".to_string();
     }
 
-    let seconds_per_day = 86_400;
-    let days = timestamp / seconds_per_day;
-    let hours = (timestamp % seconds_per_day) / 3_600;
-    let minutes = (timestamp % 3_600) / 60;
-    format!("day {days} {hours:02}:{minutes:02} UTC")
+    DateTime::from_timestamp(timestamp as i64, 0)
+        .map(|dt| dt.with_timezone(&Utc).format("%b %d, %Y").to_string())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn format_member_since(timestamp: u64) -> String {
+    if timestamp == 0 {
+        return "Recently joined".to_string();
+    }
+
+    DateTime::from_timestamp(timestamp as i64, 0)
+        .map(|dt| dt.with_timezone(&Utc).format("%B %d, %Y").to_string())
+        .unwrap_or_else(|| "Recently joined".to_string())
 }
 
 fn is_admin_credentials(email: &str, password: &str) -> bool {
@@ -776,6 +1150,16 @@ fn user_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
         .flatten()
 }
 
+fn voter_session_email(state: &AppState, jar: &CookieJar) -> Option<String> {
+    if let Some(email) = user_session_email(state, jar) {
+        return Some(email);
+    }
+    if admin_session_valid(state, jar) {
+        return Some(admin_email());
+    }
+    None
+}
+
 fn auth_nav_link_html(state: &AppState, jar: &CookieJar) -> &'static str {
     if user_session_email(state, jar).is_some() {
         r#"<a href="/home?tab=account">ACCOUNT</a>"#
@@ -835,73 +1219,380 @@ fn user_redirect_if_missing(state: &AppState, jar: &CookieJar) -> Result<String,
     user_session_email(state, jar).ok_or_else(|| Redirect::to("/"))
 }
 
-fn default_starter_tasks() -> Vec<UserTask> {
-    let today = Local::now().date_naive();
-    let month = today.month();
-    let year = today.year() as u32;
+fn api_user_email(state: &AppState, jar: &CookieJar) -> Option<String> {
+    if let Some(email) = user_session_email(state, jar) {
+        return Some(email);
+    }
 
-    vec![
-        UserTask {
-            id: "feed_breakfast".to_string(),
-            title: "Morning feeding".to_string(),
-            completed: false,
-            due_label: "Today · 8:00 AM".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 15,
-        },
-        UserTask {
-            id: "water_bowl_morning".to_string(),
-            title: "Fill water bowl".to_string(),
-            completed: false,
-            due_label: "Daily · 8:00 AM".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 12,
-        },
-        UserTask {
-            id: "play_session".to_string(),
-            title: "15-minute play session".to_string(),
-            completed: false,
-            due_label: "Today · 5:30 PM".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 20,
-        },
-        UserTask {
-            id: "litter_check".to_string(),
-            title: "Refresh litter box".to_string(),
-            completed: false,
-            due_label: "Daily · anytime".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 10,
-        },
-        UserTask {
-            id: "replace_litter".to_string(),
-            title: "Replace litter".to_string(),
-            completed: false,
-            due_label: "Weekly · anytime".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 25,
-        },
-        UserTask {
-            id: "water_bowl_night".to_string(),
-            title: "Fill water bowl".to_string(),
-            completed: false,
-            due_label: "Daily · 9:00 PM".to_string(),
-            due_day: Some(today.day()),
-            due_month: Some(month),
-            due_year: Some(year),
-            reward: 12,
-        },
-    ]
+    if admin_session_valid(state, jar) {
+        if let Err(error) = ensure_admin_user_account(state) {
+            eprintln!("admin user bootstrap failed: {error}");
+        }
+        return Some(admin_email());
+    }
+
+    None
+}
+
+fn api_auth_error(wants_json: bool) -> Response {
+    if wants_json {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "ok": false, "status": "auth" })),
+        )
+            .into_response()
+    } else {
+        Redirect::to("/").into_response()
+    }
+}
+
+fn minutes_to_time_input_value(minutes: u16) -> String {
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+fn parse_time_input(value: &str) -> Option<u16> {
+    let parts: Vec<&str> = value.trim().split(':').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let hours: u16 = parts[0].parse().ok()?;
+    let mins: u16 = parts[1].parse().ok()?;
+    if hours > 23 || mins > 59 {
+        return None;
+    }
+    Some(hours * 60 + mins)
+}
+
+fn daily_due_label(time_minutes: u16) -> String {
+    format!("Daily · {}", format_time_from_minutes(time_minutes))
+}
+
+fn task_has_adjustable_time(task_id: &str) -> bool {
+    matches!(
+        task_id,
+        "feed_breakfast"
+            | "feed_lunch"
+            | "feed_afternoon"
+            | "feed_dinner"
+            | "water_bowl_morning"
+            | "water_bowl_night"
+            | "litter_check"
+            | "play_session"
+    )
+}
+
+fn feed_schedule_time(schedule: &CareSchedule, task_id: &str) -> Option<u16> {
+    match task_id {
+        "feed_breakfast" => Some(schedule.feed_time_minutes),
+        "feed_lunch" => Some(schedule.feed_lunch_time_minutes),
+        "feed_afternoon" => Some(schedule.feed_afternoon_time_minutes),
+        "feed_dinner" => Some(schedule.feed_dinner_time_minutes),
+        _ => None,
+    }
+}
+
+fn set_feed_schedule_time(schedule: &mut CareSchedule, task_id: &str, time_minutes: u16) -> bool {
+    match task_id {
+        "feed_breakfast" => {
+            let changed = schedule.feed_time_minutes != time_minutes;
+            schedule.feed_time_minutes = time_minutes;
+            changed
+        }
+        "feed_lunch" => {
+            let changed = schedule.feed_lunch_time_minutes != time_minutes;
+            schedule.feed_lunch_time_minutes = time_minutes;
+            changed
+        }
+        "feed_afternoon" => {
+            let changed = schedule.feed_afternoon_time_minutes != time_minutes;
+            schedule.feed_afternoon_time_minutes = time_minutes;
+            changed
+        }
+        "feed_dinner" => {
+            let changed = schedule.feed_dinner_time_minutes != time_minutes;
+            schedule.feed_dinner_time_minutes = time_minutes;
+            changed
+        }
+        _ => false,
+    }
+}
+
+fn task_schedule_prefix(task_id: &str) -> &'static str {
+    if task_id == "play_session" {
+        "Today"
+    } else {
+        "Daily"
+    }
+}
+
+fn task_due_label_for(task_id: &str, time_minutes: u16) -> String {
+    format!(
+        "{} · {}",
+        task_schedule_prefix(task_id),
+        format_time_from_minutes(time_minutes)
+    )
+}
+
+fn sync_care_schedule_from_task(profile: &mut UserProfile, task_id: &str, time_minutes: u16) {
+    if feed_schedule_time(&profile.care_schedule, task_id).is_some() {
+        set_feed_schedule_time(&mut profile.care_schedule, task_id, time_minutes);
+        return;
+    }
+    match task_id {
+        "water_bowl_morning" => profile.care_schedule.water_morning_time_minutes = time_minutes,
+        "water_bowl_night" => profile.care_schedule.water_evening_time_minutes = time_minutes,
+        "litter_check" => profile.care_schedule.litter_time_minutes = time_minutes,
+        "play_session" => profile.care_schedule.play_time_minutes = time_minutes,
+        _ => {}
+    }
+}
+
+fn apply_task_time_to_profile(profile: &mut UserProfile, task_id: &str, time_minutes: u16) -> bool {
+    if !task_has_adjustable_time(task_id) {
+        return false;
+    }
+
+    let Some(task) = profile.tasks.iter_mut().find(|task| task.id == task_id) else {
+        return false;
+    };
+
+    let due_label = task_due_label_for(task_id, time_minutes);
+    if task.time_minutes != time_minutes || task.due_label != due_label {
+        task.time_minutes = time_minutes;
+        task.due_label = due_label;
+    }
+
+    let schedule = &mut profile.care_schedule;
+    if feed_schedule_time(schedule, task_id).is_some() {
+        set_feed_schedule_time(schedule, task_id, time_minutes);
+    } else {
+        match task_id {
+            "water_bowl_morning" => schedule.water_morning_time_minutes = time_minutes,
+            "water_bowl_night" => schedule.water_evening_time_minutes = time_minutes,
+            "litter_check" => schedule.litter_time_minutes = time_minutes,
+            "play_session" => schedule.play_time_minutes = time_minutes,
+            _ => {}
+        }
+    }
+
+    true
+}
+
+fn scheduled_task(
+    id: &str,
+    title: &str,
+    due_label: &str,
+    time_minutes: u16,
+    reward: u32,
+    today: NaiveDate,
+) -> UserTask {
+    UserTask {
+        id: id.to_string(),
+        title: title.to_string(),
+        completed: false,
+        due_label: due_label.to_string(),
+        due_day: Some(today.day()),
+        due_month: Some(today.month()),
+        due_year: Some(today.year() as u32),
+        time_minutes,
+        reward,
+    }
+}
+
+fn default_starter_tasks(profile: &UserProfile, schedule: &CareSchedule) -> Vec<UserTask> {
+    let today = Local::now().date_naive();
+    let plan = feeding_plan_for_profile(profile, today);
+    let mut tasks = feeding_specs_for_plan(plan, schedule)
+        .into_iter()
+        .map(|(id, title, time_minutes, reward)| {
+            scheduled_task(
+                id,
+                title,
+                &daily_due_label(time_minutes),
+                time_minutes,
+                reward,
+                today,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    tasks.extend([
+        scheduled_task(
+            "water_bowl_morning",
+            "Fill water bowl",
+            &daily_due_label(schedule.water_morning_time_minutes),
+            schedule.water_morning_time_minutes,
+            12,
+            today,
+        ),
+        scheduled_task(
+            "play_session",
+            "15-minute play session",
+            &task_due_label_for("play_session", schedule.play_time_minutes),
+            schedule.play_time_minutes,
+            20,
+            today,
+        ),
+        scheduled_task(
+            "litter_check",
+            "Refresh litter box",
+            &daily_due_label(schedule.litter_time_minutes),
+            schedule.litter_time_minutes,
+            10,
+            today,
+        ),
+        scheduled_task(
+            "replace_litter",
+            "Replace litter",
+            "Weekly · anytime",
+            default_task_time_minutes(),
+            50,
+            today,
+        ),
+        scheduled_task(
+            "water_bowl_night",
+            "Fill water bowl (evening)",
+            &daily_due_label(schedule.water_evening_time_minutes),
+            schedule.water_evening_time_minutes,
+            12,
+            today,
+        ),
+    ]);
+
+    tasks
+}
+
+fn apply_care_schedule_to_tasks(profile: &mut UserProfile) -> bool {
+    let schedule = profile.care_schedule.clone();
+    let today = Local::now().date_naive();
+    let plan = feeding_plan_for_profile(profile, today);
+    let feeding_specs: std::collections::HashMap<&str, (&str, u16, u32)> =
+        feeding_specs_for_plan(plan, &schedule)
+            .into_iter()
+            .map(|(id, title, time, reward)| (id, (title, time, reward)))
+            .collect();
+    let mut changed = false;
+
+    for task in &mut profile.tasks {
+        if let Some((title, time_minutes, reward)) = feeding_specs.get(task.id.as_str()) {
+            let due_label = daily_due_label(*time_minutes);
+            if task.title != *title
+                || task.time_minutes != *time_minutes
+                || task.due_label != due_label
+                || task.reward != *reward
+            {
+                task.title = (*title).to_string();
+                task.time_minutes = *time_minutes;
+                task.due_label = due_label;
+                task.reward = *reward;
+                changed = true;
+            }
+            continue;
+        }
+
+        let (time_minutes, due_label) = match task.id.as_str() {
+            "water_bowl_morning" => (
+                schedule.water_morning_time_minutes,
+                daily_due_label(schedule.water_morning_time_minutes),
+            ),
+            "water_bowl_night" => (
+                schedule.water_evening_time_minutes,
+                daily_due_label(schedule.water_evening_time_minutes),
+            ),
+            "litter_check" => (
+                schedule.litter_time_minutes,
+                daily_due_label(schedule.litter_time_minutes),
+            ),
+            "play_session" => (
+                schedule.play_time_minutes,
+                task_due_label_for("play_session", schedule.play_time_minutes),
+            ),
+            _ => continue,
+        };
+
+        if task.time_minutes != time_minutes || task.due_label != due_label {
+            task.time_minutes = time_minutes;
+            task.due_label = due_label;
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+fn care_calendar_event(date: NaiveDate, title: &str, time_minutes: u16) -> CalendarEvent {
+    CalendarEvent {
+        id: None,
+        day: date.day(),
+        month: date.month(),
+        year: date.year() as u32,
+        title: title.to_string(),
+        time_label: format_time_from_minutes(time_minutes),
+        time_minutes,
+    }
+}
+
+fn generate_daily_care_calendar_events(
+    profile: &UserProfile,
+    today: NaiveDate,
+    horizon: NaiveDate,
+) -> Vec<CalendarEvent> {
+    if !profile_has_pet(profile) {
+        return vec![];
+    }
+
+    let schedule = &profile.care_schedule;
+    let plan = feeding_plan_for_profile(profile, today);
+    let pet_name = if profile.pet_name.trim().is_empty() {
+        "your cat".to_string()
+    } else {
+        profile.pet_name.clone()
+    };
+
+    let mut items: Vec<(u16, String)> = feeding_specs_for_plan(plan, schedule)
+        .into_iter()
+        .map(|(_id, title, time_minutes, _reward)| {
+            let label = if title.contains("feeding") {
+                format!("Feed {pet_name}")
+            } else {
+                title.to_string()
+            };
+            (time_minutes, label)
+        })
+        .collect();
+
+    items.extend([
+        (
+            schedule.water_morning_time_minutes,
+            "Fill water bowl".to_string(),
+        ),
+        (
+            schedule.litter_time_minutes,
+            "Refresh litter box".to_string(),
+        ),
+        (
+            schedule.water_evening_time_minutes,
+            "Fill water bowl (evening)".to_string(),
+        ),
+        (
+            schedule.play_time_minutes,
+            "15-minute play session".to_string(),
+        ),
+    ]);
+
+    let mut events = Vec::new();
+    let mut cursor = today;
+    while cursor <= horizon {
+        for (time_minutes, title) in &items {
+            events.push(care_calendar_event(cursor, title, *time_minutes));
+        }
+        let Some(next) = cursor.succ_opt() else {
+            break;
+        };
+        cursor = next;
+    }
+
+    events
 }
 
 fn task_schedule_date(task: &UserTask) -> Option<NaiveDate> {
@@ -924,6 +1615,17 @@ fn task_schedule_date(task: &UserTask) -> Option<NaiveDate> {
     None
 }
 
+fn default_owned_decor() -> Vec<String> {
+    vec!["sunny_nook".to_string(), "soft_mat".to_string()]
+}
+
+fn default_equipped_decor() -> HashMap<String, String> {
+    HashMap::from([
+        ("room".to_string(), "sunny_nook".to_string()),
+        ("rug".to_string(), "soft_mat".to_string()),
+    ])
+}
+
 fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
@@ -940,6 +1642,7 @@ fn default_profile(email: &str) -> UserProfile {
         onboarding_completed: false,
         pet_age_weeks: None,
         pet_age_years: None,
+        pet_birth_date: None,
         last_vet_date: None,
         never_been_to_vet: false,
         veterinary_notes: vec![],
@@ -950,11 +1653,19 @@ fn default_profile(email: &str) -> UserProfile {
         pet_indoor_outdoor: None,
         vaccine_history: vec![],
         pet_vaccines_unknown: false,
-        tasks: default_starter_tasks(),
+        care_schedule: default_care_schedule(),
+        tasks: vec![],
         calendar_events: vec![],
+        user_calendar_events: vec![],
         activity: vec![],
         stripe_customer_id: None,
         pet_photo_url: None,
+        pet_video_url: None,
+        pet_video_clip_start: None,
+        pet_video_clip_duration: None,
+        pending_purrfect_idea_ids: vec![],
+        owned_decor: default_owned_decor(),
+        equipped_decor: default_equipped_decor(),
     }
 }
 
@@ -1027,17 +1738,127 @@ async fn save_pet_photo(
     Ok(format!("/uploads/{filename}"))
 }
 
-fn render_pet_user_photo_optional(profile: &UserProfile) -> String {
-    let Some(url) = profile.pet_photo_url.as_deref().filter(|value| !value.is_empty()) else {
+fn detect_video_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.len() < 12 {
+        return None;
+    }
+    if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return Some("webm");
+    }
+    if &bytes[4..8] == b"ftyp" {
+        return Some("mp4");
+    }
+    None
+}
+
+fn allowed_pet_video_content_type(content_type: &str) -> bool {
+    matches!(
+        content_type,
+        "video/mp4" | "video/webm" | "video/quicktime" | "video/x-m4v"
+    )
+}
+
+fn validate_pet_video(content_type: Option<&str>, bytes: &[u8]) -> Result<&'static str, ()> {
+    if bytes.is_empty() {
+        return Err(());
+    }
+    if bytes.len() > MAX_PET_VIDEO_BYTES {
+        return Err(());
+    }
+    let ext = detect_video_ext(bytes).ok_or(())?;
+    if let Some(content_type) = content_type {
+        if !allowed_pet_video_content_type(content_type) {
+            return Err(());
+        }
+    }
+    Ok(ext)
+}
+
+fn parse_pet_video_clip_start(value: &str) -> f32 {
+    value.trim().parse::<f32>().unwrap_or(0.0).max(0.0)
+}
+
+fn parse_pet_video_clip_duration(value: &str) -> f32 {
+    let parsed = value
+        .trim()
+        .parse::<f32>()
+        .unwrap_or(PET_VIDEO_CLIP_MAX_SECONDS);
+    parsed.clamp(PET_VIDEO_CLIP_MIN_SECONDS, PET_VIDEO_CLIP_MAX_SECONDS)
+}
+
+fn pet_video_clip_duration(profile: &UserProfile) -> f32 {
+    profile
+        .pet_video_clip_duration
+        .unwrap_or(PET_VIDEO_CLIP_MAX_SECONDS)
+        .clamp(PET_VIDEO_CLIP_MIN_SECONDS, PET_VIDEO_CLIP_MAX_SECONDS)
+}
+
+fn format_pet_video_clip_duration_label(seconds: f32) -> String {
+    let rounded = (seconds * 10.0).round() / 10.0;
+    if (rounded - rounded.round()).abs() < f32::EPSILON {
+        format!("{}s", rounded.round() as u32)
+    } else {
+        format!("{rounded:.1}s")
+    }
+}
+
+async fn save_pet_video(
+    state: &AppState,
+    email: &str,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<String, storage::StorageError> {
+    let uploads_dir = pet_uploads_dir(state);
+    fs::create_dir_all(&uploads_dir).await?;
+
+    let basename = email_upload_basename(email);
+    let filename = format!("{basename}-playing.{ext}");
+    let disk_path = uploads_dir.join(&filename);
+    fs::write(&disk_path, bytes).await?;
+
+    Ok(format!("/uploads/{filename}"))
+}
+
+fn pet_video_clip_start(profile: &UserProfile) -> f32 {
+    profile.pet_video_clip_start.unwrap_or(0.0).max(0.0)
+}
+
+fn profile_has_pet_video(profile: &UserProfile) -> bool {
+    profile
+        .pet_video_url
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn render_pet_user_video_optional(profile: &UserProfile) -> String {
+    let Some(url) = profile
+        .pet_video_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    else {
         return String::new();
     };
     let name = escape_html(&profile.pet_name);
+    let clip_start = pet_video_clip_start(profile);
+    let clip_duration = pet_video_clip_duration(profile);
     format!(
-        r#"<div class="pet-user-photo-optional" hidden>
-      <img src="{url}" alt="Photo of {name}" width="96" height="96" />
+        r#"<div class="pet-user-video-optional" hidden>
+      <video
+        class="pet-user-video-player"
+        src="{url}"
+        muted
+        playsinline
+        webkit-playsinline
+        preload="auto"
+        data-clip-start="{clip_start}"
+        data-clip-duration="{clip_duration}"
+        aria-label="Video of {name} playing"
+      ></video>
     </div>"#,
         url = escape_html_attr(url),
         name = name,
+        clip_start = clip_start,
+        clip_duration = clip_duration,
     )
 }
 
@@ -1048,23 +1869,19 @@ fn render_pet_avatar(profile: &UserProfile) -> String {
     } else {
         pet_name.clone()
     };
-    let photo_toggle = if profile
-        .pet_photo_url
-        .as_deref()
-        .is_some_and(|value| !value.is_empty())
-    {
-        r#"<button type="button" class="cinder-photo-toggle" aria-pressed="false">Show my cat photo</button>"#
+    let photo_toggle = if profile_has_pet_video(profile) {
+        r#"<button type="button" class="cinder-photo-toggle" aria-pressed="false">Watch my kitty play! 🎬</button>"#
     } else {
         ""
     };
-    let user_photo = render_pet_user_photo_optional(profile);
+    let user_photo = render_pet_user_video_optional(profile);
     format!(
         r#"<div class="pet-cinder-stage" id="cinder-pet-stage" data-pet-name="{display_name}">
       <p class="cinder-pet-label">{display_name}</p>
       <div class="cinder-pet-image-wrap">
         <img class="cinder-pet-image" src="/cinderanimate.png" alt="{display_name} virtual pet" />
+        {user_photo}
       </div>
-      {user_photo}
       {photo_toggle}
     </div>"#,
         display_name = display_name,
@@ -1112,6 +1929,7 @@ fn vet_appointment_task(today: NaiveDate) -> UserTask {
         due_day: Some(today.day()),
         due_month: Some(today.month()),
         due_year: Some(today.year() as u32),
+        time_minutes: default_task_time_minutes(),
         reward: 30,
     }
 }
@@ -1209,12 +2027,59 @@ fn needs_vet_appointment_asap(profile: &UserProfile, today: NaiveDate) -> bool {
     vaccines_due_or_overdue(profile, today)
 }
 
+fn ensure_starter_care_tasks(profile: &mut UserProfile) -> bool {
+    if !profile_has_pet(profile) {
+        return false;
+    }
+
+    let starters = default_starter_tasks(profile, &profile.care_schedule);
+    let expected_ids: std::collections::HashSet<String> =
+        starters.iter().map(|task| task.id.clone()).collect();
+
+    let mut changed = false;
+    let before_len = profile.tasks.len();
+    profile.tasks.retain(|task| {
+        !FEEDING_TASK_IDS.contains(&task.id.as_str()) || expected_ids.contains(&task.id)
+    });
+    if profile.tasks.len() != before_len {
+        changed = true;
+    }
+
+    for starter in starters {
+        if let Some(task) = profile.tasks.iter_mut().find(|task| task.id == starter.id) {
+            if task.reward != starter.reward {
+                task.reward = starter.reward;
+                changed = true;
+            }
+            if task.title != starter.title {
+                task.title = starter.title.clone();
+                changed = true;
+            }
+            continue;
+        }
+        profile.tasks.push(starter);
+        changed = true;
+    }
+    changed
+}
+
 fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
+    if !profile_has_pet(profile) {
+        if profile.tasks.is_empty() {
+            return false;
+        }
+        profile.tasks.clear();
+        return true;
+    }
+
     let today = Local::now().date_naive();
     let month = today.month();
     let year = today.year() as u32;
     let day = today.day();
-    let mut changed = false;
+    let mut changed = ensure_starter_care_tasks(profile);
+    if apply_care_schedule_to_tasks(profile) {
+        changed = true;
+    }
 
     for task in &mut profile.tasks {
         if is_daily_task(task) {
@@ -1222,7 +2087,12 @@ fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
                 || task.due_month != Some(month)
                 || task.due_year != Some(year);
             if stale {
-                task.completed = false;
+                let tracking_prior_day = task.due_day.is_some()
+                    && task.due_month.is_some()
+                    && task.due_year.is_some();
+                if tracking_prior_day {
+                    task.completed = false;
+                }
                 task.due_day = Some(day);
                 task.due_month = Some(month);
                 task.due_year = Some(year);
@@ -1288,6 +2158,33 @@ fn task_xp_earned(profile: &UserProfile) -> u32 {
     task_rewards_earned(profile) / 2
 }
 
+fn reverse_parent_xp_for_reward(profile: &mut UserProfile, reward: u32) {
+    let mut xp_to_remove = reward / 2;
+    while xp_to_remove > 0 {
+        if profile.parent_xp >= xp_to_remove {
+            profile.parent_xp -= xp_to_remove;
+            return;
+        }
+        xp_to_remove -= profile.parent_xp;
+        profile.parent_xp = 0;
+        if profile.parent_level <= 1 {
+            return;
+        }
+        profile.parent_level -= 1;
+        profile.parent_xp = XP_PER_LEVEL.saturating_sub(xp_to_remove);
+        return;
+    }
+}
+
+fn reopen_completed_task(profile: &mut UserProfile, index: usize) -> (String, u32) {
+    let reward = profile.tasks[index].reward;
+    let title = profile.tasks[index].title.clone();
+    profile.tasks[index].completed = false;
+    profile.paw_points = profile.paw_points.saturating_sub(reward);
+    reverse_parent_xp_for_reward(profile, reward);
+    (title, reward)
+}
+
 fn outfit_points_spent(profile: &UserProfile) -> u32 {
     profile
         .owned_outfits
@@ -1295,6 +2192,19 @@ fn outfit_points_spent(profile: &UserProfile) -> u32 {
         .filter_map(|id| outfit_by_id(id))
         .map(|outfit| outfit.price)
         .sum()
+}
+
+fn decor_points_spent(profile: &UserProfile) -> u32 {
+    profile
+        .owned_decor
+        .iter()
+        .filter_map(|id| decor_by_id(id))
+        .map(|decor| decor.price)
+        .sum()
+}
+
+fn shop_points_spent(profile: &UserProfile) -> u32 {
+    outfit_points_spent(profile) + decor_points_spent(profile)
 }
 
 fn purchased_paw_points(profile: &UserProfile) -> u32 {
@@ -1324,7 +2234,7 @@ fn lifetime_xp(profile: &UserProfile) -> u32 {
 fn render_parent_level_breakdown(profile: &UserProfile) -> String {
     let xp_from_tasks = task_xp_earned(profile);
     let paw_from_tasks = task_rewards_earned(profile);
-    let paw_spent = outfit_points_spent(profile);
+    let paw_spent = shop_points_spent(profile);
     let paw_purchased = purchased_paw_points(profile);
     let lifetime = lifetime_xp(profile);
     let xp_remaining = XP_PER_LEVEL.saturating_sub(profile.parent_xp);
@@ -1367,7 +2277,7 @@ fn render_parent_level_breakdown(profile: &UserProfile) -> String {
           <dt>Spent in shop</dt>
           <dd>-{paw_spent}</dd>
         </dl>
-        <p class="parent-level-shop-hint"><a href="/home?tab=outfits" class="parent-level-shop-link">Visit the outfit shop</a> to spend paw points on looks for {pet_name}.</p>
+        <p class="parent-level-shop-hint"><a href="/home?tab=outfits" class="parent-level-shop-link">Visit the outfit shop</a> or <a href="/home/cat-home" class="parent-level-shop-link">{pet_name}'s home</a> to spend paw points.</p>
       </section>
     </div>
   </div>
@@ -1392,6 +2302,36 @@ fn outfit_by_id(id: &str) -> Option<&'static OutfitCatalogItem> {
     OUTFIT_CATALOG.iter().find(|item| item.id == id)
 }
 
+fn decor_by_id(id: &str) -> Option<&'static DecorCatalogItem> {
+    DECOR_CATALOG.iter().find(|item| item.id == id)
+}
+
+fn decor_slot_label(slot: &str) -> &'static str {
+    match slot {
+        "room" => "Room",
+        "rug" => "Rug",
+        "bed" => "Bed",
+        "toy" => "Toy",
+        "plant" => "Plant",
+        _ => "Decor",
+    }
+}
+
+fn equipped_decor_for_slot<'a>(
+    profile: &'a UserProfile,
+    slot: &str,
+) -> Option<&'static DecorCatalogItem> {
+    if let Some(id) = profile.equipped_decor.get(slot) {
+        if let Some(decor) = decor_by_id(id) {
+            return Some(decor);
+        }
+    }
+    profile
+        .owned_decor
+        .iter()
+        .find_map(|id| decor_by_id(id).filter(|decor| decor.slot == slot))
+}
+
 const MONTH_NAMES: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
@@ -1409,7 +2349,70 @@ fn parse_age(age_value: &str, age_unit: &str) -> Result<(Option<u32>, Option<u32
     }
 }
 
+fn validate_pet_birth_date(value: &str, today: NaiveDate) -> Result<NaiveDate, ()> {
+    let dob = parse_vet_date(value.trim()).ok_or(())?;
+    if dob > today {
+        return Err(());
+    }
+    let days = (today - dob).num_days();
+    if days < 28 || days > 25 * 365 {
+        return Err(());
+    }
+    Ok(dob)
+}
+
+fn derive_age_from_birth(dob: NaiveDate, today: NaiveDate) -> Result<(Option<u32>, Option<u32>), ()> {
+    if dob > today {
+        return Err(());
+    }
+    let days = (today - dob).num_days();
+    if days < 28 {
+        return Err(());
+    }
+    if days < 365 {
+        let weeks = (days / 7).max(1) as u32;
+        return Ok((Some(weeks), None));
+    }
+
+    let mut years = today.year() - dob.year();
+    if (today.month(), today.day()) < (dob.month(), dob.day()) {
+        years -= 1;
+    }
+    if years < 1 {
+        let weeks = (days / 7).max(1) as u32;
+        Ok((Some(weeks), None))
+    } else {
+        Ok((None, Some(years as u32)))
+    }
+}
+
+fn format_birth_date_display(dob: NaiveDate) -> String {
+    let month = MONTH_NAMES
+        .get(dob.month0() as usize)
+        .unwrap_or(&"???");
+    format!("{month} {}, {}", dob.day(), dob.year())
+}
+
 fn age_display(profile: &UserProfile) -> String {
+    if let Some(dob) = profile
+        .pet_birth_date
+        .as_deref()
+        .and_then(parse_vet_date)
+    {
+        if let Ok((Some(weeks), None)) = derive_age_from_birth(dob, Local::now().date_naive()) {
+            return format!(
+                "{weeks} weeks old (born {})",
+                format_birth_date_display(dob)
+            );
+        }
+        if let Ok((None, Some(years))) = derive_age_from_birth(dob, Local::now().date_naive()) {
+            return format!(
+                "{years} years old (born {})",
+                format_birth_date_display(dob)
+            );
+        }
+        return format!("Born {}", format_birth_date_display(dob));
+    }
     if let Some(weeks) = profile.pet_age_weeks {
         return format!("{weeks} weeks old");
     }
@@ -1461,14 +2464,87 @@ fn format_event_time_label(date: NaiveDate) -> String {
     format!("{month} {} · 10:00 AM", date.day())
 }
 
+fn format_time_from_minutes(minutes: u16) -> String {
+    let hours = minutes / 60;
+    let mins = minutes % 60;
+    let (hour_12, period) = if hours == 0 {
+        (12, "AM")
+    } else if hours < 12 {
+        (hours, "AM")
+    } else if hours == 12 {
+        (12, "PM")
+    } else {
+        (hours - 12, "PM")
+    };
+    format!("{hour_12}:{mins:02} {period}")
+}
+
 fn calendar_event_from_date(date: NaiveDate, title: &str) -> CalendarEvent {
+    let time_minutes = default_event_time_minutes();
     CalendarEvent {
+        id: None,
         day: date.day(),
         month: date.month(),
         year: date.year() as u32,
         title: title.to_string(),
         time_label: format_event_time_label(date),
+        time_minutes,
     }
+}
+
+fn visible_calendar_events(profile: &UserProfile, reference_date: NaiveDate) -> Vec<CalendarEvent> {
+    let today = Local::now().date_naive();
+    let horizon = today + Duration::days(730);
+    let mut events = merge_calendar_events(profile, reference_date);
+    events.extend(generate_daily_care_calendar_events(profile, today, horizon));
+    events.extend(profile.user_calendar_events.iter().cloned());
+    events.sort_by(|left, right| {
+        (
+            left.year,
+            left.month,
+            left.day,
+            left.time_minutes,
+            &left.title,
+        )
+            .cmp(&(
+                right.year,
+                right.month,
+                right.day,
+                right.time_minutes,
+                &right.title,
+            ))
+    });
+    events
+}
+
+fn resolve_calendar_view(cal_month: Option<&str>, cal_year: Option<&str>) -> (u32, u32) {
+    let today = Local::now().date_naive();
+    let default_month = today.month();
+    let default_year = today.year() as u32;
+
+    let year = cal_year
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(default_year);
+    let month = cal_month
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(default_month);
+
+    if (1..=12).contains(&month) && (1970..=2100).contains(&year) {
+        (month, year)
+    } else {
+        (default_month, default_year)
+    }
+}
+
+fn parse_calendar_date_fields(day: &str, month: &str, year: &str) -> Option<(u32, u32, u32)> {
+    let day: u32 = day.trim().parse().ok()?;
+    let month: u32 = month.trim().parse().ok()?;
+    let year: u32 = year.trim().parse().ok()?;
+    if !(1..=12).contains(&month) || year < 2000 {
+        return None;
+    }
+    let date = NaiveDate::from_ymd_opt(year as i32, month, day)?;
+    Some((date.day(), date.month(), date.year() as u32))
 }
 
 fn parse_vet_date(value: &str) -> Option<NaiveDate> {
@@ -1525,6 +2601,9 @@ fn parse_vaccine_history(names: &[String], dates: &[String]) -> Vec<VaccineRecor
 }
 
 fn pet_birth_date(profile: &UserProfile, reference: NaiveDate) -> Option<NaiveDate> {
+    if let Some(stored) = profile.pet_birth_date.as_deref().and_then(parse_vet_date) {
+        return Some(stored);
+    }
     if let Some(weeks) = profile.pet_age_weeks {
         return reference.checked_sub_signed(Duration::weeks(weeks as i64));
     }
@@ -1532,6 +2611,51 @@ fn pet_birth_date(profile: &UserProfile, reference: NaiveDate) -> Option<NaiveDa
         return reference.checked_sub_signed(Duration::days(i64::from(years) * 365));
     }
     None
+}
+
+fn birthday_in_year(birth: NaiveDate, year: i32) -> Option<NaiveDate> {
+    let month = birth.month();
+    let day = birth.day();
+    if month == 2 && day == 29 {
+        return NaiveDate::from_ymd_opt(year, 2, 29).or_else(|| NaiveDate::from_ymd_opt(year, 2, 28));
+    }
+    NaiveDate::from_ymd_opt(year, month, day)
+}
+
+fn generate_birthday_calendar_events(
+    profile: &UserProfile,
+    today: NaiveDate,
+    horizon: NaiveDate,
+) -> Vec<CalendarEvent> {
+    let Some(birth) = profile
+        .pet_birth_date
+        .as_deref()
+        .and_then(parse_vet_date)
+    else {
+        return vec![];
+    };
+
+    let pet_name = if profile.pet_name.is_empty() {
+        "Your cat".to_string()
+    } else {
+        profile.pet_name.clone()
+    };
+
+    let mut events = Vec::new();
+    for year in today.year()..=horizon.year() {
+        let Some(birthday) = birthday_in_year(birth, year) else {
+            continue;
+        };
+        if birthday < today || birthday > horizon {
+            continue;
+        }
+        events.push(calendar_event_from_date(
+            birthday,
+            &format!("{pet_name}'s birthday"),
+        ));
+    }
+
+    events
 }
 
 fn history_dates_for_kind(history: &[VaccineRecord], kind: VaccineKind) -> Vec<NaiveDate> {
@@ -1758,13 +2882,17 @@ fn generate_vaccine_calendar_events(
 }
 
 fn merge_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -> Vec<CalendarEvent> {
+    let today = Local::now().date_naive();
+    let horizon = signup_date + Duration::days(730);
     let mut events = generate_vet_calendar_events(profile, signup_date);
     events.extend(generate_vaccine_calendar_events(profile, signup_date));
+    events.extend(generate_birthday_calendar_events(profile, today, horizon));
     events.sort_by_key(|event| (event.year, event.month, event.day));
     events
 }
 
 fn generate_vet_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -> Vec<CalendarEvent> {
+    let today = Local::now().date_naive();
     let anchor = profile
         .last_vet_date
         .as_deref()
@@ -1786,16 +2914,31 @@ fn generate_vet_calendar_events(profile: &UserProfile, signup_date: NaiveDate) -
         ));
     }
 
-    let interval = vet_reminder_interval(profile);
-    let reminder_title = format!("Vet checkup reminder — {pet_name}");
-    let horizon = signup_date + Duration::days(730);
-    let mut next = anchor + interval;
+    let horizon = today + Duration::days(730);
 
-    while next <= horizon {
-        if profile.last_vet_date.is_none() || next > anchor {
-            events.push(calendar_event_from_date(next, &reminder_title));
+    if profile.never_been_to_vet {
+        let asap_title = format!("Make vet appointment ASAP — {pet_name}");
+        let asap_interval = Duration::weeks(2);
+        let mut next = today;
+        while next <= horizon {
+            events.push(calendar_event_from_date(next, &asap_title));
+            next += asap_interval;
         }
-        next += interval;
+    } else {
+        let interval = vet_reminder_interval(profile);
+        let reminder_title = format!("Vet checkup reminder — {pet_name}");
+        let mut next = if profile.last_vet_date.is_none() {
+            today
+        } else {
+            anchor + interval
+        };
+
+        while next <= horizon {
+            if profile.last_vet_date.is_none() || next > anchor {
+                events.push(calendar_event_from_date(next, &reminder_title));
+            }
+            next += interval;
+        }
     }
 
     events.sort_by_key(|event| (event.year, event.month, event.day));
@@ -2086,11 +3229,18 @@ fn render_health_tab(profile: &UserProfile) -> String {
         r#"<p class="panel-intro">Health records for {pet_name} — vaccines, vet visits, and notes.</p>
 <div class="health-grid">
   <article class="dashboard-card health-vet-visit-card">
-    <h2>Add veterinary information</h2>
-    <p class="field-hint">Record a vet appointment for {pet_name}: date, vaccines given, and visit notes.</p>
-    <form class="onboarding-form login-form health-vet-visit-form" action="/home/vet-visit" method="post">
-      {vet_visit_form}
-    </form>
+    <details class="health-vet-disclosure" id="health-vet-disclosure">
+      <summary class="health-vet-disclosure-summary">
+        <span class="health-vet-disclosure-title">Add veterinary information</span>
+        <span class="health-vet-disclosure-hint">Record a vet appointment for {pet_name}</span>
+      </summary>
+      <div class="health-vet-disclosure-body">
+        <p class="field-hint">Add the visit date, vaccines given, and notes from your appointment.</p>
+        <form class="onboarding-form login-form health-vet-visit-form" action="/home/vet-visit" method="post">
+          {vet_visit_form}
+        </form>
+      </div>
+    </details>
   </article>
   <article class="dashboard-card">
     <h2>Overview</h2>
@@ -2145,7 +3295,12 @@ fn profile_has_pet(profile: &UserProfile) -> bool {
         && !name.eq_ignore_ascii_case("your cat")
         && !name.eq_ignore_ascii_case("no pet yet");
     let has_breed = !breed.is_empty() && !breed.eq_ignore_ascii_case("add your cat's details");
-    let has_age = profile.pet_age_weeks.is_some() || profile.pet_age_years.is_some();
+    let has_age = profile
+        .pet_birth_date
+        .as_deref()
+        .is_some_and(|value| parse_vet_date(value).is_some())
+        || profile.pet_age_weeks.is_some()
+        || profile.pet_age_years.is_some();
     let has_lifestyle = profile
         .pet_indoor_outdoor
         .as_deref()
@@ -2175,6 +3330,327 @@ fn render_pet_blurb(profile: &UserProfile) -> String {
         "{} mirrors your real cat's care routine. Complete tasks to keep them happy and earn paw points!",
         escape_html(&profile.pet_name)
     )
+}
+
+fn account_profile_photo_src(profile: &UserProfile) -> String {
+    profile
+        .pet_photo_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "/cinderanimate.png".to_string())
+}
+
+fn normalize_pet_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 40 {
+        return None;
+    }
+    if trimmed.eq_ignore_ascii_case("your cat") || trimmed.eq_ignore_ascii_case("no pet yet") {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn render_account_pet_name_field(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return r#"<dt>Pet name</dt>
+<dd class="account-pet-name-empty">Set up your cat on the My Pet tab.</dd>"#
+            .to_string();
+    }
+
+    let pet_name_display = escape_html(&profile.pet_name);
+    format!(
+        r#"<dt>Pet name</dt>
+<dd class="account-pet-name-dd">
+  <div class="account-pet-name-display">
+    <span class="account-pet-name-inline">
+      <span class="account-pet-name-value">{pet_name_display}</span>
+      <button type="button" class="account-pet-name-change-trigger" aria-label="Change pet name">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+      </button>
+    </span>
+  </div>
+  <form class="account-pet-name-form" action="/home/pet-name" method="post" hidden>
+    <input id="account-pet-name-input" name="pet_name" type="text" value="{pet_name}" maxlength="40" aria-label="Pet name" required />
+    <button type="submit" class="download-btn account-pet-name-save">Save name</button>
+    <button type="button" class="onboarding-skip-btn account-pet-name-cancel">Cancel</button>
+  </form>
+</dd>"#,
+        pet_name = escape_html_attr(&profile.pet_name),
+        pet_name_display = pet_name_display,
+    )
+}
+
+fn render_account_pet_media_actions(has_video: bool) -> String {
+    let gif_button = if has_video {
+        r#"<button type="button" class="download-btn pet-video-upload-trigger account-pet-gif-change-trigger" data-return-tab="account">Change cat GIF</button>"#
+    } else {
+        r#"<button type="button" class="download-btn pet-video-upload-trigger account-pet-gif-change-trigger" data-return-tab="account">cat GIF creator</button>"#
+    };
+
+    format!(
+        r#"<div class="account-pet-media-actions">
+  <button type="button" class="download-btn account-pet-photo-change-trigger">Change profile photo</button>
+  {gif_button}
+</div>"#
+    )
+}
+
+fn render_account_pet_photo(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return r#"<p class="account-pet-photo-empty">Add your cat on the My Pet tab to upload a profile photo and playing video clip.</p>"#
+            .to_string();
+    }
+
+    let pet_name = escape_html(&profile.pet_name);
+    let photo_src = escape_html_attr(&account_profile_photo_src(profile));
+    let has_video = profile_has_pet_video(profile);
+    let media_actions = render_account_pet_media_actions(has_video);
+
+    if !has_video {
+        return format!(
+            r#"<div class="account-pet-photo" id="account-pet-photo-stage" data-pet-name="{pet_name}">
+  <div class="account-pet-photo-wrap">
+    <img class="account-pet-photo-image" src="{photo_src}" alt="{pet_name} profile photo" />
+  </div>
+  <p class="account-pet-photo-caption">{pet_name} profile photo</p>
+  {media_actions}
+</div>"#,
+            pet_name = pet_name,
+            photo_src = photo_src,
+            media_actions = media_actions,
+        );
+    }
+
+    let url = profile
+        .pet_video_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .expect("profile_has_pet_video implies url");
+    let clip_start = pet_video_clip_start(profile);
+    let clip_duration = pet_video_clip_duration(profile);
+    let clip_label = format_pet_video_clip_duration_label(clip_duration);
+    format!(
+        r#"<div class="account-pet-photo" id="account-pet-photo-stage" data-pet-name="{pet_name}" data-clip-label="{clip_label}">
+  <div
+    class="account-pet-photo-wrap account-pet-photo-toggle"
+    role="button"
+    tabindex="0"
+    aria-pressed="false"
+    aria-label="Show {pet_name} playing video"
+  >
+    <img class="account-pet-photo-image" src="{photo_src}" alt="{pet_name} profile photo" />
+    <div class="account-pet-video-optional" hidden>
+      <video
+        class="account-pet-video-player"
+        src="{url}"
+        muted
+        playsinline
+        webkit-playsinline
+        preload="auto"
+        data-clip-start="{clip_start}"
+        data-clip-duration="{clip_duration}"
+        aria-label="Playing video clip of {pet_name}"
+      ></video>
+    </div>
+  </div>
+  <p class="account-pet-photo-caption">{pet_name} · tap photo for playing clip</p>
+  {media_actions}
+</div>"#,
+        url = escape_html_attr(url),
+        pet_name = pet_name,
+        photo_src = photo_src,
+        clip_start = clip_start,
+        clip_duration = clip_duration,
+        clip_label = clip_label,
+        media_actions = media_actions,
+    )
+}
+
+const PASSWORD_TOGGLE_BUTTON_HTML: &str = r#"<button
+      type="button"
+      class="password-toggle password-toggle--hidden"
+      data-password-toggle
+      aria-label="Show password"
+      aria-pressed="false"
+    >
+      <span class="password-toggle-icon password-toggle-icon--show" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </span>
+      <span class="password-toggle-icon password-toggle-icon--hide" aria-hidden="true" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22" />
+        </svg>
+      </span>
+    </button>"#;
+
+fn render_password_input_field(id: &str, name: &str, label: &str, autocomplete: &str) -> String {
+    format!(
+        r#"<label for="{id}">{label}</label>
+<div class="password-field">
+  <input id="{id}" name="{name}" type="password" required autocomplete="{autocomplete}" />
+  {toggle}
+</div>"#,
+        id = id,
+        name = name,
+        label = label,
+        autocomplete = autocomplete,
+        toggle = PASSWORD_TOGGLE_BUTTON_HTML,
+    )
+}
+
+fn render_account_password_section(email: &str) -> String {
+    if is_admin_account(email) {
+        return r#"<article class="dashboard-card account-password-card">
+  <h2>Password</h2>
+  <p class="account-password-note">Admin passwords are managed with the <code>ADMIN_PASSWORD</code> environment variable on the server.</p>
+</article>"#
+            .to_string();
+    }
+
+    format!(
+        r#"<article class="dashboard-card account-password-card">
+  <h2>Password</h2>
+  <p class="account-password-note">Use at least 5 characters with one number and one special character.</p>
+  <form id="account-change-password-form" class="login-form account-password-form" action="/home/password" method="post">
+    {current_password}
+    {new_password}
+    {confirm_password}
+    <ul class="password-requirements" id="account-password-requirements" aria-live="polite" aria-label="Password requirements">
+      <li id="account-pw-req-length" data-requirement="length">
+        <span class="password-req-icon" aria-hidden="true"></span>
+        At least 5 characters
+      </li>
+      <li id="account-pw-req-digit" data-requirement="digit">
+        <span class="password-req-icon" aria-hidden="true"></span>
+        At least one number
+      </li>
+      <li id="account-pw-req-special" data-requirement="special">
+        <span class="password-req-icon" aria-hidden="true"></span>
+        At least one special character
+      </li>
+    </ul>
+    <p class="password-confirm-error" id="account-password-confirm-error" role="alert" hidden>Passwords do not match.</p>
+    <button type="submit" class="download-btn login-submit">Change password</button>
+  </form>
+</article>"#,
+        current_password = render_password_input_field(
+            "account-current-password",
+            "current_password",
+            "Current password",
+            "current-password",
+        ),
+        new_password = render_password_input_field(
+            "account-new-password",
+            "new_password",
+            "New password",
+            "new-password",
+        ),
+        confirm_password = render_password_input_field(
+            "account-confirm-password",
+            "confirm_password",
+            "Confirm new password",
+            "new-password",
+        ),
+    )
+}
+
+fn render_account_pet_photo_modal(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<div class="onboarding-backdrop" id="account-pet-photo-modal" role="dialog" aria-modal="true" aria-labelledby="account-pet-photo-title" hidden>
+  <div class="onboarding-modal">
+    <h2 id="account-pet-photo-title">Change profile photo</h2>
+    <p class="onboarding-intro">Upload a photo of your cat for your account profile.</p>
+    <form class="onboarding-form login-form" action="/home/pet-photo" method="post" enctype="multipart/form-data">
+      <fieldset class="pet-photo-fieldset">
+        <legend>Profile photo</legend>
+        <p class="field-hint">JPEG, PNG, or WebP up to 5MB.</p>
+        <div class="pet-photo-upload">
+          <input id="account_pet_photo" name="pet_photo" type="file" class="pet-photo-input" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" required />
+          <label for="account_pet_photo" class="pet-photo-paw-btn" aria-label="Choose profile photo">
+            <span class="pet-photo-paw-icon" aria-hidden="true">📷</span>
+          </label>
+        </div>
+        <div id="account-pet-photo-preview" class="pet-photo-preview" hidden aria-live="polite"></div>
+      </fieldset>
+      <input type="hidden" name="return_tab" value="account" />
+      <div class="onboarding-actions">
+        <button type="submit" class="download-btn login-submit">Save photo</button>
+        <button type="button" class="onboarding-skip-btn" id="account-pet-photo-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>"#
+        .to_string()
+}
+
+fn render_pet_check_cta(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return r#"<p class="pet-check-cta"><button type="button" class="download-btn pet-setup-trigger" id="pet-home-setup-trigger">Set up your cat's virtual home</button></p>"#.to_string();
+    }
+
+    r#"<p class="pet-check-cta"><a href="/home/cat-home" class="download-btn">Check on your cat</a></p>"#.to_string()
+}
+
+fn render_pet_video_upload_cta(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) || profile_has_pet_video(profile) {
+        return String::new();
+    }
+
+    r#"<p class="pet-video-upload-cta"><button type="button" class="download-btn pet-video-upload-trigger">cat GIF creator</button></p>"#
+        .to_string()
+}
+
+fn render_pet_video_modal(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<div class="onboarding-backdrop" id="pet-video-upload-modal" role="dialog" aria-modal="true" aria-labelledby="pet-video-upload-title" hidden>
+  <div class="onboarding-modal">
+    <h2 id="pet-video-upload-title">cat GIF creator</h2>
+    <p class="onboarding-intro">Upload a video of your cat playing, then pick a 3–6 second clip that loops on the My Pet tab.</p>
+    <form class="onboarding-form login-form" action="/home/pet-video" method="post" enctype="multipart/form-data">
+      <fieldset class="pet-video-fieldset">
+        <legend>Cat playing video</legend>
+        <p class="field-hint">MP4, WebM, or MOV up to 50MB. Pick a 3–6 second clip of your cat playing.</p>
+        <div class="pet-photo-upload">
+          <input id="upload_pet_video" name="pet_video" type="file" class="pet-photo-input" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" required />
+          <label for="upload_pet_video" class="pet-photo-paw-btn" aria-label="Choose cat playing video">
+            <span class="pet-photo-paw-icon" aria-hidden="true">🎬</span>
+          </label>
+        </div>
+        <div id="upload-pet-video-preview" class="pet-video-preview" hidden aria-live="polite"></div>
+        <input type="hidden" id="upload_pet_video_clip_start" name="pet_video_clip_start" value="0" />
+        <input type="hidden" id="upload_pet_video_clip_duration" name="pet_video_clip_duration" value="6" />
+      </fieldset>
+      <input type="hidden" id="pet_video_return_tab" name="return_tab" value="pet" />
+      <div class="onboarding-actions">
+        <button type="submit" class="download-btn login-submit">Save GIF</button>
+        <button type="button" class="onboarding-skip-btn" id="pet-video-upload-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>"#
+        .to_string()
+}
+
+fn render_cat_home_nav_link(profile: &UserProfile) -> String {
+    if user_needs_pet_setup(profile) {
+        return String::new();
+    }
+
+    r#"<a href="/home/cat-home">CAT HOME</a>"#.to_string()
 }
 
 fn render_pet_setup_cta(profile: &UserProfile) -> String {
@@ -2215,7 +3691,10 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
         return String::new();
     }
 
-    r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
+    let today_input_max = Local::now().date_naive().format("%Y-%m-%d").to_string();
+
+    format!(
+        r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
   <div class="onboarding-modal">
     <h2 id="onboarding-title">Tell us about your cat 🐾</h2>
     <p class="onboarding-intro">We will personalize your pet tab and schedule vet and vaccine reminders on your calendar.</p>
@@ -2240,20 +3719,9 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
         <option value="Black and white" />
       </datalist>
 
-      <div class="age-row">
-        <div>
-          <label for="age_value">Age</label>
-          <input id="age_value" name="age_value" type="number" min="1" placeholder="12" required />
-        </div>
-        <div>
-          <label for="age_unit">Unit</label>
-          <select id="age_unit" name="age_unit" required>
-            <option value="weeks">Weeks (under 1 year)</option>
-            <option value="years" selected>Years</option>
-          </select>
-        </div>
-      </div>
-      <p class="field-hint">Use weeks for kittens (6–20 weeks) so we can schedule FVRCP, rabies, and FeLV doses. Cats 1–10 years get booster schedules; 10+ years get vet reminders every 6 months.</p>
+      <label for="pet_birth_date">Date of birth</label>
+      <input id="pet_birth_date" name="pet_birth_date" type="date" max="{today_input_max}" required />
+      <p class="field-hint">We use your cat's birthday for vaccine scheduling and add a yearly birthday to your calendar.</p>
 
       <fieldset class="indoor-outdoor-fieldset">
         <legend>Indoor or outdoor cat?</legend>
@@ -2304,19 +3772,21 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
       <label for="medications">Medications</label>
       <textarea id="medications" name="medications" rows="2" placeholder="e.g. flea prevention monthly"></textarea>
 
-      <fieldset class="pet-photo-fieldset">
-        <legend>Cat profile photo</legend>
-        <p class="field-hint">Add a photo of your cat for the My Pet tab. JPEG, PNG, or WebP up to 5MB.</p>
+      <fieldset class="pet-video-fieldset">
+        <legend>Cat playing video</legend>
+        <p class="field-hint">Upload a video of your cat playing, then pick a 3–6 second clip for the My Pet tab. MP4, WebM, or MOV up to 50MB.</p>
         <div class="pet-photo-upload">
-          <input id="pet_photo" name="pet_photo" type="file" class="pet-photo-input" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" />
-          <label for="pet_photo" class="pet-photo-paw-btn" aria-label="Choose cat profile photo">
-            <span class="pet-photo-paw-icon" aria-hidden="true">🐾</span>
+          <input id="pet_video" name="pet_video" type="file" class="pet-photo-input" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" />
+          <label for="pet_video" class="pet-photo-paw-btn" aria-label="Choose cat playing video">
+            <span class="pet-photo-paw-icon" aria-hidden="true">🎬</span>
           </label>
         </div>
-        <div id="pet-photo-preview" class="pet-photo-preview" hidden aria-live="polite"></div>
+        <div id="pet-video-preview" class="pet-video-preview" hidden aria-live="polite"></div>
+        <input type="hidden" id="pet_video_clip_start" name="pet_video_clip_start" value="0" />
+        <input type="hidden" id="pet_video_clip_duration" name="pet_video_clip_duration" value="6" />
         <label class="checkbox-pill skip-photo-option">
-          <input type="checkbox" id="skip_photo" name="skip_photo" value="on" />
-          Skip photo for now
+          <input type="checkbox" id="skip_video" name="skip_video" value="on" />
+          Skip video for now
         </label>
       </fieldset>
 
@@ -2326,8 +3796,9 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
       </div>
     </form>
   </div>
-</div>"#
-        .to_string()
+</div>"#,
+        today_input_max = escape_html_attr(&today_input_max),
+    )
 }
 
 fn current_calendar_month() -> u32 {
@@ -2435,10 +3906,16 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("task_done") => "",
         Some("task_reopened") => {
-            r#"<p class="auth-success status-flash" role="status">Task marked as incomplete.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Task marked as incomplete. Paw points for that task were deducted.</p>"#
         }
         Some("task_invalid") => {
             r#"<p class="auth-error status-flash" role="alert">That task could not be updated.</p>"#
+        }
+        Some("task_time_saved") => {
+            r#"<p class="auth-success status-flash" role="status">Task time updated.</p>"#
+        }
+        Some("task_time_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That task time could not be updated.</p>"#
         }
         Some("onboarding_done") => {
             r#"<p class="auth-success status-flash" role="status">Welcome! Your cat profile is saved with vet and vaccine reminders on your calendar.</p>"#
@@ -2446,8 +3923,47 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("onboarding_invalid") => {
             r#"<p class="auth-error status-flash" role="alert">Please enter your cat's name, breed, a valid age, and whether they are indoor or outdoor.</p>"#
         }
-        Some("onboarding_photo_invalid") => {
-            r#"<p class="auth-error status-flash" role="alert">That photo could not be saved. Use a JPEG, PNG, or WebP image under 5MB, or skip the photo.</p>"#
+        Some("onboarding_photo_invalid") | Some("onboarding_video_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That video could not be saved. Use an MP4, WebM, or MOV under 50MB with at least 3 seconds of footage, or skip the video.</p>"#
+        }
+        Some("pet_video_done") => {
+            r#"<p class="auth-success status-flash" role="status">Playing video saved! Tap your profile photo on the Account tab or "Watch my kitty play!" on My Pet to watch it loop.</p>"#
+        }
+        Some("pet_video_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That video could not be saved. Use an MP4, WebM, or MOV under 50MB with at least 3 seconds of footage.</p>"#
+        }
+        Some("pet_photo_done") => {
+            r#"<p class="auth-success status-flash" role="status">Profile photo updated!</p>"#
+        }
+        Some("pet_photo_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That photo could not be saved. Use a JPEG, PNG, or WebP under 5MB.</p>"#
+        }
+        Some("password_done") => {
+            r#"<p class="auth-success status-flash" role="status">Password updated successfully.</p>"#
+        }
+        Some("password_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">Current password is incorrect.</p>"#
+        }
+        Some("password_mismatch") => {
+            r#"<p class="auth-error status-flash" role="alert">New password and confirmation do not match.</p>"#
+        }
+        Some("password_requirements") => {
+            r#"<p class="auth-error status-flash" role="alert">New password must be at least 5 characters and include one number and one special character.</p>"#
+        }
+        Some("password_same") => {
+            r#"<p class="auth-error status-flash" role="alert">Choose a new password that is different from your current one.</p>"#
+        }
+        Some("password_missing") => {
+            r#"<p class="auth-error status-flash" role="alert">Enter your current password and a new password.</p>"#
+        }
+        Some("password_error") => {
+            r#"<p class="auth-error status-flash" role="alert">Could not update your password right now. Please try again.</p>"#
+        }
+        Some("pet_name_done") => {
+            r#"<p class="auth-success status-flash" role="status">Pet name updated!</p>"#
+        }
+        Some("pet_name_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">Enter a pet name up to 40 characters.</p>"#
         }
         Some("vet_visit_done") => {
             r#"<p class="auth-success status-flash" role="status">Vet visit saved! Vaccines and health notes updated.</p>"#
@@ -2462,13 +3978,16 @@ fn dashboard_status_block(status: Option<&str>) -> String {
             r#"<p class="auth-error status-flash" role="alert">Could not save vet notes. Please try again.</p>"#
         }
         Some("feedback_sent") => {
-            r#"<p class="auth-success status-flash" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
+            r#"<p class="auth-success status-flash" role="status">Your feedback was posted to the public forum.</p>"#
         }
         Some("feedback_missing") => {
             r#"<p class="auth-error status-flash" role="alert">Please fill out all feedback fields.</p>"#
         }
         Some("feedback_failed") => {
             r#"<p class="auth-error status-flash" role="alert">We could not save your feedback. Please try again.</p>"#
+        }
+        Some("feedback_idea_purrfect") => {
+            r#"<p class="auth-success status-flash" role="status">Your idea is purrfect! +200 paw points.</p>"#
         }
         Some("forum_post_sent") => {
             r#"<p class="auth-success status-flash" role="status">Your question was posted to the forum.</p>"#
@@ -2499,6 +4018,18 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("forum_delete_failed") => {
             r#"<p class="auth-error status-flash" role="alert">We could not delete that forum item. Please try again.</p>"#
+        }
+        Some("calendar_event_added") => {
+            r#"<p class="auth-success status-flash" role="status">Event saved to your calendar.</p>"#
+        }
+        Some("calendar_event_missing") => {
+            r#"<p class="auth-error status-flash" role="alert">Enter a task name before saving.</p>"#
+        }
+        Some("calendar_event_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That calendar date could not be saved. Pick a day and try again.</p>"#
+        }
+        Some("calendar_event_failed") => {
+            r#"<p class="auth-error status-flash" role="alert">We could not save your calendar event. Please try again.</p>"#
         }
         _ => "",
     }
@@ -2542,11 +4073,171 @@ fn render_dashboard_status_area(profile: &UserProfile, status: Option<&str>) -> 
     html
 }
 
-fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
+const PURRFECT_IDEA_UPVOTES: u32 = 5;
+const PURRFECT_IDEA_REWARD: u32 = 200;
+
+fn feedback_author_email(submission: &FeedbackSubmission) -> String {
+    submission
+        .user_id
+        .clone()
+        .unwrap_or_else(|| submission.email.clone())
+}
+
+async fn maybe_grant_purrfect_idea_reward(state: &AppState, feedback_id: i64, upvotes: u32) {
+    if upvotes < PURRFECT_IDEA_UPVOTES {
+        return;
+    }
+    if state.storage.feedback_reward_granted(feedback_id).unwrap_or(false) {
+        return;
+    }
+
+    let Ok(Some(submission)) = state.storage.get_feedback_submission(feedback_id) else {
+        return;
+    };
+    if submission.category != "idea" {
+        return;
+    }
+
+    let author_email = feedback_author_email(&submission);
+    if let Ok(Some(mut profile)) = state.storage.load_profile(&author_email) {
+        profile.paw_points += PURRFECT_IDEA_REWARD;
+        if !profile.pending_purrfect_idea_ids.contains(&feedback_id) {
+            profile.pending_purrfect_idea_ids.push(feedback_id);
+        }
+        push_activity(
+            &mut profile,
+            "Your idea is purrfect! +200 paw points.",
+        );
+        let _ = save_profile(state, &profile).await;
+    }
+
+    let _ = state.storage.mark_feedback_reward_granted(feedback_id);
+}
+
+fn feedback_category_label(category: &str) -> &'static str {
+    match category {
+        "fix" => "Something to fix",
+        "idea" => "New idea",
+        "bug" => "Bug report",
+        _ => "Feedback",
+    }
+}
+
+fn feedback_message_preview(message: &str) -> String {
+    let collapsed = message.trim().replace(['\n', '\r'], " ");
+    let max_chars = 90usize;
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        format!(
+            "{}…",
+            collapsed.chars().take(max_chars).collect::<String>()
+        )
+    }
+}
+
+fn render_feedback_vote_controls(entry: &storage::FeedbackForumEntry, voter_email: Option<&str>) -> String {
+    let id = entry.submission.id;
+    let up_active = entry.user_vote == Some(1);
+    let down_active = entry.user_vote == Some(-1);
+    let up_pressed = if up_active { r#" aria-pressed="true""# } else { "" };
+    let down_pressed = if down_active { r#" aria-pressed="true""# } else { "" };
+    let up_class = if up_active {
+        "feedback-vote-btn feedback-vote-up is-active"
+    } else {
+        "feedback-vote-btn feedback-vote-up"
+    };
+    let down_class = if down_active {
+        "feedback-vote-btn feedback-vote-down is-active"
+    } else {
+        "feedback-vote-btn feedback-vote-down"
+    };
+    let vote_blocked = if voter_email.is_none() {
+        r#" data-vote-blocked="login""#
+    } else {
+        ""
+    };
+
     format!(
-        r#"<h1>Share Feedback</h1>
-        <p class="panel-intro">Tell us what to fix, what to improve, or share a new idea for WhiskerWatch.</p>
-        <article class="dashboard-card">
+        r#"<div class="feedback-votes" data-feedback-id="{id}"{vote_blocked}>
+            <button type="button" class="{up_class}" data-vote="up"{up_pressed} aria-label="Upvote">▲ {upvotes}</button>
+            <button type="button" class="{down_class}" data-vote="down"{down_pressed} aria-label="Downvote">▼ {downvotes}</button>
+          </div>"#,
+        id = id,
+        vote_blocked = vote_blocked,
+        up_class = up_class,
+        down_class = down_class,
+        up_pressed = up_pressed,
+        down_pressed = down_pressed,
+        upvotes = entry.upvotes,
+        downvotes = entry.downvotes,
+    )
+}
+
+fn render_feedback_post(
+    entry: &storage::FeedbackForumEntry,
+    open: bool,
+    voter_email: Option<&str>,
+) -> String {
+    let item = &entry.submission;
+    let open_attr = if open { " open" } else { "" };
+    let votes = render_feedback_vote_controls(entry, voter_email);
+    format!(
+        r#"<article class="feedback-forum-item" data-feedback-id="{id}">
+          <div class="feedback-forum-row">
+            <details class="feedback-forum-post"{open_attr}>
+              <summary class="feedback-forum-summary">
+                <span class="feedback-forum-category">{category}</span>
+                <span class="feedback-forum-preview">{preview}</span>
+                <span class="feedback-forum-meta">by {author} · {when}</span>
+              </summary>
+              <div class="feedback-forum-body">
+                <p>{message}</p>
+              </div>
+            </details>
+            {votes}
+          </div>
+        </article>"#,
+        open_attr = open_attr,
+        id = item.id,
+        category = escape_html(feedback_category_label(&item.category)),
+        preview = escape_html(&feedback_message_preview(&item.message)),
+        votes = votes,
+        author = escape_html(&item.author_username),
+        when = escape_html(&format_timestamp(item.submitted_at)),
+        message = escape_html(&item.message),
+    )
+}
+
+fn render_feedback_forum(
+    state: &AppState,
+    form_name: &str,
+    form_email: &str,
+    open_post: Option<i64>,
+    voter_email: Option<&str>,
+) -> String {
+    let posts = state
+        .storage
+        .load_feedback_forum(voter_email)
+        .unwrap_or_default();
+
+    let mut list = String::new();
+    if posts.is_empty() {
+        list.push_str(
+            r#"<p class="feedback-forum-empty">No public feedback yet. Share the first idea with the community!</p>"#,
+        );
+    } else {
+        for post in &posts {
+            let open = open_post.is_some_and(|id| id == post.submission.id);
+            list.push_str(&render_feedback_post(post, open, voter_email));
+        }
+    }
+
+    format!(
+        r#"<h1>Feedback Forum</h1>
+        <p class="panel-intro">Post feedback publicly so other WhiskerWatch parents can see ideas, bugs, and fixes in the works.</p>
+        <article class="dashboard-card feedback-forum-compose">
+          <h2>Post feedback</h2>
           <form class="login-form contact-form" action="/feedback" method="post">
             <label for="feedback-name">Name</label>
             <input id="feedback-name" name="name" type="text" placeholder="Your name" value="{form_name}" required />
@@ -2571,11 +4262,16 @@ fn render_dashboard_feedback_tab(form_name: &str, form_email: &str) -> String {
               required
             ></textarea>
 
-            <button type="submit" class="download-btn login-submit">Send Feedback</button>
+            <button type="submit" class="download-btn login-submit">Post to forum</button>
           </form>
-        </article>"#,
+        </article>
+        <div class="feedback-forum-list">
+          <h2 class="feedback-forum-list-title">Community feedback</h2>
+          {list}
+        </div>"#,
         form_name = form_name,
         form_email = form_email,
+        list = list,
     )
 }
 
@@ -2787,7 +4483,180 @@ fn render_outfit_cards(profile: &UserProfile) -> String {
         .collect()
 }
 
+fn render_decor_cards(profile: &UserProfile) -> String {
+    DECOR_CATALOG
+        .iter()
+        .map(|decor| {
+            let owned = profile.owned_decor.iter().any(|id| id == decor.id);
+            let equipped = profile
+                .equipped_decor
+                .get(decor.slot)
+                .is_some_and(|id| id == decor.id);
+            let mut classes = vec!["decor-card"];
+            if owned {
+                classes.push("owned");
+            }
+            if equipped {
+                classes.push("equipped");
+            }
+
+            let price_label = if decor.price == 0 {
+                "Included".to_string()
+            } else {
+                format!("{} paw points", decor.price)
+            };
+
+            let action = if equipped {
+                r#"<span class="decor-badge">Placed in home</span>"#.to_string()
+            } else if owned {
+                format!(
+                    r#"<form action="/home/decor/equip" method="post"><input type="hidden" name="decor_id" value="{}" /><button type="submit" class="download-btn decor-btn">Place in home</button></form>"#,
+                    escape_html_attr(decor.id)
+                )
+            } else if decor.price == 0 {
+                r#"<span class="decor-badge">Starter decor</span>"#.to_string()
+            } else {
+                format!(
+                    r#"<form action="/home/decor/buy" method="post"><input type="hidden" name="decor_id" value="{}" /><button type="submit" class="download-btn decor-btn">Buy for {} pts</button></form>"#,
+                    escape_html_attr(decor.id),
+                    decor.price
+                )
+            };
+
+            format!(
+                r#"<article class="{}"><div class="decor-emoji">{}</div><p class="decor-slot">{slot}</p><h3>{name}</h3><p class="decor-price">{price}</p><div class="decor-actions">{action}</div></article>"#,
+                classes.join(" "),
+                decor.emoji,
+                slot = decor_slot_label(decor.slot),
+                name = escape_html(decor.name),
+                price = price_label,
+                action = action,
+            )
+        })
+        .collect()
+}
+
+fn render_cat_home_scene(profile: &UserProfile) -> String {
+    let pet_name = if profile.pet_name.trim().is_empty() {
+        "Your cat".to_string()
+    } else {
+        profile.pet_name.clone()
+    };
+    let room = equipped_decor_for_slot(profile, "room")
+        .map(|decor| decor.id)
+        .unwrap_or("sunny_nook");
+    let rug = equipped_decor_for_slot(profile, "rug");
+    let bed = equipped_decor_for_slot(profile, "bed");
+    let toy = equipped_decor_for_slot(profile, "toy");
+    let plant = equipped_decor_for_slot(profile, "plant");
+
+    let rug_layer = rug.map(|decor| {
+        format!(
+            r#"<div class="cat-home-prop cat-home-rug" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
+            escape_html(decor.name),
+            decor.emoji,
+            escape_html(decor.name),
+        )
+    }).unwrap_or_default();
+
+    let bed_layer = bed.map(|decor| {
+        format!(
+            r#"<div class="cat-home-prop cat-home-bed" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
+            escape_html(decor.name),
+            decor.emoji,
+            escape_html(decor.name),
+        )
+    }).unwrap_or_default();
+
+    let toy_layer = toy.map(|decor| {
+        format!(
+            r#"<div class="cat-home-prop cat-home-toy" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
+            escape_html(decor.name),
+            decor.emoji,
+            escape_html(decor.name),
+        )
+    }).unwrap_or_default();
+
+    let plant_layer = plant.map(|decor| {
+        format!(
+            r#"<div class="cat-home-prop cat-home-plant" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
+            escape_html(decor.name),
+            decor.emoji,
+            escape_html(decor.name),
+        )
+    }).unwrap_or_default();
+
+    format!(
+        r#"<div class="cat-home-scene" data-room="{room}">
+  <div class="cat-home-room-bg" aria-hidden="true"></div>
+  {rug_layer}
+  {bed_layer}
+  <div class="cat-home-pet-stage">
+    <p class="cat-home-pet-bubble" role="note">pet me!</p>
+    {pet_avatar}
+  </div>
+  {toy_layer}
+  {plant_layer}
+  <p class="cat-home-mood">{pet_name} is relaxing in their play area.</p>
+</div>"#,
+        room = escape_html_attr(room),
+        rug_layer = rug_layer,
+        bed_layer = bed_layer,
+        toy_layer = toy_layer,
+        plant_layer = plant_layer,
+        pet_avatar = render_pet_avatar(profile),
+        pet_name = escape_html(&pet_name),
+    )
+}
+
+fn cat_home_status_block(status: Option<&str>) -> String {
+    match status {
+        Some("decor_bought") => {
+            r#"<p class="auth-success status-flash" role="status">Decor purchased and placed in your cat's home!</p>"#
+        }
+        Some("decor_equipped") => {
+            r#"<p class="auth-success status-flash" role="status">Decor placed in your cat's home.</p>"#
+        }
+        Some("decor_owned") => {
+            r#"<p class="auth-error status-flash" role="alert">You already own that decor item.</p>"#
+        }
+        Some("decor_points") => {
+            r#"<p class="auth-error status-flash" role="alert">Not enough paw points for that decor.</p>"#
+        }
+        Some("decor_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That decor item is not available.</p>"#
+        }
+        _ => "",
+    }
+    .to_string()
+}
+
+fn render_task_due_html(task: &UserTask) -> String {
+    if !task_has_adjustable_time(&task.id) {
+        return format!(
+            r#"{due} · +{reward} pts"#,
+            due = escape_html(&task.due_label),
+            reward = task.reward,
+        );
+    }
+
+    format!(
+        r#"<span class="task-schedule-prefix">{prefix}</span> · <button type="button" class="task-time-btn" data-task-id="{id}" data-time="{time_value}" data-time-minutes="{time_minutes}" data-task-title="{title}" aria-label="Change time for {title}">{time_label}</button> · +{reward} pts"#,
+        prefix = task_schedule_prefix(&task.id),
+        id = escape_html_attr(&task.id),
+        time_value = minutes_to_time_input_value(task.time_minutes),
+        time_minutes = task.time_minutes,
+        title = escape_html_attr(&task.title),
+        time_label = escape_html(&format_time_from_minutes(task.time_minutes)),
+        reward = task.reward,
+    )
+}
+
 fn render_task_list(profile: &UserProfile) -> String {
+    if !profile_has_pet(profile) {
+        return String::new();
+    }
+
     profile
         .tasks
         .iter()
@@ -2799,11 +4668,10 @@ fn render_task_list(profile: &UserProfile) -> String {
                 "Complete"
             };
             format!(
-                r#"<li class="task-item{completed_class}"><div><p class="task-title">{title}</p><p class="task-due">{due} · +{reward} pts</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="{id}" /><button type="submit" class="download-btn task-toggle-btn">{button_label}</button></form></li>"#,
+                r#"<li class="task-item{completed_class}"><div><p class="task-title">{title}</p><p class="task-due">{due_html}</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="{id}" /><button type="submit" class="download-btn task-toggle-btn">{button_label}</button></form></li>"#,
                 completed_class = completed_class,
                 title = escape_html(&task.title),
-                due = escape_html(&task.due_label),
-                reward = task.reward,
+                due_html = render_task_due_html(task),
                 id = escape_html_attr(&task.id),
                 button_label = button_label,
             )
@@ -2839,8 +4707,7 @@ fn render_calendar_grid(profile: &UserProfile, month: u32, year: u32) -> String 
         html.push_str(r#"<span class="calendar-day empty"></span>"#);
     }
 
-    let event_days: HashSet<u32> = profile
-        .calendar_events
+    let event_days: HashSet<u32> = visible_calendar_events(profile, Local::now().date_naive())
         .iter()
         .filter(|e| e.month == month && e.year == year)
         .map(|e| e.day)
@@ -2876,12 +4743,12 @@ fn render_calendar_grid(profile: &UserProfile, month: u32, year: u32) -> String 
 }
 
 fn render_event_list(profile: &UserProfile) -> String {
-    if profile.calendar_events.is_empty() {
+    let events = visible_calendar_events(profile, Local::now().date_naive());
+    if events.is_empty() {
         return "<li>No upcoming events yet.</li>".to_string();
     }
 
-    profile
-        .calendar_events
+    events
         .iter()
         .map(|event| {
             format!(
@@ -2898,16 +4765,18 @@ fn render_event_list(profile: &UserProfile) -> String {
 
 fn render_calendar_data_json(profile: &UserProfile, month: u32, year: u32) -> String {
     let today = Local::now().date_naive();
-    let events: Vec<_> = profile
-        .calendar_events
+    let events: Vec<_> = visible_calendar_events(profile, today)
         .iter()
         .map(|event| {
             serde_json::json!({
+                "id": event.id,
                 "day": event.day,
                 "month": event.month,
                 "year": event.year,
                 "title": event.title,
                 "time_label": event.time_label,
+                "time_minutes": event.time_minutes,
+                "user_created": event.id.is_some(),
             })
         })
         .collect();
@@ -2926,6 +4795,9 @@ fn render_calendar_data_json(profile: &UserProfile, month: u32, year: u32) -> St
                     "due_label": task.due_label,
                     "reward": task.reward,
                     "completed": task.completed,
+                    "time_minutes": task.time_minutes,
+                    "time_value": minutes_to_time_input_value(task.time_minutes),
+                    "adjustable_time": task_has_adjustable_time(&task.id),
                 })
             })
         })
@@ -2952,7 +4824,7 @@ async fn member_since_label(state: &AppState, email: &str) -> String {
         .find_user_by_email(email)
         .ok()
         .flatten()
-        .map(|user| format_timestamp(user.created_at))
+        .map(|user| format_member_since(user.created_at))
         .unwrap_or_else(|| "Recently joined".to_string())
 }
 
@@ -3003,7 +4875,14 @@ async fn dashboard_page(
         }
     }
 
-    let profile = get_or_create_profile(&state, &email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
+    let dashboard_status = if !profile.pending_purrfect_idea_ids.is_empty() {
+        profile.pending_purrfect_idea_ids.clear();
+        let _ = save_profile(&state, &profile).await;
+        Some("feedback_idea_purrfect")
+    } else {
+        query.status.as_deref()
+    };
     let show_vet_followup = profile.vet_followup_pending
         || query.vet_followup.as_deref().is_some_and(|value| value == "1");
     let user = user_for_email(&state, &email);
@@ -3020,8 +4899,8 @@ async fn dashboard_page(
         .map(|u| u.last_name.clone())
         .unwrap_or_default();
     let (level_progress_pct, level_progress_text) = level_progress(&profile);
-    let calendar_month = current_calendar_month();
-    let calendar_year = current_calendar_year();
+    let (calendar_month, calendar_year) =
+        resolve_calendar_view(query.cal_month.as_deref(), query.cal_year.as_deref());
     let (form_name, form_email) = form_prefill(&state, &jar).await;
 
     let template = match fs::read_to_string("templates/dashboard.html").await {
@@ -3041,6 +4920,15 @@ async fn dashboard_page(
         .replace("{{USER_LAST_NAME}}", &escape_html(&last_name))
         .replace("{{USER_USERNAME}}", &escape_html(&username))
         .replace("{{USER_EMAIL}}", &escape_html(&email))
+        .replace("{{ACCOUNT_PET_PHOTO}}", &render_account_pet_photo(&profile))
+        .replace(
+            "{{ACCOUNT_PASSWORD_SECTION}}",
+            &render_account_password_section(&email),
+        )
+        .replace(
+            "{{ACCOUNT_PET_NAME_FIELD}}",
+            &render_account_pet_name_field(&profile),
+        )
         .replace("{{MEMBER_SINCE}}", &escape_html(&member_since_label(&state, &email).await))
         .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
         .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
@@ -3048,6 +4936,14 @@ async fn dashboard_page(
         .replace("{{LEVEL_PROGRESS_TEXT}}", &escape_html(&level_progress_text))
         .replace("{{PET_NAME}}", &escape_html(&display_pet_name(&profile)))
         .replace("{{PET_BLURB}}", &render_pet_blurb(&profile))
+        .replace("{{PET_CHECK_CTA}}", &render_pet_check_cta(&profile))
+        .replace("{{PET_VIDEO_UPLOAD_CTA}}", &render_pet_video_upload_cta(&profile))
+        .replace("{{PET_VIDEO_MODAL}}", &render_pet_video_modal(&profile))
+        .replace(
+            "{{ACCOUNT_PET_PHOTO_MODAL}}",
+            &render_account_pet_photo_modal(&profile),
+        )
+        .replace("{{CAT_HOME_NAV_LINK}}", &render_cat_home_nav_link(&profile))
         .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
         .replace(
             "{{NEEDS_PET_SETUP_DATA}}",
@@ -3087,7 +4983,10 @@ async fn dashboard_page(
         )
         .replace("{{HEALTH_TAB_CONTENT}}", &render_health_tab(&profile))
         .replace("{{EQUIPPED_OUTFIT}}", &escape_html(&profile.equipped_outfit))
-        .replace("{{STATUS_BLOCK}}", &render_dashboard_status_area(&profile, query.status.as_deref()))
+        .replace(
+            "{{STATUS_BLOCK}}",
+            &render_dashboard_status_area(&profile, dashboard_status),
+        )
         .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
         .replace("{{OUTFIT_CARDS}}", &render_outfit_cards(&profile))
         .replace("{{TASK_LIST}}", &render_task_list(&profile))
@@ -3111,7 +5010,16 @@ async fn dashboard_page(
         )
         .replace(
             "{{FEEDBACK_TAB_CONTENT}}",
-            &render_dashboard_feedback_tab(&form_name, &form_email),
+            &render_feedback_forum(
+                &state,
+                &form_name,
+                &form_email,
+                query
+                    .feedback
+                    .as_deref()
+                    .and_then(|value| value.parse::<i64>().ok()),
+                Some(email.as_str()),
+            ),
         );
     let open_thread = query
         .thread
@@ -3126,6 +5034,309 @@ async fn dashboard_page(
     (jar, Html(body)).into_response()
 }
 
+fn pet_media_return_tab(value: &str) -> &'static str {
+    if value.trim() == "account" {
+        "account"
+    } else {
+        "pet"
+    }
+}
+
+async fn pet_name_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Form(form): Form<ChangePetNameForm>,
+) -> Response {
+    let wants_json = wants_json_response(&headers);
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => {
+            return if wants_json {
+                api_auth_error(true)
+            } else {
+                redirect.into_response()
+            };
+        }
+    };
+
+    let Some(new_name) = normalize_pet_name(&form.pet_name) else {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(PetNameChangeResponse {
+                    ok: false,
+                    status: "invalid",
+                    pet_name: String::new(),
+                }),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=account&status=pet_name_invalid").into_response()
+        };
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(PetNameChangeResponse {
+                    ok: false,
+                    status: "invalid",
+                    pet_name: String::new(),
+                }),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=account&status=pet_name_invalid").into_response()
+        };
+    }
+
+    if profile.pet_name != new_name {
+        let previous_name = profile.pet_name.clone();
+        profile.pet_name = new_name.clone();
+        let today = Local::now().date_naive();
+        profile.calendar_events = merge_calendar_events(&profile, today);
+        let _ = refresh_profile_tasks(&mut profile);
+
+        push_activity(
+            &mut profile,
+            &format!("Renamed {previous_name} to {new_name}."),
+        );
+
+        if let Err(error) = save_profile(&state, &profile).await {
+            eprintln!("pet name change failed for {email}: {error}");
+            return if wants_json {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(PetNameChangeResponse {
+                        ok: false,
+                        status: "invalid",
+                        pet_name: String::new(),
+                    }),
+                )
+                    .into_response()
+            } else {
+                Redirect::to("/home?tab=account&status=pet_name_invalid").into_response()
+            };
+        }
+    }
+
+    if wants_json {
+        Json(PetNameChangeResponse {
+            ok: true,
+            status: "done",
+            pet_name: new_name,
+        })
+        .into_response()
+    } else {
+        Redirect::to("/home?tab=account&status=pet_name_done").into_response()
+    }
+}
+
+async fn password_change_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<ChangePasswordForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    if is_admin_account(&email) {
+        return Redirect::to("/home?tab=account&status=password_error");
+    }
+
+    let current_password = form.current_password.trim();
+    let new_password = form.new_password.trim();
+    let confirm_password = form.confirm_password.trim();
+
+    if current_password.is_empty() || new_password.is_empty() || confirm_password.is_empty() {
+        return Redirect::to("/home?tab=account&status=password_missing");
+    }
+
+    if !signup_passwords_match(new_password, confirm_password) {
+        return Redirect::to("/home?tab=account&status=password_mismatch");
+    }
+
+    if !password_meets_signup_requirements(new_password) {
+        return Redirect::to("/home?tab=account&status=password_requirements");
+    }
+
+    if current_password == new_password {
+        return Redirect::to("/home?tab=account&status=password_same");
+    }
+
+    match state.storage.validate_login(&email, current_password) {
+        Ok(true) => {}
+        Ok(false) => return Redirect::to("/home?tab=account&status=password_invalid"),
+        Err(error) => {
+            eprintln!("password change validation failed for {email}: {error}");
+            return Redirect::to("/home?tab=account&status=password_error");
+        }
+    }
+
+    match state.storage.set_user_password(&email, new_password) {
+        Ok(()) => Redirect::to("/home?tab=account&status=password_done"),
+        Err(error) => {
+            eprintln!("password change failed for {email}: {error}");
+            Redirect::to("/home?tab=account&status=password_error")
+        }
+    }
+}
+
+async fn pet_photo_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut return_tab = "pet";
+    let mut photo_bytes: Option<Vec<u8>> = None;
+    let mut photo_content_type: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "pet_photo" {
+            photo_content_type = field.content_type().map(str::to_string);
+            match field.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => photo_bytes = Some(bytes.to_vec()),
+                Ok(_) => {}
+                Err(_) => return Redirect::to("/home?tab=account&status=pet_photo_invalid"),
+            }
+            continue;
+        }
+
+        if name == "return_tab" {
+            if let Ok(text) = field.text().await {
+                return_tab = pet_media_return_tab(&text);
+            }
+        }
+    }
+
+    let redirect_invalid = format!("/home?tab={return_tab}&status=pet_photo_invalid");
+
+    let Some(bytes) = photo_bytes else {
+        return Redirect::to(&redirect_invalid);
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return Redirect::to(&redirect_invalid);
+    }
+
+    let ext = match validate_pet_photo(photo_content_type.as_deref(), &bytes) {
+        Ok(ext) => ext,
+        Err(()) => return Redirect::to(&redirect_invalid),
+    };
+
+    match save_pet_photo(&state, &email, &bytes, ext).await {
+        Ok(url) => profile.pet_photo_url = Some(url),
+        Err(_) => return Redirect::to(&redirect_invalid),
+    }
+
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Updated the profile photo for {pet_name}."),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to(&format!(
+            "/home?tab={return_tab}&status=pet_photo_done"
+        )),
+        Err(_) => Redirect::to(&redirect_invalid),
+    }
+}
+
+async fn pet_video_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut return_tab = "pet";
+    let mut clip_start = 0.0f32;
+    let mut clip_duration = PET_VIDEO_CLIP_MAX_SECONDS;
+    let mut video_bytes: Option<Vec<u8>> = None;
+    let mut video_content_type: Option<String> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "pet_video" {
+            video_content_type = field.content_type().map(str::to_string);
+            match field.bytes().await {
+                Ok(bytes) if !bytes.is_empty() => video_bytes = Some(bytes.to_vec()),
+                Ok(_) => {}
+                Err(_) => return Redirect::to("/home?tab=pet&status=pet_video_invalid"),
+            }
+            continue;
+        }
+
+        if name == "return_tab" {
+            if let Ok(text) = field.text().await {
+                return_tab = pet_media_return_tab(&text);
+            }
+        } else if name == "pet_video_clip_start" {
+            if let Ok(text) = field.text().await {
+                clip_start = parse_pet_video_clip_start(&text);
+            }
+        } else if name == "pet_video_clip_duration" {
+            if let Ok(text) = field.text().await {
+                clip_duration = parse_pet_video_clip_duration(&text);
+            }
+        }
+    }
+
+    let redirect_invalid = format!("/home?tab={return_tab}&status=pet_video_invalid");
+
+    let Some(bytes) = video_bytes else {
+        return Redirect::to(&redirect_invalid);
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return Redirect::to(&redirect_invalid);
+    }
+
+    let ext = match validate_pet_video(video_content_type.as_deref(), &bytes) {
+        Ok(ext) => ext,
+        Err(()) => return Redirect::to(&redirect_invalid),
+    };
+
+    match save_pet_video(&state, &email, &bytes, ext).await {
+        Ok(url) => {
+            profile.pet_video_url = Some(url);
+            profile.pet_video_clip_start = Some(clip_start);
+            profile.pet_video_clip_duration = Some(clip_duration);
+        }
+        Err(_) => return Redirect::to(&redirect_invalid),
+    }
+
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Added a playing video clip for {pet_name}."),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to(&format!(
+            "/home?tab={return_tab}&status=pet_video_done"
+        )),
+        Err(_) => Redirect::to(&redirect_invalid),
+    }
+}
+
 async fn onboarding_submit(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -3137,17 +5348,17 @@ async fn onboarding_submit(
     };
 
     let mut fields: HashMap<String, Vec<String>> = HashMap::new();
-    let mut photo_bytes: Option<Vec<u8>> = None;
-    let mut photo_content_type: Option<String> = None;
+    let mut video_bytes: Option<Vec<u8>> = None;
+    let mut video_content_type: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
-        if name == "pet_photo" {
-            photo_content_type = field.content_type().map(str::to_string);
+        if name == "pet_video" {
+            video_content_type = field.content_type().map(str::to_string);
             match field.bytes().await {
-                Ok(bytes) if !bytes.is_empty() => photo_bytes = Some(bytes.to_vec()),
+                Ok(bytes) if !bytes.is_empty() => video_bytes = Some(bytes.to_vec()),
                 Ok(_) => {}
-                Err(_) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+                Err(_) => return Redirect::to("/home?status=onboarding_video_invalid"),
             }
             continue;
         }
@@ -3173,7 +5384,12 @@ async fn onboarding_submit(
         return Redirect::to("/home?status=onboarding_invalid");
     }
 
-    let (pet_age_weeks, pet_age_years) = match parse_age(&form.age_value, &form.age_unit) {
+    let signup_date = Local::now().date_naive();
+    let dob = match validate_pet_birth_date(&form.pet_birth_date, signup_date) {
+        Ok(dob) => dob,
+        Err(()) => return Redirect::to("/home?status=onboarding_invalid"),
+    };
+    let (pet_age_weeks, pet_age_years) = match derive_age_from_birth(dob, signup_date) {
         Ok(age) => age,
         Err(()) => return Redirect::to("/home?status=onboarding_invalid"),
     };
@@ -3203,12 +5419,12 @@ async fn onboarding_submit(
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
-    let signup_date = Local::now().date_naive();
 
     profile.pet_name = cat_name.to_string();
     profile.pet_breed = pet_breed.to_string();
     profile.pet_color = form.pet_color.trim().to_string();
     profile.pet_mood = "Happy".to_string();
+    profile.pet_birth_date = Some(dob.format("%Y-%m-%d").to_string());
     profile.pet_age_weeks = pet_age_weeks;
     profile.pet_age_years = pet_age_years;
     profile.never_been_to_vet = form.never_been_to_vet;
@@ -3222,15 +5438,19 @@ async fn onboarding_submit(
     profile.calendar_events = merge_calendar_events(&profile, signup_date);
     let _ = refresh_profile_tasks(&mut profile);
 
-    if !form.skip_photo {
-        if let Some(bytes) = photo_bytes {
-            let ext = match validate_pet_photo(photo_content_type.as_deref(), &bytes) {
+    if !form.skip_video {
+        if let Some(bytes) = video_bytes {
+            let ext = match validate_pet_video(video_content_type.as_deref(), &bytes) {
                 Ok(ext) => ext,
-                Err(()) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+                Err(()) => return Redirect::to("/home?status=onboarding_video_invalid"),
             };
-            match save_pet_photo(&state, &email, &bytes, ext).await {
-                Ok(url) => profile.pet_photo_url = Some(url),
-                Err(_) => return Redirect::to("/home?status=onboarding_photo_invalid"),
+            match save_pet_video(&state, &email, &bytes, ext).await {
+                Ok(url) => {
+                    profile.pet_video_url = Some(url);
+                    profile.pet_video_clip_start = Some(form.pet_video_clip_start);
+                    profile.pet_video_clip_duration = Some(form.pet_video_clip_duration);
+                }
+                Err(_) => return Redirect::to("/home?status=onboarding_video_invalid"),
             }
         }
     }
@@ -3318,6 +5538,193 @@ async fn outfit_equip(
     }
 }
 
+async fn decor_buy(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<DecorBuyForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let Some(decor) = decor_by_id(form.decor_id.trim()) else {
+        return Redirect::to("/home/cat-home?status=decor_invalid");
+    };
+
+    if decor.price == 0 {
+        return Redirect::to("/home/cat-home?status=decor_invalid");
+    }
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+
+    if !profile_has_pet(&profile) {
+        return Redirect::to("/home?tab=pet");
+    }
+
+    if profile.owned_decor.iter().any(|id| id == decor.id) {
+        return Redirect::to("/home/cat-home?status=decor_owned");
+    }
+
+    if profile.paw_points < decor.price {
+        return Redirect::to("/home/cat-home?status=decor_points");
+    }
+
+    profile.paw_points -= decor.price;
+    profile.owned_decor.push(decor.id.to_string());
+    profile
+        .equipped_decor
+        .insert(decor.slot.to_string(), decor.id.to_string());
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!(
+            "Purchased {} for {} paw points for {}'s home.",
+            decor.name, decor.price, pet_name
+        ),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to("/home/cat-home?status=decor_bought"),
+        Err(_) => Redirect::to("/home/cat-home?status=decor_invalid"),
+    }
+}
+
+async fn decor_equip(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<DecorEquipForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let Some(decor) = decor_by_id(form.decor_id.trim()) else {
+        return Redirect::to("/home/cat-home?status=decor_invalid");
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+
+    if !profile_has_pet(&profile) {
+        return Redirect::to("/home?tab=pet");
+    }
+
+    if !profile.owned_decor.iter().any(|id| id == decor.id) {
+        return Redirect::to("/home/cat-home?status=decor_invalid");
+    }
+
+    profile
+        .equipped_decor
+        .insert(decor.slot.to_string(), decor.id.to_string());
+    let pet_name = profile.pet_name.clone();
+    push_activity(
+        &mut profile,
+        &format!("Placed {} in {}'s home.", decor.name, pet_name),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to("/home/cat-home?status=decor_equipped"),
+        Err(_) => Redirect::to("/home/cat-home?status=decor_invalid"),
+    }
+}
+
+async fn pet_pet(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+) -> Response {
+    let wants_json = wants_json_response(&headers);
+    let Some(email) = api_user_email(&state, &jar) else {
+        return api_auth_error(wants_json);
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=pet").into_response()
+        };
+    }
+
+    profile.paw_points = profile.paw_points.saturating_add(PET_PET_REWARD);
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => {
+            if wants_json {
+                Json(PetPetResponse {
+                    ok: true,
+                    paw_points: profile.paw_points,
+                })
+                .into_response()
+            } else {
+                Redirect::to("/home/cat-home").into_response()
+            }
+        }
+        Err(_) => {
+            if wants_json {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "ok": false, "status": "error" })),
+                )
+                    .into_response()
+            } else {
+                Redirect::to("/home/cat-home?status=pet_pet_failed").into_response()
+            }
+        }
+    }
+}
+
+async fn cat_home_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<CatHomeQuery>,
+) -> impl IntoResponse {
+    let (jar, email) = match ensure_dashboard_session(&state, jar) {
+        Ok(pair) => pair,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return Redirect::to("/home?tab=pet").into_response();
+    }
+
+    let user = user_for_email(&state, &email);
+    let username = user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| "Parent".to_string());
+    let pet_name = display_pet_name(&profile);
+
+    match fs::read_to_string("templates/cat-home.html").await {
+        Ok(template) => {
+            let html = template
+                .replace("{{USER_NAME}}", &escape_html(&username))
+                .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar))
+                .replace("{{STATUS_BLOCK}}", &cat_home_status_block(query.status.as_deref()))
+                .replace("{{PET_NAME}}", &escape_html(&pet_name))
+                .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
+                .replace("{{CAT_HOME_SCENE}}", &render_cat_home_scene(&profile))
+                .replace("{{DECOR_CARDS}}", &render_decor_cards(&profile));
+            (jar, Html(html)).into_response()
+        }
+        Err(_) => (
+            jar,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not load cat home page",
+            ),
+        )
+            .into_response(),
+    }
+}
+
 fn wants_json_response(headers: &HeaderMap) -> bool {
     headers
         .get(ACCEPT)
@@ -3325,7 +5732,7 @@ fn wants_json_response(headers: &HeaderMap) -> bool {
         .is_some_and(|value| value.contains("application/json"))
 }
 
-fn task_toggle_json_response(profile: &UserProfile, status: &'static str, show_vet_followup: bool) -> Response {
+fn task_dashboard_json_response(profile: &UserProfile, status: &'static str, show_vet_followup: bool) -> Response {
     let (level_progress_pct, level_progress_text) = level_progress(profile);
     let calendar_month = current_calendar_month();
     let calendar_year = current_calendar_year();
@@ -3342,13 +5749,95 @@ fn task_toggle_json_response(profile: &UserProfile, status: &'static str, show_v
         tasks_html: render_task_list(profile),
         activity_html: render_activity_list(profile),
         paw_points: profile.paw_points,
+        paw_from_tasks: task_rewards_earned(profile),
+        xp_from_tasks: task_xp_earned(profile),
         parent_level: profile.parent_level,
+        parent_xp: profile.parent_xp,
         level_progress: level_progress_pct,
         level_progress_text,
         calendar_data,
         show_vet_followup,
     })
     .into_response()
+}
+
+async fn task_time_update(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Form(form): Form<TaskTimeForm>,
+) -> Response {
+    let wants_json = wants_json_response(&headers);
+    let Some(email) = api_user_email(&state, &jar) else {
+        return api_auth_error(wants_json);
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=tasks&status=task_time_invalid").into_response()
+        };
+    }
+
+    let task_id = form.task_id.trim();
+    let Some(time_minutes) = parse_time_input(&form.task_time) else {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=tasks&status=task_time_invalid").into_response()
+        };
+    };
+
+    if !apply_task_time_to_profile(&mut profile, task_id, time_minutes) {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=tasks&status=task_time_invalid").into_response()
+        };
+    }
+
+    let today = Local::now().date_naive();
+    profile.calendar_events = merge_calendar_events(&profile, today);
+
+    let activity_title = profile
+        .tasks
+        .iter()
+        .find(|task| task.id == task_id)
+        .map(|task| task.title.clone());
+    if let Some(title) = activity_title {
+        push_activity(
+            &mut profile,
+            &format!(
+                "Updated \"{title}\" to {}.",
+                format_time_from_minutes(time_minutes)
+            ),
+        );
+    }
+
+    match save_profile(&state, &profile).await {
+        Ok(()) if wants_json => task_dashboard_json_response(&profile, "time_updated", false),
+        Ok(()) => Redirect::to("/home?tab=tasks&status=task_time_saved").into_response(),
+        Err(_) if wants_json => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "ok": false, "status": "error" })),
+        )
+            .into_response(),
+        Err(_) => Redirect::to("/home?tab=tasks&status=task_time_invalid").into_response(),
+    }
 }
 
 async fn task_toggle(
@@ -3358,9 +5847,8 @@ async fn task_toggle(
     Form(form): Form<TaskToggleForm>,
 ) -> Response {
     let wants_json = wants_json_response(&headers);
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
-        Err(redirect) => return redirect.into_response(),
+    let Some(email) = api_user_email(&state, &jar) else {
+        return api_auth_error(wants_json);
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
@@ -3379,11 +5867,13 @@ async fn task_toggle(
     };
 
     if profile.tasks[index].completed {
-        let title = profile.tasks[index].title.clone();
-        profile.tasks[index].completed = false;
-        push_activity(&mut profile, &format!("Reopened task: {title}."));
+        let (title, reward) = reopen_completed_task(&mut profile, index);
+        push_activity(
+            &mut profile,
+            &format!("Reopened task: {title}. −{reward} paw points."),
+        );
         return match save_profile(&state, &profile).await {
-            Ok(()) if wants_json => task_toggle_json_response(&profile, "reopened", false),
+            Ok(()) if wants_json => task_dashboard_json_response(&profile, "reopened", false),
             Ok(()) => Redirect::to("/home?tab=tasks&status=task_reopened").into_response(),
             Err(_) if wants_json => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -3397,6 +5887,12 @@ async fn task_toggle(
     let reward = profile.tasks[index].reward;
     let title = profile.tasks[index].title.clone();
     profile.tasks[index].completed = true;
+    let today = Local::now().date_naive();
+    if is_daily_task(&profile.tasks[index]) {
+        profile.tasks[index].due_day = Some(today.day());
+        profile.tasks[index].due_month = Some(today.month());
+        profile.tasks[index].due_year = Some(today.year() as u32);
+    }
     profile.paw_points += reward;
     profile.parent_xp += reward / 2;
     if profile.parent_xp >= 100 {
@@ -3420,7 +5916,7 @@ async fn task_toggle(
 
     match save_profile(&state, &profile).await {
         Ok(()) if wants_json => {
-            task_toggle_json_response(&profile, "completed", is_vet_task && profile_has_pet(&profile))
+            task_dashboard_json_response(&profile, "completed", is_vet_task && profile_has_pet(&profile))
         }
         Ok(()) if is_vet_task => {
             Redirect::to("/home?tab=tasks&vet_followup=1&status=task_done").into_response()
@@ -3432,6 +5928,171 @@ async fn task_toggle(
         )
             .into_response(),
         Err(_) => Redirect::to("/home?tab=tasks&status=task_invalid").into_response(),
+    }
+}
+
+fn calendar_event_add_json_response(profile: &UserProfile, status: &'static str) -> Response {
+    let calendar_month = current_calendar_month();
+    let calendar_year = current_calendar_year();
+    let calendar_data = serde_json::from_str(&render_calendar_data_json(
+        profile,
+        calendar_month,
+        calendar_year,
+    ))
+    .unwrap_or_else(|_| serde_json::json!({}));
+
+    Json(CalendarEventAddResponse {
+        ok: true,
+        status,
+        calendar_data,
+    })
+    .into_response()
+}
+
+fn parse_time_minutes_field(value: &str) -> Option<u16> {
+    let minutes: u32 = value.trim().parse().ok()?;
+    if minutes < 360 || minutes > 1320 || minutes % 15 != 0 {
+        return None;
+    }
+    Some(minutes as u16)
+}
+
+fn calendar_date_heading(day: u32, month: u32, year: u32) -> String {
+    let month_name = MONTH_NAMES
+        .get(month.saturating_sub(1) as usize)
+        .unwrap_or(&"Month");
+    format!("{month_name} {day}, {year}")
+}
+
+async fn calendar_event_form_page(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Query(query): Query<CalendarEventFormQuery>,
+) -> impl IntoResponse {
+    let (jar, email) = match ensure_dashboard_session(&state, jar) {
+        Ok(pair) => pair,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let day = query.day.as_deref().unwrap_or("");
+    let month = query.month.as_deref().unwrap_or("");
+    let year = query.year.as_deref().unwrap_or("");
+    let Some((day, month, year)) = parse_calendar_date_fields(day, month, year) else {
+        return Redirect::to("/home?tab=calendar&status=calendar_event_invalid").into_response();
+    };
+
+    let user = user_for_email(&state, &email);
+    let username = user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| "Parent".to_string());
+    let date_label = calendar_date_heading(day, month, year);
+    let back_url = format!("/home?tab=calendar&cal_day={day}&cal_month={month}&cal_year={year}");
+
+    match fs::read_to_string("templates/calendar-event-form.html").await {
+        Ok(template) => {
+            let html = template
+                .replace("{{USER_NAME}}", &escape_html(&username))
+                .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar))
+                .replace("{{DATE_LABEL}}", &escape_html(&date_label))
+                .replace("{{EVENT_DAY}}", &day.to_string())
+                .replace("{{EVENT_MONTH}}", &month.to_string())
+                .replace("{{EVENT_YEAR}}", &year.to_string())
+                .replace("{{BACK_URL}}", &escape_html(&back_url));
+            (jar, Html(html)).into_response()
+        }
+        Err(_) => (
+            jar,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Could not load calendar event form",
+            ),
+        )
+            .into_response(),
+    }
+}
+
+async fn calendar_event_add(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    Form(form): Form<CalendarEventAddForm>,
+) -> Response {
+    let wants_json = wants_json_response(&headers);
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let title = form.title.trim();
+    if title.is_empty() {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "missing" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=calendar&status=calendar_event_missing").into_response()
+        };
+    }
+
+    let Some((day, month, year)) =
+        parse_calendar_date_fields(&form.day, &form.month, &form.year)
+    else {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=calendar&status=calendar_event_invalid").into_response()
+        };
+    };
+
+    let Some(time_minutes) = parse_time_minutes_field(&form.time_minutes) else {
+        return if wants_json {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            )
+                .into_response()
+        } else {
+            Redirect::to("/home?tab=calendar&status=calendar_event_invalid").into_response()
+        };
+    };
+    let time_label = format_time_from_minutes(time_minutes);
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    profile.user_calendar_events.push(CalendarEvent {
+        id: Some(Uuid::new_v4().to_string()),
+        day,
+        month,
+        year,
+        title: title.to_string(),
+        time_label,
+        time_minutes,
+    });
+    push_activity(
+        &mut profile,
+        &format!("Added \"{title}\" to the calendar."),
+    );
+
+    match save_profile(&state, &profile).await {
+        Ok(()) if wants_json => calendar_event_add_json_response(&profile, "added"),
+        Ok(()) => {
+            Redirect::to(&format!(
+                "/home?tab=calendar&cal_day={day}&cal_month={month}&cal_year={year}&status=calendar_event_added"
+            ))
+            .into_response()
+        }
+        Err(_) if wants_json => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "ok": false, "status": "error" })),
+        )
+            .into_response(),
+        Err(_) => Redirect::to("/home?tab=calendar&status=calendar_event_failed").into_response(),
     }
 }
 
@@ -3973,7 +6634,7 @@ async fn feedback_page(
             let (form_name, form_email) = form_prefill(&state, &jar).await;
             let feedback_success_block = match query.status.as_deref() {
                 Some("sent") => {
-                    r#"<p class="auth-success status-flash" role="status">Thanks! Your feedback was sent to the WhiskerWatch team.</p>"#
+                    r#"<p class="auth-success status-flash" role="status">Your feedback was posted to the public forum.</p>"#
                 }
                 _ => "",
             };
@@ -3986,11 +6647,24 @@ async fn feedback_page(
                 }
                 _ => "",
             };
+            let open_post = query
+                .feedback
+                .as_deref()
+                .and_then(|value| value.parse::<i64>().ok());
+            let voter_email = user_session_email(&state, &jar);
             let body = contents
                 .replace("{{FEEDBACK_SUCCESS_BLOCK}}", feedback_success_block)
                 .replace("{{FEEDBACK_ERROR_BLOCK}}", feedback_error_block)
-                .replace("{{FORM_NAME}}", &form_name)
-                .replace("{{FORM_EMAIL}}", &form_email);
+                .replace(
+                    "{{FEEDBACK_FORUM_CONTENT}}",
+                    &render_feedback_forum(
+                        &state,
+                        &form_name,
+                        &form_email,
+                        open_post,
+                        voter_email.as_deref(),
+                    ),
+                );
             let body = apply_auth_nav_link(&body, &state, &jar);
             Html(body).into_response()
         }
@@ -4196,14 +6870,22 @@ fn save_feedback_submission(
     state: &AppState,
     form: &FeedbackForm,
     user_id: Option<&str>,
-) -> Result<(), storage::StorageError> {
+) -> Result<i64, storage::StorageError> {
+    let name = form.name.trim().to_string();
+    let author_username = user_id
+        .and_then(|email| user_for_email(state, email).map(|user| user.username))
+        .filter(|username| !username.is_empty())
+        .unwrap_or_else(|| name.clone());
+
     let submission = FeedbackSubmission {
-        name: form.name.trim().to_string(),
+        id: 0,
+        name,
         email: form.email.trim().to_string(),
         category: form.category.trim().to_string(),
         message: form.message.trim().to_string(),
         submitted_at: timestamp_now(),
         user_id: user_id.map(str::to_string),
+        author_username,
     };
 
     state.storage.save_feedback(&submission)
@@ -4257,11 +6939,13 @@ async fn feedback_submit(
 
     let user_id = user_session_email(&state, &jar);
     match save_feedback_submission(&state, &form, user_id.as_deref()) {
-        Ok(()) => {
+        Ok(post_id) => {
             if from_dashboard {
-                Redirect::to("/home?tab=feedback&status=feedback_sent")
+                Redirect::to(&format!(
+                    "/home?tab=feedback&feedback={post_id}&status=feedback_sent"
+                ))
             } else {
-                Redirect::to("/feedback?status=sent")
+                Redirect::to(&format!("/feedback?status=sent&feedback={post_id}"))
             }
         }
         Err(error) => {
@@ -4271,6 +6955,112 @@ async fn feedback_submit(
             } else {
                 Redirect::to("/feedback?status=failed")
             }
+        }
+    }
+}
+
+async fn feedback_vote_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<FeedbackVoteForm>,
+) -> impl IntoResponse {
+    let Some(email) = voter_session_email(&state, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(FeedbackVoteResponse {
+                ok: false,
+                error: Some("login_required"),
+                feedback_id: 0,
+                upvotes: 0,
+                downvotes: 0,
+                user_vote: None,
+            }),
+        )
+            .into_response();
+    };
+
+    let feedback_id = match form.feedback_id.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FeedbackVoteResponse {
+                    ok: false,
+                    error: Some("invalid_feedback"),
+                    feedback_id: 0,
+                    upvotes: 0,
+                    downvotes: 0,
+                    user_vote: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let vote = match form.vote.trim() {
+        "up" => 1i8,
+        "down" => -1i8,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FeedbackVoteResponse {
+                    ok: false,
+                    error: Some("invalid_vote"),
+                    feedback_id,
+                    upvotes: 0,
+                    downvotes: 0,
+                    user_vote: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    if state.storage.get_feedback_submission(feedback_id).ok().flatten().is_none() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(FeedbackVoteResponse {
+                ok: false,
+                error: Some("not_found"),
+                feedback_id,
+                upvotes: 0,
+                downvotes: 0,
+                user_vote: None,
+            }),
+        )
+            .into_response();
+    }
+
+    match state.storage.cast_feedback_vote(feedback_id, &email, vote) {
+        Ok(counts) => {
+            maybe_grant_purrfect_idea_reward(&state, feedback_id, counts.upvotes).await;
+            (
+                StatusCode::OK,
+                Json(FeedbackVoteResponse {
+                    ok: true,
+                    error: None,
+                    feedback_id,
+                    upvotes: counts.upvotes,
+                    downvotes: counts.downvotes,
+                    user_vote: counts.user_vote,
+                }),
+            )
+                .into_response()
+        }
+        Err(error) => {
+            eprintln!("feedback vote failed: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FeedbackVoteResponse {
+                    ok: false,
+                    error: Some("server_error"),
+                    feedback_id,
+                    upvotes: 0,
+                    downvotes: 0,
+                    user_vote: None,
+                }),
+            )
+                .into_response()
         }
     }
 }
@@ -4519,7 +7309,7 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
       </div>
       <nav>
-        <a href="/home">HOME</a>
+        <a href="/home?tab=pet">HOME</a>
         <a href="/home?tab=feedback">FEEDBACK</a>
         <form class="admin-logout-form" action="/admin/logout" method="post">
           <button type="submit" class="admin-logout-btn">LOG OUT</button>
@@ -4598,7 +7388,7 @@ mod tests {
             parent_level: 1,
             parent_xp: 0,
             pet_name: "Mochi".to_string(),
-            pet_breed: String::new(),
+            pet_breed: "Domestic Shorthair".to_string(),
             pet_color: String::new(),
             pet_mood: String::new(),
             pet_emoji: "🐱".to_string(),
@@ -4607,6 +7397,7 @@ mod tests {
             onboarding_completed: true,
             pet_age_weeks: Some(weeks),
             pet_age_years: None,
+            pet_birth_date: None,
             last_vet_date: None,
             never_been_to_vet: false,
             veterinary_notes: vec![],
@@ -4617,12 +7408,230 @@ mod tests {
             pet_indoor_outdoor: Some(indoor.to_string()),
             vaccine_history: vec![],
             pet_vaccines_unknown: false,
+            care_schedule: default_care_schedule(),
             tasks: vec![],
             calendar_events: vec![],
+            user_calendar_events: vec![],
             activity: vec![],
             stripe_customer_id: None,
             pet_photo_url: None,
+            pet_video_url: None,
+            pet_video_clip_start: None,
+            pet_video_clip_duration: None,
+            pending_purrfect_idea_ids: vec![],
+            owned_decor: default_owned_decor(),
+            equipped_decor: default_equipped_decor(),
         }
+    }
+
+    #[test]
+    fn parse_time_input_accepts_hh_mm() {
+        assert_eq!(parse_time_input("08:30"), Some(510));
+        assert_eq!(parse_time_input("21:00"), Some(1260));
+        assert!(parse_time_input("25:00").is_none());
+        assert!(parse_time_input("bad").is_none());
+    }
+
+    #[test]
+    fn feeding_plan_matches_cat_age() {
+        let today = NaiveDate::from_ymd_opt(2026, 6, 5).expect("date");
+
+        let mut kitten = test_profile_weeks(12, "indoor");
+        kitten.pet_birth_date = Some("2026-03-01".to_string());
+        assert_eq!(
+            feeding_plan_for_profile(&kitten, today),
+            FeedingPlan::FourMeals
+        );
+
+        let mut juvenile = test_profile_weeks(40, "indoor");
+        juvenile.pet_birth_date = Some("2025-09-01".to_string());
+        assert_eq!(
+            feeding_plan_for_profile(&juvenile, today),
+            FeedingPlan::ThreeMeals
+        );
+
+        let mut adult = test_profile_weeks(52, "indoor");
+        adult.pet_age_weeks = None;
+        adult.pet_age_years = Some(4);
+        adult.pet_birth_date = Some("2022-06-05".to_string());
+        assert_eq!(feeding_plan_for_profile(&adult, today), FeedingPlan::TwoMeals);
+
+        let mut senior = test_profile_weeks(52, "indoor");
+        senior.pet_age_weeks = None;
+        senior.pet_age_years = Some(9);
+        senior.pet_birth_date = Some("2017-06-05".to_string());
+        assert_eq!(feeding_plan_for_profile(&senior, today), FeedingPlan::TwoMeals);
+    }
+
+    #[test]
+    fn starter_tasks_follow_age_based_feeding_schedule() {
+        let mut kitten = test_profile_weeks(10, "indoor");
+        kitten.pet_birth_date = Some("2026-04-01".to_string());
+        let kitten_tasks = default_starter_tasks(&kitten, &default_care_schedule());
+        assert_eq!(
+            kitten_tasks
+                .iter()
+                .filter(|task| FEEDING_TASK_IDS.contains(&task.id.as_str()))
+                .count(),
+            4
+        );
+
+        let mut adult = default_profile("user@example.com");
+        adult.pet_name = "Mochi".to_string();
+        adult.pet_breed = "Domestic Shorthair".to_string();
+        adult.pet_age_years = Some(3);
+        adult.pet_birth_date = Some("2023-06-05".to_string());
+        adult.pet_indoor_outdoor = Some("indoor".to_string());
+        let adult_tasks = default_starter_tasks(&adult, &default_care_schedule());
+        let feed_ids: Vec<_> = adult_tasks
+            .iter()
+            .filter(|task| FEEDING_TASK_IDS.contains(&task.id.as_str()))
+            .map(|task| task.id.as_str())
+            .collect();
+        assert_eq!(feed_ids, vec!["feed_breakfast", "feed_dinner"]);
+    }
+
+    #[test]
+    fn care_schedule_updates_task_labels() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.care_schedule.feed_time_minutes = 7 * 60 + 15;
+        profile.care_schedule.water_evening_time_minutes = 20 * 60;
+        assert!(refresh_profile_tasks(&mut profile));
+
+        let feed = profile
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed task");
+        assert_eq!(feed.due_label, "Daily · 7:15 AM");
+        assert_eq!(feed.time_minutes, 435);
+
+        let water_night = profile
+            .tasks
+            .iter()
+            .find(|task| task.id == "water_bowl_night")
+            .expect("evening water");
+        assert_eq!(water_night.due_label, "Daily · 8:00 PM");
+    }
+
+    #[test]
+    fn daily_care_events_repeat_on_calendar() {
+        let profile = test_profile_weeks(52, "indoor");
+        let today = NaiveDate::from_ymd_opt(2026, 6, 5).expect("date");
+        let tomorrow = today.succ_opt().expect("tomorrow");
+        let events = generate_daily_care_calendar_events(&profile, today, tomorrow);
+
+        assert_eq!(events.len(), 14);
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.day == today.day() && event.month == today.month())
+                .count()
+                == 7
+        );
+        assert!(
+            events.iter().any(|event| event.title.contains("Feed Mochi"))
+        );
+        assert!(events.iter().any(|event| event.title == "Refresh litter box"));
+    }
+
+    #[test]
+    fn task_list_renders_clickable_times_for_scheduled_tasks() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        assert!(refresh_profile_tasks(&mut profile));
+        let html = render_task_list(&profile);
+        assert!(html.contains("task-time-btn"));
+        assert!(html.contains(r#"data-task-id="feed_breakfast""#));
+        assert!(html.contains(r#"data-time-minutes="480""#));
+        assert!(html.contains("Weekly · anytime"));
+        assert!(!html.contains(r#"data-task-id="replace_litter""#));
+    }
+
+    #[test]
+    fn apply_task_time_updates_task_schedule_and_care_schedule() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        assert!(refresh_profile_tasks(&mut profile));
+        assert!(apply_task_time_to_profile(&mut profile, "feed_breakfast", 7 * 60 + 45));
+
+        let feed = profile
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        assert_eq!(feed.due_label, "Daily · 7:45 AM");
+        assert_eq!(profile.care_schedule.feed_time_minutes, 7 * 60 + 45);
+        assert!(!apply_task_time_to_profile(&mut profile, "replace_litter", 600));
+    }
+
+    #[test]
+    fn user_calendar_events_merge_with_generated_events() {
+        let mut profile = test_profile_weeks(12, "indoor");
+        profile.user_calendar_events.push(CalendarEvent {
+            id: Some("user-event-1".to_string()),
+            day: 15,
+            month: 6,
+            year: 2026,
+            title: "Brush coat".to_string(),
+            time_label: "9:00 AM".to_string(),
+            time_minutes: 540,
+        });
+
+        let events = visible_calendar_events(&profile, NaiveDate::from_ymd_opt(2026, 6, 1).unwrap());
+        assert!(events.iter().any(|event| event.title == "Brush coat"));
+        assert!(events.iter().any(|event| event.id.is_none()));
+    }
+
+    #[test]
+    fn user_calendar_events_sort_by_time_on_same_day() {
+        let mut profile = test_profile_weeks(12, "indoor");
+        profile.user_calendar_events = vec![
+            CalendarEvent {
+                id: Some("late".to_string()),
+                day: 10,
+                month: 6,
+                year: 2026,
+                title: "Evening meds".to_string(),
+                time_label: "8:00 PM".to_string(),
+                time_minutes: 1200,
+            },
+            CalendarEvent {
+                id: Some("early".to_string()),
+                day: 10,
+                month: 6,
+                year: 2026,
+                title: "Morning brush".to_string(),
+                time_label: "7:00 AM".to_string(),
+                time_minutes: 420,
+            },
+            CalendarEvent {
+                id: Some("mid".to_string()),
+                day: 10,
+                month: 6,
+                year: 2026,
+                title: "Lunch water".to_string(),
+                time_label: "12:00 PM".to_string(),
+                time_minutes: 720,
+            },
+        ];
+
+        let events: Vec<_> = visible_calendar_events(
+            &profile,
+            NaiveDate::from_ymd_opt(2026, 6, 1).unwrap(),
+        )
+        .into_iter()
+        .filter(|event| {
+            event.id.is_some()
+                && event.day == 10
+                && event.month == 6
+                && event.year == 2026
+        })
+        .collect();
+
+        let titles: Vec<_> = events.iter().map(|event| event.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec!["Morning brush", "Lunch water", "Evening meds"]
+        );
     }
 
     #[test]
@@ -4639,6 +7648,7 @@ mod tests {
             due_day: None,
             due_month: None,
             due_year: None,
+            time_minutes: 480,
             reward: 20,
         }];
         profile.owned_outfits = vec!["classic_collar".to_string(), "cozy_sweater".to_string()];
@@ -4694,6 +7704,65 @@ mod tests {
     fn signup_passwords_must_match() {
         assert!(signup_passwords_match("abcde1!", "abcde1!"));
         assert!(!signup_passwords_match("abcde1!", "abcde1?"));
+    }
+
+    #[test]
+    fn account_password_section_shows_change_form_for_regular_users() {
+        let html = render_account_password_section("mochi@example.com");
+        assert!(html.contains("account-change-password-form"));
+        assert!(html.contains("Change password"));
+        assert!(html.contains("current_password"));
+        assert!(html.contains("new_password"));
+    }
+
+    #[test]
+    fn account_password_section_hides_change_form_for_admin() {
+        let html = render_account_password_section(&admin_email());
+        assert!(!html.contains("account-change-password-form"));
+        assert!(html.contains("ADMIN_PASSWORD"));
+    }
+
+    #[test]
+    fn format_timestamp_uses_readable_calendar_date() {
+        let formatted = format_timestamp(1_700_000_000);
+        assert!(!formatted.contains("day "));
+        assert!(formatted.contains("2023"));
+    }
+
+    #[test]
+    fn format_member_since_uses_long_month_name() {
+        let formatted = format_member_since(1_700_000_000);
+        assert!(formatted.contains("November"));
+        assert!(formatted.contains("2023"));
+    }
+
+    #[test]
+    fn normalize_pet_name_rejects_blank_and_placeholder_values() {
+        assert_eq!(normalize_pet_name("  Mochi  "), Some("Mochi".to_string()));
+        assert_eq!(normalize_pet_name(""), None);
+        assert_eq!(normalize_pet_name("your cat"), None);
+        assert_eq!(normalize_pet_name("No Pet Yet"), None);
+    }
+
+    #[test]
+    fn account_pet_name_field_shows_save_form_when_pet_exists() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        let html = render_account_pet_name_field(&profile);
+        assert!(html.contains("account-pet-name-change-trigger"));
+        assert!(html.contains("account-pet-name-form"));
+        assert!(html.contains(r#"value="Mochi""#));
+        assert!(html.contains(">Mochi<"));
+        assert!(html.contains(r#"aria-label="Change pet name""#));
+        assert!(html.contains("Save name"));
+    }
+
+    #[test]
+    fn account_pet_name_field_prompts_setup_when_missing_pet() {
+        let profile = default_profile("new@example.com");
+        let html = render_account_pet_name_field(&profile);
+        assert!(!html.contains("account-pet-name-form"));
+        assert!(html.contains("Set up your cat on the My Pet tab."));
     }
 
     #[test]
@@ -4753,8 +7822,48 @@ mod tests {
 
     fn onboarding_form_body(extra: &str) -> String {
         format!(
-            "cat_name=Mochi&pet_breed=Domestic+Shorthair&pet_color=Tabby&age_value=2&age_unit=years&pet_indoor_outdoor=indoor&last_vet_date=&conditions=&medications={extra}"
+            "cat_name=Mochi&pet_breed=Domestic+Shorthair&pet_color=Tabby&pet_birth_date=2024-01-15&pet_indoor_outdoor=indoor&last_vet_date=&conditions=&medications={extra}"
         )
+    }
+
+    #[test]
+    fn birthday_events_repeat_each_year_in_horizon() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_birth_date = Some("2024-06-15".to_string());
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+
+        let today = NaiveDate::from_ymd_opt(2026, 3, 1).expect("date");
+        let horizon = today + Duration::days(730);
+        let events = generate_birthday_calendar_events(&profile, today, horizon);
+        assert!(events.iter().any(|event| {
+            event.year == 2026 && event.month == 6 && event.day == 15 && event.title.contains("birthday")
+        }));
+        assert!(events.iter().any(|event| {
+            event.year == 2027 && event.month == 6 && event.day == 15 && event.title.contains("birthday")
+        }));
+    }
+
+    #[test]
+    fn derive_age_from_birth_handles_kittens_and_adults() {
+        let today = NaiveDate::from_ymd_opt(2026, 6, 1).expect("date");
+        assert_eq!(
+            derive_age_from_birth(
+                NaiveDate::from_ymd_opt(2026, 4, 1).expect("dob"),
+                today
+            )
+            .expect("kitten"),
+            (Some(8), None)
+        );
+        assert_eq!(
+            derive_age_from_birth(
+                NaiveDate::from_ymd_opt(2022, 6, 1).expect("dob"),
+                today
+            )
+            .expect("adult"),
+            (None, Some(4))
+        );
     }
 
     #[test]
@@ -4801,24 +7910,23 @@ mod tests {
     }
 
     #[test]
-    fn validate_pet_photo_accepts_png_magic_bytes() {
-        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
-        assert_eq!(
-            validate_pet_photo(Some("image/png"), &png),
-            Ok("png")
-        );
+    fn validate_pet_video_accepts_mp4_magic_bytes() {
+        let mut mp4 = vec![0x00, 0x00, 0x00, 0x20, b'f', b't', b'y', b'p'];
+        mp4.extend_from_slice(b"mp42");
+        assert_eq!(validate_pet_video(Some("video/mp4"), &mp4), Ok("mp4"));
     }
 
     #[test]
-    fn validate_pet_photo_rejects_oversized_file() {
-        let bytes = vec![0xFF; MAX_PET_PHOTO_BYTES + 1];
-        assert!(validate_pet_photo(Some("image/jpeg"), &bytes).is_err());
+    fn validate_pet_video_rejects_oversized_file() {
+        let bytes = vec![0x00; MAX_PET_VIDEO_BYTES + 1];
+        assert!(validate_pet_video(Some("video/mp4"), &bytes).is_err());
     }
 
     #[test]
-    fn validate_pet_photo_rejects_bad_content_type() {
-        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
-        assert!(validate_pet_photo(Some("application/pdf"), &png).is_err());
+    fn validate_pet_video_rejects_bad_content_type() {
+        let mut mp4 = vec![0x00, 0x00, 0x00, 0x20, b'f', b't', b'y', b'p'];
+        mp4.extend_from_slice(b"mp42");
+        assert!(validate_pet_video(Some("application/pdf"), &mp4).is_err());
     }
 
     #[test]
@@ -4832,13 +7940,38 @@ mod tests {
     }
 
     #[test]
-    fn render_pet_user_photo_optional_when_uploaded() {
+    fn render_pet_user_video_optional_when_uploaded() {
         let mut profile = test_profile_weeks(10, "indoor");
-        profile.pet_photo_url = Some("/uploads/example.jpg".to_string());
+        profile.pet_video_url = Some("/uploads/example-playing.mp4".to_string());
+        profile.pet_video_clip_start = Some(12.5);
+        profile.pet_video_clip_duration = Some(4.5);
         let html = render_pet_avatar(&profile);
         assert!(html.contains("cinder-photo-toggle"));
-        assert!(html.contains("/uploads/example.jpg"));
-        assert!(html.contains("pet-user-photo-optional"));
+        assert!(html.contains("Watch my kitty play!"));
+        assert!(html.contains("/uploads/example-playing.mp4"));
+        assert!(html.contains("pet-user-video-optional"));
+        assert!(html.contains(r#"data-clip-start="12.5""#));
+        assert!(html.contains(r#"data-clip-duration="4.5""#));
+    }
+
+    #[test]
+    fn account_profile_shows_uploaded_cat_video() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_video_url = Some("/uploads/mochi-playing.mp4".to_string());
+        profile.pet_video_clip_start = Some(3.0);
+        let html = render_account_pet_photo(&profile);
+        assert!(html.contains(r#"class="account-pet-photo-wrap account-pet-photo-toggle""#));
+        assert!(html.contains(r#"role="button""#));
+        assert!(html.contains("account-pet-photo-image"));
+        assert!(html.contains("account-pet-video-optional"));
+        assert!(html.contains("account-pet-video-player"));
+        assert!(html.contains("account-pet-media-actions"));
+        assert!(html.contains("Change profile photo"));
+        assert!(html.contains("Change cat GIF"));
+        assert!(html.contains("/uploads/mochi-playing.mp4"));
+        assert!(html.contains("tap photo for playing clip"));
+        assert!(html.contains("Mochi"));
     }
 
     #[test]
@@ -4857,6 +7990,45 @@ mod tests {
         );
         assert!(
             events
+                .iter()
+                .any(|event| event.title.contains("Vet checkup reminder"))
+        );
+    }
+
+    #[test]
+    fn never_been_to_vet_adds_asap_calendar_reminders_starting_today() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(2);
+        profile.never_been_to_vet = true;
+        profile.last_vet_date = None;
+
+        let today = Local::now().date_naive();
+        let events = generate_vet_calendar_events(&profile, today);
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.title.contains("Last vet visit"))
+        );
+        assert!(
+            events.iter().any(|event| {
+                event.title.contains("Make vet appointment ASAP")
+                    && event.year == today.year() as u32
+                    && event.month == today.month()
+                    && event.day == today.day()
+            })
+        );
+        let two_weeks = today + Duration::weeks(2);
+        assert!(
+            events.iter().any(|event| {
+                event.title.contains("Make vet appointment ASAP")
+                    && event.year == two_weeks.year() as u32
+                    && event.month == two_weeks.month()
+                    && event.day == two_weeks.day()
+            })
+        );
+        assert!(
+            !events
                 .iter()
                 .any(|event| event.title.contains("Vet checkup reminder"))
         );
@@ -5166,10 +8338,165 @@ mod tests {
     }
 
     #[test]
+    fn cat_home_scene_renders_room_and_starter_decor() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        let scene = render_cat_home_scene(&profile);
+        assert!(scene.contains(r#"data-room="sunny_nook""#));
+        assert!(scene.contains("cat-home-pet-stage"));
+        assert!(scene.contains("cat-home-pet-bubble"));
+        assert!(scene.contains("pet me!"));
+        assert!(scene.contains("Soft Mat"));
+    }
+
+    #[tokio::test]
+    async fn pet_name_submit_persists_new_name() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let email = "pet-name@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        profile.pet_name = "Mochi".to_string();
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let cookie = jar
+            .get(USER_SESSION_COOKIE)
+            .expect("session cookie should be set");
+        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
+
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state.clone(), uploads);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/home/pet-name")
+                    .header("accept", "application/json")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("cookie", cookie_header)
+                    .body(Body::from("pet_name=Pippin"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], true);
+        assert_eq!(data["status"], "done");
+        assert_eq!(data["pet_name"], "Pippin");
+
+        let updated = state
+            .storage
+            .load_profile(email)
+            .expect("load profile")
+            .expect("profile");
+        assert_eq!(updated.pet_name, "Pippin");
+    }
+
+    #[tokio::test]
+    async fn pet_pet_awards_one_paw_point_per_request() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let email = "pet-pet@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        profile.paw_points = 10;
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let cookie = jar
+            .get(USER_SESSION_COOKIE)
+            .expect("session cookie should be set");
+        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
+
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state.clone(), uploads);
+
+        for expected in [11_u32, 12] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/home/cat-home/pet-pet")
+                        .header("accept", "application/json")
+                        .header("cookie", cookie_header.clone())
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("response");
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = response_html(response).await;
+            let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+            assert_eq!(data["ok"], true);
+            assert_eq!(data["paw_points"], expected);
+        }
+
+        let updated = state
+            .storage
+            .load_profile(email)
+            .expect("load profile")
+            .expect("profile");
+        assert_eq!(updated.paw_points, 12);
+    }
+
+    #[test]
+    fn pet_check_cta_links_to_cat_home_after_onboarding() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        let cta = render_pet_check_cta(&profile);
+        assert!(cta.contains("/home/cat-home"));
+        assert!(cta.contains("Check on your cat"));
+        assert!(render_cat_home_nav_link(&profile).contains("/home/cat-home"));
+    }
+
+    #[test]
+    fn pet_check_cta_prompts_setup_before_onboarding() {
+        let profile = default_profile("user@example.com");
+        let cta = render_pet_check_cta(&profile);
+        assert!(cta.contains("virtual home"));
+        assert!(cta.contains("pet-setup-trigger"));
+        assert!(render_cat_home_nav_link(&profile).is_empty());
+    }
+
+    #[test]
     fn admin_account_skips_vet_appointment_task() {
         let profile = admin_profile(&admin_email());
         let today = NaiveDate::from_ymd_opt(2026, 5, 29).expect("date");
         assert!(!needs_vet_appointment_asap(&profile, today));
+    }
+
+    #[test]
+    fn admin_with_pet_gets_starter_care_tasks() {
+        let mut profile = admin_profile(&admin_email());
+        profile.pet_name = "Cinder".to_string();
+        profile.pet_breed = "Maine Coon".to_string();
+        profile.pet_birth_date = Some("2021-06-07".to_string());
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+        assert!(refresh_profile_tasks(&mut profile));
+        let html = render_task_list(&profile);
+        assert!(html.contains("Morning feeding"));
+        assert!(html.contains("+15 pts"));
+        assert!(
+            !profile
+                .tasks
+                .iter()
+                .any(|task| task.id == VET_APPOINTMENT_TASK_ID)
+        );
     }
 
     #[test]
@@ -5204,6 +8531,7 @@ mod tests {
         let profile = test_profile_weeks(10, "indoor");
         let html = render_health_tab(&profile);
         assert!(html.contains("Add veterinary information"));
+        assert!(html.contains("health-vet-disclosure"));
         assert!(html.contains("action=\"/home/vet-visit\""));
         assert!(html.contains("health-vaccine-rows"));
         assert!(html.contains("health-vet-note"));
@@ -5224,14 +8552,202 @@ mod tests {
 
     #[test]
     fn onboarding_modal_uses_breed_picker_input() {
-        let profile = test_profile_weeks(10, "indoor");
-        let mut profile = profile;
-        profile.onboarding_completed = false;
+        let profile = default_profile("user@example.com");
         let modal = render_onboarding_modal(&profile);
         assert!(modal.contains(r#"id="pet_breed""#));
         assert!(modal.contains("breed-picker-input"));
         assert!(modal.contains("readonly"));
         assert!(!modal.contains("cat-breeds"));
+    }
+
+    #[test]
+    fn replace_litter_reward_syncs_to_latest_default() {
+        let mut profile = default_profile("user@example.com");
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+        assert!(refresh_profile_tasks(&mut profile));
+        if let Some(task) = profile.tasks.iter().find(|task| task.id == "replace_litter") {
+            assert_eq!(task.reward, 50);
+        } else {
+            panic!("replace_litter task missing");
+        }
+
+        if let Some(task) = profile.tasks.iter_mut().find(|task| task.id == "replace_litter") {
+            task.reward = 25;
+        }
+        assert!(refresh_profile_tasks(&mut profile));
+        assert_eq!(
+            profile
+                .tasks
+                .iter()
+                .find(|task| task.id == "replace_litter")
+                .map(|task| task.reward),
+            Some(50)
+        );
+    }
+
+    #[test]
+    fn starter_care_tasks_appear_once_pet_is_created() {
+        let mut profile = default_profile("user@example.com");
+        assert!(render_task_list(&profile).is_empty());
+
+        profile.pet_name = "Mochi".to_string();
+        profile.pet_breed = "Domestic Shorthair".to_string();
+        profile.pet_age_years = Some(2);
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+
+        assert!(refresh_profile_tasks(&mut profile));
+        let html = render_task_list(&profile);
+        assert!(html.contains("Morning feeding"));
+        assert!(html.contains("+15 pts"));
+        assert!(html.contains("15-minute play session"));
+        assert!(html.contains("+20 pts"));
+    }
+
+    #[test]
+    fn refresh_backfills_due_dates_without_clearing_same_day_completion() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        let today = Local::now().date_naive();
+        profile.tasks = vec![UserTask {
+            id: "feed_breakfast".to_string(),
+            title: "Morning feeding".to_string(),
+            completed: true,
+            due_label: "Daily · 8:00 AM".to_string(),
+            due_day: None,
+            due_month: None,
+            due_year: None,
+            time_minutes: 480,
+            reward: 15,
+        }];
+
+        assert!(refresh_profile_tasks(&mut profile));
+        let feed = profile
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        assert!(feed.completed);
+        assert_eq!(feed.due_day, Some(today.day()));
+        assert_eq!(feed.due_month, Some(today.month()));
+        assert_eq!(feed.due_year, Some(today.year() as u32));
+    }
+
+    #[tokio::test]
+    async fn task_toggle_reopen_deducts_paw_points_after_profile_refresh() {
+        let state = routing_test_state();
+        let email = "toggle-reopen@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        assert!(refresh_profile_tasks(&mut profile));
+        let reward = profile
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed")
+            .reward;
+        profile.paw_points = 100 + reward;
+        let task = profile
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        task.completed = true;
+        task.due_day = None;
+        task.due_month = None;
+        task.due_year = None;
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            "application/json".parse().expect("accept header"),
+        );
+        let response = task_toggle(
+            State(state.clone()),
+            jar,
+            headers,
+            Form(TaskToggleForm {
+                task_id: "feed_breakfast".to_string(),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], true);
+        assert_eq!(data["status"], "reopened");
+        assert_eq!(data["paw_points"], 100);
+
+        let updated = state
+            .storage
+            .load_profile(email)
+            .expect("load profile")
+            .expect("profile");
+        assert_eq!(updated.paw_points, 100);
+        let feed = updated
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        assert!(!feed.completed);
+    }
+
+    #[test]
+    fn reopening_task_deducts_paw_points_without_going_negative() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.paw_points = 100;
+        profile.parent_xp = 20;
+        profile.tasks = vec![UserTask {
+            id: "feed_breakfast".to_string(),
+            title: "Morning feeding".to_string(),
+            completed: true,
+            due_label: "Daily · 8:00 AM".to_string(),
+            due_day: None,
+            due_month: None,
+            due_year: None,
+            time_minutes: 480,
+            reward: 15,
+        }];
+
+        let (_title, reward) = reopen_completed_task(&mut profile, 0);
+        assert_eq!(reward, 15);
+        assert!(!profile.tasks[0].completed);
+        assert_eq!(profile.paw_points, 85);
+        assert_eq!(profile.parent_xp, 13);
+
+        profile.paw_points = 10;
+        profile.tasks[0].completed = true;
+        let (_title, _) = reopen_completed_task(&mut profile, 0);
+        assert_eq!(profile.paw_points, 0);
+    }
+
+    #[test]
+    fn reopening_task_reverses_level_up_from_completion() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.parent_level = 2;
+        profile.parent_xp = 5;
+        profile.paw_points = 40;
+        profile.tasks = vec![UserTask {
+            id: "replace_litter".to_string(),
+            title: "Replace litter".to_string(),
+            completed: true,
+            due_label: "Weekly · anytime".to_string(),
+            due_day: None,
+            due_month: None,
+            due_year: None,
+            time_minutes: 600,
+            reward: 50,
+        }];
+
+        let (_title, _) = reopen_completed_task(&mut profile, 0);
+        assert_eq!(profile.paw_points, 0);
+        assert_eq!(profile.parent_level, 1);
+        assert_eq!(profile.parent_xp, 80);
     }
 
     #[test]
@@ -5257,8 +8773,7 @@ mod tests {
 
     #[test]
     fn health_tab_prompts_pet_setup_without_cat() {
-        let mut profile = test_profile_weeks(10, "indoor");
-        profile.onboarding_completed = false;
+        let profile = default_profile("user@example.com");
         let html = render_health_tab(&profile);
         assert!(html.contains("health-tab-setup-alert"));
         assert!(html.contains("health-tab-setup-trigger"));
@@ -5357,6 +8872,101 @@ mod tests {
     }
 
     #[test]
+    fn feedback_forum_renders_public_posts() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-feedback-forum-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState { storage };
+        state
+            .storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Cat Mom".to_string(),
+                email: "catmom@example.com".to_string(),
+                category: "idea".to_string(),
+                message: "Add a treat counter".to_string(),
+                submitted_at: 1_700_000_000,
+                user_id: Some("catmom@example.com".to_string()),
+                author_username: "catmom".to_string(),
+            })
+            .expect("save feedback");
+
+        let html = render_feedback_forum(
+            &state,
+            "Cat Mom",
+            "catmom@example.com",
+            None,
+            Some("catmom@example.com"),
+        );
+        assert!(html.contains("Feedback Forum"));
+        assert!(html.contains("Community feedback"));
+        assert!(html.contains("Add a treat counter"));
+        assert!(html.contains("data-feedback-id="));
+        assert!(html.contains("Post to forum"));
+        assert!(html.contains("feedback-vote-btn"));
+        assert!(html.contains("feedback-vote-up"));
+    }
+
+    #[test]
+    fn purrfect_idea_reward_grants_points_once() {
+        let storage = Storage::open_at(std::env::temp_dir().join(format!(
+            "ww-purrfect-{}",
+            Uuid::new_v4()
+        )))
+        .expect("storage");
+        let state = AppState { storage: storage.clone() };
+
+        let author_email = "author@example.com";
+        let author_profile = default_profile(author_email);
+        state
+            .storage
+            .save_profile(&author_profile)
+            .expect("save author profile");
+
+        let post_id = state
+            .storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Author".to_string(),
+                email: author_email.to_string(),
+                category: "idea".to_string(),
+                message: "Purrfect idea".to_string(),
+                submitted_at: 1_700_000_000,
+                user_id: Some(author_email.to_string()),
+                author_username: "Author".to_string(),
+            })
+            .expect("save feedback");
+
+        for index in 0..5 {
+            state
+                .storage
+                .cast_feedback_vote(
+                    post_id,
+                    &format!("voter{index}@example.com"),
+                    1,
+                )
+                .expect("upvote");
+        }
+
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        rt.block_on(async {
+            maybe_grant_purrfect_idea_reward(&state, post_id, 5).await;
+            maybe_grant_purrfect_idea_reward(&state, post_id, 5).await;
+        });
+
+        let updated = state
+            .storage
+            .load_profile(author_email)
+            .expect("load profile")
+            .expect("author profile");
+        assert_eq!(updated.paw_points, PURRFECT_IDEA_REWARD);
+        assert_eq!(updated.pending_purrfect_idea_ids, vec![post_id]);
+        assert!(state.storage.feedback_reward_granted(post_id).expect("reward flag"));
+    }
+
+    #[test]
     fn admin_feedback_list_renders_submissions_with_user_id() {
         let storage = Storage::open_at(std::env::temp_dir().join(format!(
             "ww-admin-feedback-{}",
@@ -5365,12 +8975,14 @@ mod tests {
         .expect("storage");
         storage
             .save_feedback(&FeedbackSubmission {
+                id: 0,
                 name: "Cat Mom".to_string(),
                 email: "catmom@example.com".to_string(),
                 category: "idea".to_string(),
                 message: "Add a treat counter".to_string(),
                 submitted_at: 1_700_000_000,
                 user_id: Some("catmom@example.com".to_string()),
+                author_username: "catmom".to_string(),
             })
             .expect("save feedback");
 
@@ -5413,7 +9025,24 @@ mod tests {
             session_id: None,
             vet_followup: None,
             thread: None,
+            feedback: None,
+            cal_day: None,
+            cal_month: None,
+            cal_year: None,
         }
+    }
+
+    #[test]
+    fn resolve_calendar_view_uses_query_or_defaults() {
+        assert_eq!(resolve_calendar_view(Some("8"), Some("2027")), (8, 2027));
+        assert_eq!(
+            resolve_calendar_view(Some("13"), Some("2027")),
+            (current_calendar_month(), current_calendar_year())
+        );
+        assert_eq!(
+            resolve_calendar_view(Some("0"), Some("2200")),
+            (current_calendar_month(), current_calendar_year())
+        );
     }
 
     fn response_location(response: Response) -> String {
@@ -5575,6 +9204,221 @@ mod tests {
         assert!(html.contains("Create your pet"));
         assert!(html.contains("calendar-pet-setup-alert"));
         assert!(html.contains("tasks-tab-setup-alert"));
+    }
+
+    #[tokio::test]
+    async fn task_toggle_accepts_urlencoded_json_request() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let email = "toggle-http@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        assert!(refresh_profile_tasks(&mut profile));
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let cookie = jar
+            .get(USER_SESSION_COOKIE)
+            .expect("session cookie should be set");
+        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
+
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state.clone(), uploads);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/home/tasks/toggle")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("accept", "application/json")
+                    .header("cookie", cookie_header)
+                    .body(Body::from("task_id=feed_breakfast"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], true);
+        assert_eq!(data["status"], "completed");
+
+        let updated = state
+            .storage
+            .load_profile(email)
+            .expect("load profile")
+            .expect("profile");
+        let feed = updated
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        assert!(feed.completed);
+    }
+
+    #[tokio::test]
+    async fn task_toggle_accepts_admin_session_without_user_cookie() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let email = admin_email();
+        ensure_admin_user_account(&state).expect("admin profile");
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        profile.pet_name = "Admin Cat".to_string();
+        profile.pet_breed = "Maine Coon".to_string();
+        profile.pet_age_years = Some(4);
+        profile.pet_age_weeks = None;
+        profile.pet_indoor_outdoor = Some("indoor".to_string());
+        profile.onboarding_completed = true;
+        assert!(refresh_profile_tasks(&mut profile));
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_admin_session(&state, CookieJar::new());
+        let cookie = jar
+            .get(ADMIN_SESSION_COOKIE)
+            .expect("admin session cookie should be set");
+        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
+
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state.clone(), uploads);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/home/tasks/toggle")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("accept", "application/json")
+                    .header("cookie", cookie_header)
+                    .body(Body::from("task_id=feed_breakfast"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], true);
+        assert_eq!(data["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn task_toggle_json_request_without_session_returns_unauthorized() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state, uploads);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/home/tasks/toggle")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("accept", "application/json")
+                    .body(Body::from("task_id=feed_breakfast"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], false);
+        assert_eq!(data["status"], "auth");
+    }
+
+    #[tokio::test]
+    async fn task_time_update_accepts_urlencoded_json_request() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::util::ServiceExt;
+
+        let state = routing_test_state();
+        let email = "task-time-http@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        assert!(refresh_profile_tasks(&mut profile));
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let cookie = jar
+            .get(USER_SESSION_COOKIE)
+            .expect("session cookie should be set");
+        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
+
+        let uploads = state.storage.data_dir().join("uploads");
+        let _ = std::fs::create_dir_all(&uploads);
+        let app = build_app(state.clone(), uploads);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/home/tasks/time")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("accept", "application/json")
+                    .header("cookie", cookie_header)
+                    .body(Body::from("task_id=feed_breakfast&task_time=09%3A30"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_html(response).await;
+        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
+        assert_eq!(data["ok"], true);
+        assert_eq!(data["status"], "time_updated");
+
+        let updated = state
+            .storage
+            .load_profile(email)
+            .expect("load profile")
+            .expect("profile");
+        let feed = updated
+            .tasks
+            .iter()
+            .find(|task| task.id == "feed_breakfast")
+            .expect("feed");
+        assert_eq!(feed.time_minutes, 9 * 60 + 30);
+        assert_eq!(updated.care_schedule.feed_time_minutes, 9 * 60 + 30);
+    }
+
+    #[tokio::test]
+    async fn logged_in_home_with_pet_includes_task_time_editor() {
+        let state = routing_test_state();
+        let email = "task-time-user@example.com";
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.email = email.to_string();
+        assert!(refresh_profile_tasks(&mut profile));
+        state.storage.save_profile(&profile).expect("save profile");
+
+        let jar = create_user_session(&state, CookieJar::new(), email);
+        let response = dashboard_page(
+            State(state),
+            jar,
+            Query(empty_dashboard_query()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = response_html(response).await;
+        assert!(html.contains(r#"id="task-time-modal""#));
+        assert!(html.contains("task-time-btn"));
+        assert!(html.contains(r#"data-task-id="feed_breakfast""#));
     }
 
     #[tokio::test]
@@ -5778,11 +9622,22 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home", get(dashboard_page))
         .route("/home/breeds", get(breed_select_page))
         .route("/home/onboarding", post(onboarding_submit))
+        .route("/home/pet-name", post(pet_name_submit))
+        .route("/home/password", post(password_change_submit))
+        .route("/home/pet-photo", post(pet_photo_submit))
+        .route("/home/pet-video", post(pet_video_submit))
         .route("/home/vet-visit", post(vet_visit_submit))
         .route("/home/vet-notes", post(vet_notes_submit))
         .route("/home/outfits/buy", post(outfit_buy))
         .route("/home/outfits/equip", post(outfit_equip))
         .route("/home/tasks/toggle", post(task_toggle))
+        .route("/home/tasks/time", post(task_time_update))
+        .route("/home/calendar/event/new", get(calendar_event_form_page))
+        .route("/home/calendar/event", post(calendar_event_add))
+        .route("/home/cat-home", get(cat_home_page))
+        .route("/home/cat-home/pet-pet", post(pet_pet))
+        .route("/home/decor/buy", post(decor_buy))
+        .route("/home/decor/equip", post(decor_equip))
         .route("/home/forum/post", post(forum_post_submit))
         .route("/home/forum/post/delete", post(forum_post_delete))
         .route("/home/forum/reply", post(forum_reply_submit))
@@ -5803,6 +9658,7 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         )
         .route("/contact", get(contact_page).post(contact_submit))
         .route("/feedback", get(feedback_page).post(feedback_submit))
+        .route("/feedback/vote", post(feedback_vote_submit))
         .route("/admin", get(admin_page))
         .route("/admin/logout", post(admin_logout))
         .route("/login.html", get(|| async { Redirect::permanent("/login") }))
@@ -5825,9 +9681,23 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
             "/paw-cursor.js",
             get(|| serve_static_no_cache("paw-cursor.js", "application/javascript; charset=utf-8")),
         )
+        .route(
+            "/feedback-forum.js",
+            get(|| serve_static_no_cache("feedback-forum.js", "application/javascript; charset=utf-8")),
+        )
+        .route(
+            "/calendar-event-form.js",
+            get(|| {
+                serve_static_no_cache(
+                    "calendar-event-form.js",
+                    "application/javascript; charset=utf-8",
+                )
+            }),
+        )
         .nest_service("/uploads", ServeDir::new(uploads_dir))
         .nest_service("/images", ServeDir::new(storage::static_dir().join("images")))
         .fallback_service(ServeDir::new(storage::static_dir()))
+        .layer(DefaultBodyLimit::max(MAX_PET_VIDEO_BYTES))
         .with_state(state)
 }
 
