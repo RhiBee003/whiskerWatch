@@ -112,8 +112,19 @@
     });
   }
 
+  function applyPetVideoFraming(video) {
+    if (!(video instanceof HTMLVideoElement)) {
+      return;
+    }
+
+    const viewport = video.closest(".pet-user-video-optional, .account-pet-video-optional, .account-pet-photo-wrap");
+    const viewportPx = viewport instanceof HTMLElement ? viewport.clientWidth : undefined;
+    window.whiskerPetVideoFramer?.applyPlaybackFraming?.(video, viewportPx);
+  }
+
   document.querySelectorAll(".pet-user-video-player, .account-pet-video-player").forEach((video) => {
     bindPetVideoClipLoop(video);
+    applyPetVideoFraming(video);
   });
 
   const stage = document.getElementById("cinder-pet-stage");
@@ -141,6 +152,7 @@
 
       if (showVideo) {
         window.requestAnimationFrame(() => {
+          applyPetVideoFraming(videoPlayer);
           playPetVideoClip(videoPlayer);
         });
       } else {
@@ -187,6 +199,7 @@
 
     if (showVideo) {
       window.requestAnimationFrame(() => {
+        applyPetVideoFraming(accountVideoPlayer);
         playPetVideoClip(accountVideoPlayer);
       });
     } else {
@@ -214,5 +227,39 @@
       event.preventDefault();
       toggleAccountPhotoMode();
     }
+  });
+
+  document.querySelectorAll(".community-cat-media").forEach((media) => {
+    const toggle = media.querySelector(".community-cat-media-toggle");
+    const videoWrap = media.querySelector(".community-cat-video-optional");
+    const videoPlayer = media.querySelector(".community-cat-video-player");
+    if (!(toggle instanceof HTMLElement) || !(videoWrap instanceof HTMLElement)) {
+      return;
+    }
+
+    const petName = media.dataset.petName?.trim() || "this kitty";
+
+    if (videoPlayer instanceof HTMLVideoElement) {
+      bindPetVideoClipLoop(videoPlayer);
+    }
+
+    bindToggleControl(toggle, () => {
+      const showVideo = !videoWrap.classList.contains("is-visible");
+      videoWrap.classList.toggle("is-visible", showVideo);
+      videoWrap.hidden = !showVideo;
+      toggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
+      toggle.textContent = showVideo
+        ? `Back to ${petName} 🐾`
+        : `Watch ${petName} play! 🎬`;
+      media.classList.toggle("video-mode", showVideo);
+
+      if (showVideo) {
+        window.requestAnimationFrame(() => {
+          playPetVideoClip(videoPlayer);
+        });
+      } else {
+        pausePetVideoClip(videoPlayer);
+      }
+    });
   });
 })();

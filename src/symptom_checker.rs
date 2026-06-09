@@ -1,3 +1,5 @@
+use crate::breed_health;
+
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -32,11 +34,43 @@ impl Urgency {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConcernLevel {
+    Mild,
+    Moderate,
+    Serious,
+    Severe,
+}
+
+impl ConcernLevel {
+    fn rank(self) -> u8 {
+        match self {
+            Self::Mild => 0,
+            Self::Moderate => 1,
+            Self::Serious => 2,
+            Self::Severe => 3,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Mild => "Usually mild",
+            Self::Moderate => "Worth a vet check",
+            Self::Serious => "Needs prompt attention",
+            Self::Severe => "Potentially urgent",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Possibility {
     pub name: String,
     pub summary: String,
     pub home_care: Vec<String>,
+    pub concern_level: ConcernLevel,
+    pub concern_label: String,
+    pub less_likely: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,6 +106,7 @@ struct ConditionRule {
     summary: &'static str,
     home_care: &'static [&'static str],
     min_hits: usize,
+    concern_level: ConcernLevel,
 }
 
 const EMERGENCY_SIGNALS: &[SignalRule] = &[
@@ -307,13 +342,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "licking genital",
             "small clumps",
         ],
-        summary: "Painful or blocked urination is common in cats and can become life-threatening quickly, especially in male cats.",
+        summary: "A urethral blockage or feline lower urinary tract disease (FLUTD) can make urination painful or impossible. Crystals, inflammation, or spasms are common triggers, and male cats are at higher risk because their urethra is narrower.",
         home_care: &[
             "Do not wait to see if it passes on its own.",
             "Keep your cat calm and avoid stressors while you arrange care.",
             "Note when you last saw urine in the litter box.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Severe,
     },
     ConditionRule {
         name: "Hairball or mild stomach upset",
@@ -325,13 +361,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "groom",
             "retch",
         ],
-        summary: "Occasional vomiting after grooming can be a hairball, but repeated vomiting still deserves a vet check.",
+        summary: "Hairballs form when swallowed fur clumps in the stomach. A single episode after heavy grooming is often benign, but repeated vomiting can still mean irritation, inflammation, or another problem underneath.",
         home_care: &[
             "Offer fresh water and withhold food for a few hours if vomiting is active.",
             "Reintroduce a small bland meal if vomiting stops.",
             "Brush regularly and ask your vet about hairball support if this is frequent.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Mild,
     },
     ConditionRule {
         name: "Gastroenteritis or dietary upset",
@@ -344,13 +381,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "treat",
             "scaveng",
         ],
-        summary: "Sudden diet changes, rich treats, or mild infections can upset the stomach and intestines.",
+        summary: "Gastroenteritis is inflammation of the stomach and intestines. Sudden food changes, rich treats, scavenged food, bacteria, or viruses can cause vomiting and diarrhea even in otherwise healthy cats.",
         home_care: &[
             "Offer water frequently; dehydration can happen quickly in cats.",
             "Avoid sudden food changes until your vet advises otherwise.",
             "Watch for blood, lethargy, or vomiting that lasts more than 24 hours.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
     },
     ConditionRule {
         name: "Kidney disease or diabetes",
@@ -362,13 +400,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "appetite",
             "pee",
         ],
-        summary: "Increased thirst and urination with weight or appetite changes are common clues your vet may want to investigate.",
+        summary: "Chronic kidney disease and diabetes both commonly cause increased thirst, larger litter clumps, and weight or appetite changes. Cats may seem hungrier with diabetes but still lose weight, while kidney disease often brings gradual decline.",
         home_care: &[
             "Track water intake and litter box clumps for 24–48 hours.",
             "Do not restrict water unless your vet tells you to.",
             "Bring a fresh urine sample to the appointment if your vet asks.",
         ],
         min_hits: 3,
+        concern_level: ConcernLevel::Serious,
     },
     ConditionRule {
         name: "Upper respiratory infection",
@@ -380,13 +419,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "runny nose",
             "fever",
         ],
-        summary: "Cat colds are common and often spread between cats; congestion can reduce appetite.",
+        summary: "Upper respiratory infections are often caused by feline herpesvirus or calicivirus and spread between cats. Sneezing, nasal discharge, congestion, and eye irritation are typical, and appetite may drop if your cat cannot smell food.",
         home_care: &[
             "Use a humidifier or steamy bathroom to ease congestion.",
             "Wipe nose and eyes gently with a warm damp cloth.",
             "Encourage eating with warm, aromatic wet food.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Mild,
     },
     ConditionRule {
         name: "Asthma or airway irritation",
@@ -398,13 +438,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "hacking",
             "gasp",
         ],
-        summary: "Breathing changes can reflect asthma, irritation, or heart/lung issues and should be taken seriously.",
+        summary: "Feline asthma causes inflamed, narrowed airways — cats may wheeze, cough with a neck-stretched posture, or breathe faster at rest. Attacks can be triggered by dust, smoke, litter dust, or stress and may overlap with heart disease in older cats.",
         home_care: &[
             "Reduce dust, smoke, and strong fragrances at home.",
             "Keep your cat in a calm, well-ventilated room.",
             "Seek urgent care if breathing looks labored or mouth breathing occurs.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Serious,
     },
     ConditionRule {
         name: "Dental disease or oral pain",
@@ -416,13 +457,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "pawing",
             "chew",
         ],
-        summary: "Dental pain often shows up as drooling, odor, or reluctance to eat hard food.",
+        summary: "Cats hide oral pain well. Resorptive lesions, gingivitis, fractured teeth, and stomatitis cause drooling, foul breath, pawing at the mouth, or dropping kibble. Chronic dental infection can also affect appetite, kidneys, and heart over time.",
         home_care: &[
             "Offer soft food temporarily if your cat is interested.",
             "Avoid pulling on the mouth or giving bones.",
             "Schedule a dental exam — oral pain rarely resolves on its own.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
     },
     ConditionRule {
         name: "Arthritis or joint pain",
@@ -435,13 +477,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "mobility",
             "favor",
         ],
-        summary: "Reluctance to jump, stiffness, or limping can reflect arthritis or injury, especially in older cats.",
+        summary: "Osteoarthritis is common in cats over age 10 but often missed because cats simply jump less or use lower routes. Limping, stiff gait after naps, reluctance to use high perches, or irritability when touched over the back or hips are typical clues.",
         home_care: &[
             "Provide low-sided litter boxes and easy-to-reach resting spots.",
             "Keep bedding warm and supportive.",
             "Limit rough play until your vet examines the limb.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
     },
     ConditionRule {
         name: "Skin irritation, fleas, or allergies",
@@ -454,13 +497,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "lick",
             "scab",
         ],
-        summary: "Itching and over-grooming may come from fleas, allergies, or skin infection.",
+        summary: "Itching and over-grooming may come from fleas, environmental allergies, food reactions, mites, or bacterial skin infection. You may see scabs, bald patches, or excessive licking of the belly and legs.",
         home_care: &[
             "Check for fleas with a fine comb; only use cat-safe treatments.",
             "Avoid human or dog flea products — many are toxic to cats.",
             "Note any new food, litter, or detergent changes.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Mild,
     },
     ConditionRule {
         name: "Stress-related litter box changes",
@@ -473,13 +517,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "new pet",
             "visitor",
         ],
-        summary: "Stress can trigger inappropriate urination even when the bladder is healthy.",
+        summary: "Cats are sensitive to routine, territory, and litter-box hygiene. New pets, visitors, moved furniture, or conflict with another cat can trigger urination on beds or rugs — but the same signs appear with bladder pain, crystals, and infection, so medical causes must be ruled out.",
         home_care: &[
             "Add an extra clean litter box in a quiet location.",
             "Keep routines predictable and offer hiding spots.",
             "Still rule out pain or urinary issues with your vet if straining or blood is present.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Mild,
     },
     ConditionRule {
         name: "Conjunctivitis or eye infection",
@@ -491,13 +536,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "watery",
             "cloudy",
         ],
-        summary: "Eye discharge or squinting can signal infection, irritation, or a more serious injury.",
+        summary: "Conjunctivitis from herpesvirus, calicivirus, allergens, or scratches causes redness, squinting, and watery or thick discharge. Corneal ulcers are painful emergencies — a cloudy or blue-tinged spot on the eye needs same-day care.",
         home_care: &[
             "Do not use human eye drops unless prescribed for your cat.",
             "Prevent rubbing with a soft collar if your vet recommends one.",
             "Seek same-day care if the eye looks cloudy or very painful.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
     },
     ConditionRule {
         name: "Constipation",
@@ -516,14 +562,470 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "Contact your vet if straining continues beyond a day.",
         ],
         min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Poisoning or toxin exposure",
+        patterns: &[
+            "poison",
+            "toxin",
+            "toxic",
+            "antifreeze",
+            "lily",
+            "lilies",
+            "chocolate",
+            "onion",
+            "grape",
+            "rat poison",
+            "rodenticide",
+            "cleaning product",
+            "essential oil",
+            "medication",
+            "pill",
+            "ate",
+            "swallowed",
+            "houseplant",
+            "plant",
+            "drool",
+            "vomit",
+            "collapse",
+        ],
+        summary: "Cats can be poisoned by lilies, antifreeze, human medications, essential oils, rodent bait, onions, grapes, and many household chemicals. Some toxins damage kidneys or red blood cells within hours.",
+        home_care: &[
+            "Treat this as urgent — call your vet, emergency clinic, or pet poison helpline immediately.",
+            "Bring the package, plant photo, or medication label if you know what was ingested.",
+            "Do not induce vomiting unless a veterinary professional tells you to.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Severe,
+    },
+    ConditionRule {
+        name: "Bacterial or systemic infection",
+        patterns: &[
+            "fever",
+            "infect",
+            "pus",
+            "abscess",
+            "wound",
+            "bite",
+            "swollen",
+            "hot spot",
+            "letharg",
+            "not eating",
+            "shiver",
+        ],
+        summary: "Bacterial infections can start in a wound, mouth, bladder, skin, or elsewhere and spread systemically. Fever, lethargy, poor appetite, and painful swellings are common warning signs.",
+        home_care: &[
+            "Keep your cat warm and comfortable while you arrange veterinary care.",
+            "Do not squeeze or lance swellings at home.",
+            "Note when fever, lethargy, or appetite loss began.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Urinary tract infection (UTI)",
+        patterns: &[
+            "urinat",
+            "pee",
+            "litter",
+            "blood in urine",
+            "accident",
+            "outside litter",
+            "licking genital",
+            "frequent",
+            "small clumps",
+        ],
+        summary: "A urinary tract infection can cause painful, frequent, or bloody urination and accidents outside the litter box. It can look similar to blockage, but both need veterinary evaluation.",
+        home_care: &[
+            "Watch whether your cat is producing urine — absence of urine is an emergency.",
+            "Offer fresh water and keep the litter box very clean.",
+            "Collect a urine sample if your vet requests one before starting antibiotics.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Intestinal parasites or worms",
+        patterns: &[
+            "worm",
+            "parasite",
+            "tape",
+            "diarrhea",
+            "vomit",
+            "weight loss",
+            "bloated",
+            "scoot",
+            "itch",
+            "flea",
+        ],
+        summary: "Roundworms, tapeworms, hookworms, and other parasites can irritate the gut and cause diarrhea, vomiting, weight loss, or a dull coat. Fleas often carry tapeworms.",
+        home_care: &[
+            "Bring a fresh stool sample to your vet for parasite testing.",
+            "Use only cat-specific dewormers prescribed or recommended by your vet.",
+            "Treat the home environment if fleas are involved.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Foreign body or intestinal obstruction",
+        patterns: &[
+            "swallowed",
+            "ate",
+            "string",
+            "toy",
+            "rubber",
+            "hair tie",
+            "vomit",
+            "retch",
+            "not eating",
+            "abdom",
+            "bloat",
+            "constipat",
+        ],
+        summary: "Cats sometimes swallow string, hair ties, toys, or bones that lodge in the stomach or intestines. This can cause repeated vomiting, loss of appetite, painful belly, or inability to pass stool.",
+        home_care: &[
+            "Do not pull string hanging from the mouth — it may be tangled inside.",
+            "Withhold food and seek urgent veterinary care if vomiting is repeated.",
+            "Tell your vet exactly what your cat may have swallowed and when.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Severe,
+    },
+    ConditionRule {
+        name: "Pancreatitis",
+        patterns: &[
+            "vomit",
+            "not eating",
+            "letharg",
+            "diarrhea",
+            "abdom",
+            "hunched",
+            "pain",
+            "fatty",
+            "treat",
+        ],
+        summary: "Pancreatitis is painful inflammation of the pancreas. Cats may vomit, stop eating, act lethargic, hunch their back, or react painfully when the belly is touched.",
+        home_care: &[
+            "Do not offer rich food, treats, or fatty table scraps.",
+            "Keep your cat resting and seek veterinary care promptly.",
+            "Tell your vet about recent diet changes or scavenging.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Liver disease or hepatitis",
+        patterns: &[
+            "yellow",
+            "jaundice",
+            "not eating",
+            "letharg",
+            "vomit",
+            "weight loss",
+            "gums",
+            "urine dark",
+        ],
+        summary: "Liver disease can cause yellowing of the gums, skin, or eyes (jaundice), vomiting, appetite loss, and lethargy. Toxins, infections, fatty liver syndrome, and other illnesses can be involved.",
+        home_care: &[
+            "This often needs same-day bloodwork and veterinary assessment.",
+            "Encourage small amounts of food only if your cat is willing — do not force-feed.",
+            "Mention any recent weight loss, toxin exposure, or medication use to your vet.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Hyperthyroidism",
+        patterns: &[
+            "weight loss",
+            "eating more",
+            "hungry",
+            "hyper",
+            "restless",
+            "vomit",
+            "drinking",
+            "senior",
+            "older",
+        ],
+        summary: "An overactive thyroid gland is common in middle-aged and older cats. It can cause weight loss despite a strong appetite, restlessness, vomiting, and increased thirst.",
+        home_care: &[
+            "Track appetite, weight, and activity changes over the past few weeks.",
+            "Do not restrict food unless your vet advises it.",
+            "A blood test is usually needed to confirm hyperthyroidism.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Heart disease or congestive failure",
+        patterns: &[
+            "breathing fast",
+            "breath",
+            "cough",
+            "open mouth",
+            "collapse",
+            "letharg",
+            "exercise",
+            "hiding",
+            "gasp",
+        ],
+        summary: "Heart disease can lead to fluid in or around the lungs, making breathing faster or harder. Coughing, hiding, reduced activity, and open-mouth breathing can appear, especially in older cats.",
+        home_care: &[
+            "Keep your cat calm and in a cool, quiet space.",
+            "Avoid stress and exertion while getting veterinary care.",
+            "Seek emergency care if breathing is labored or the gums look pale or blue.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Severe,
+    },
+    ConditionRule {
+        name: "Ear infection or ear mites",
+        patterns: &[
+            "ear",
+            "head shake",
+            "scratch ear",
+            "smelly ear",
+            "discharge",
+            "black crumb",
+            "itch",
+        ],
+        summary: "Ear mites and bacterial or yeast ear infections cause itching, head shaking, dark crumbly discharge, and odor. Left untreated, they can spread or lead to painful inflammation.",
+        home_care: &[
+            "Do not insert cotton swabs deep into the ear canal.",
+            "Keep nails trimmed to reduce scratching damage.",
+            "Your vet can check the ears with an otoscope and prescribe targeted treatment.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Mild,
+    },
+    ConditionRule {
+        name: "Skin infection (bacterial or fungal)",
+        patterns: &[
+            "scab",
+            "red skin",
+            "smell",
+            "scratch",
+            "hair loss",
+            "ring",
+            "patch",
+            "oozing",
+            "crust",
+        ],
+        summary: "Broken skin from scratching or bites can become infected, and fungal infections like ringworm can cause round hairless patches. Bacterial infections may ooze, crust, or smell unpleasant.",
+        home_care: &[
+            "Prevent further self-trauma with an e-collar if your vet recommends one.",
+            "Wash hands after touching affected skin — some fungal infections spread to people.",
+            "Avoid over-the-counter antibiotic creams unless your vet approves them for cats.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Food allergy or adverse food reaction",
+        patterns: &[
+            "itch",
+            "scratch",
+            "vomit",
+            "diarrhea",
+            "new food",
+            "diet",
+            "skin",
+            "ear",
+            "overgroom",
+        ],
+        summary: "Some cats react to certain proteins or ingredients with itching, ear inflammation, vomiting, or soft stool. Reactions may appear after a diet change but can also develop on long-standing foods.",
+        home_care: &[
+            "Write down current food, treats, and any recent changes.",
+            "Avoid introducing new foods until your vet guides a plan.",
+            "Do not assume grain-free or raw diets are safer without veterinary advice.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Abscess or cat-bite wound",
+        patterns: &[
+            "abscess",
+            "bite",
+            "wound",
+            "swollen",
+            "lump",
+            "pus",
+            "fever",
+            "limp",
+            "fight",
+            "outdoor",
+        ],
+        summary: "Cat bites and puncture wounds often seal over and trap bacteria, forming a painful abscess. You may notice swelling, fever, lameness, or a sudden drop in energy a few days after a fight.",
+        home_care: &[
+            "Do not squeeze or drain swellings at home.",
+            "Keep the area clean and prevent licking until your vet examines it.",
+            "Outdoor cats with fever and swellings should be seen promptly.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Dehydration",
+        patterns: &[
+            "vomit",
+            "diarrhea",
+            "not drinking",
+            "letharg",
+            "sunken",
+            "dry gum",
+            "tacky",
+            "weak",
+            "collapse",
+        ],
+        summary: "Repeated vomiting, diarrhea, or poor fluid intake can dehydrate cats quickly. Dehydration worsens lethargy and can become dangerous, especially in kittens and seniors.",
+        home_care: &[
+            "Offer fresh water and unflavored broth only if your vet approves.",
+            "Track whether your cat is urinating normally.",
+            "Seek care promptly if gums feel tacky, eyes look sunken, or your cat is too weak to drink.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Heat stress or heatstroke",
+        patterns: &[
+            "pant",
+            "drool",
+            "hot",
+            "overheat",
+            "collapse",
+            "restless",
+            "vomit",
+            "summer",
+            "car",
+        ],
+        summary: "Cats can overheat in hot cars, poorly ventilated rooms, or during heat waves. Panting, drooling, restlessness, vomiting, and collapse are warning signs of dangerous heat stress.",
+        home_care: &[
+            "Move your cat to a cool, shaded area with airflow immediately.",
+            "Offer small amounts of cool water — do not force immersion in ice water.",
+            "Heatstroke is an emergency; continue cooling during transport to the vet.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Severe,
+    },
+    ConditionRule {
+        name: "Inflammatory bowel disease (IBD)",
+        patterns: &[
+            "chronic",
+            "frequent vomit",
+            "diarrhea",
+            "weight loss",
+            "appetite",
+            "mucus",
+            "soft stool",
+            "months",
+        ],
+        summary: "IBD is long-term inflammation of the intestines that can cause chronic vomiting, diarrhea, weight loss, or picky eating. It is often diagnosed after other causes are ruled out.",
+        home_care: &[
+            "Keep a log of stool quality, vomiting frequency, and diet.",
+            "Avoid frequent diet changes before your vet workup.",
+            "Bring stool samples and a detailed history to the appointment.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Stomatitis or severe oral infection",
+        patterns: &[
+            "mouth",
+            "drool",
+            "bad breath",
+            "red gum",
+            "not eating",
+            "pawing mouth",
+            "tooth",
+            "pain",
+        ],
+        summary: "Stomatitis is severe inflammation of the mouth and gums. Cats may drool, refuse food, have foul breath, or paw at the face because eating is painful.",
+        home_care: &[
+            "Offer soft wet food at room temperature if your cat will eat.",
+            "Do not examine the mouth forcefully — it is often very painful.",
+            "Dental disease, infections, and immune-mediated disease may all be involved.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Giardia or protozoal infection",
+        patterns: &[
+            "diarrhea",
+            "mucus",
+            "foul",
+            "smelly stool",
+            "weight loss",
+            "vomit",
+            "kitten",
+            "rescue",
+        ],
+        summary: "Giardia and similar protozoa can cause intermittent diarrhea, mucus in stool, gas, and weight loss. They are more common in kittens, rescues, and cats exposed to contaminated water or feces.",
+        home_care: &[
+            "Clean the litter box frequently and wash hands thoroughly.",
+            "Bring a fresh stool sample for parasite testing.",
+            "Isolate affected cats from other household cats until your vet advises otherwise.",
+        ],
+        min_hits: 2,
+        concern_level: ConcernLevel::Moderate,
+    },
+    ConditionRule {
+        name: "Allergic reaction",
+        patterns: &[
+            "swollen face",
+            "hives",
+            "sudden itch",
+            "vaccine",
+            "bee",
+            "sting",
+            "new medication",
+            "facial swell",
+            "welts",
+        ],
+        summary: "Allergic reactions can follow insect stings, vaccines, medications, or new exposures. Facial swelling, hives, sudden itching, vomiting, or breathing changes can appear quickly.",
+        home_care: &[
+            "Sudden facial swelling or breathing trouble is an emergency.",
+            "Note the timing of vaccines, medications, or outdoor exposure.",
+            "Do not give human antihistamines unless your vet directs you to.",
+        ],
+        min_hits: 1,
+        concern_level: ConcernLevel::Serious,
+    },
+    ConditionRule {
+        name: "Cancer or chronic internal disease",
+        patterns: &[
+            "weight loss",
+            "lump",
+            "mass",
+            "not eating",
+            "letharg",
+            "senior",
+            "older",
+            "night",
+            "vomit",
+            "decline",
+        ],
+        summary: "Persistent weight loss, lethargy, poor appetite, new lumps, or gradual decline can reflect cancer or other chronic internal disease. Early changes are easy to miss in cats that hide illness.",
+        home_care: &[
+            "Track weight, appetite, and energy weekly if you can.",
+            "Photograph or measure any new lumps and note growth speed.",
+            "Older cats with ongoing decline usually need bloodwork and imaging.",
+        ],
+        min_hits: 3,
+        concern_level: ConcernLevel::Serious,
     },
 ];
 
 const QUICK_SYMPTOM_OPTIONS: &[(&str, &str)] = &[
     ("vomiting", "Vomiting"),
+    ("lethargy", "Lethargy"),
     ("diarrhea", "Diarrhea"),
     ("not eating", "Not eating"),
-    ("lethargy", "Low energy"),
     ("drinking more", "Drinking more"),
     ("straining in litter box", "Straining in litter box"),
     ("coughing", "Coughing"),
@@ -599,32 +1101,81 @@ fn max_urgency(current: Urgency, candidate: Urgency) -> Urgency {
     }
 }
 
-fn score_conditions(text: &str) -> Vec<Possibility> {
+fn possibility_from_rule(
+    rule: &ConditionRule,
+    less_likely: bool,
+    text: &str,
+    context: &PetContext,
+    breed: Option<&breed_health::ResolvedBreed>,
+) -> Possibility {
+    let pet_name = if context.name.trim().is_empty() {
+        "your cat"
+    } else {
+        context.name.as_str()
+    };
+
+    let mut summary = if less_likely {
+        format!(
+            "A weaker symptom match, but still possible: {}",
+            rule.summary
+        )
+    } else {
+        rule.summary.to_string()
+    };
+
+    if let Some(breed) = breed {
+        summary = breed_health::enrich_summary(rule.name, &summary, text, breed, pet_name);
+    }
+
+    Possibility {
+        name: rule.name.to_string(),
+        summary,
+        home_care: rule.home_care.iter().map(|tip| (*tip).to_string()).collect(),
+        concern_label: rule.concern_level.label().to_string(),
+        concern_level: rule.concern_level,
+        less_likely,
+    }
+}
+
+fn score_conditions(
+    text: &str,
+    context: &PetContext,
+    breed: Option<&breed_health::ResolvedBreed>,
+) -> Vec<Possibility> {
     let mut scored = CONDITION_RULES
         .iter()
         .filter_map(|rule| {
-            let hits = rule
+            let pattern_hits = rule
                 .patterns
                 .iter()
                 .filter(|pattern| text_contains(text, pattern))
                 .count();
-            if hits >= rule.min_hits {
-                Some((
-                    hits,
-                    Possibility {
-                        name: rule.name.to_string(),
-                        summary: rule.summary.to_string(),
-                        home_care: rule.home_care.iter().map(|tip| (*tip).to_string()).collect(),
-                    },
-                ))
-            } else {
-                None
+            if pattern_hits == 0 {
+                return None;
             }
+
+            let breed_hits = breed
+                .map(|profile| breed_health::breed_bonus_hits(rule.name, profile, text))
+                .unwrap_or(0);
+            let hits = pattern_hits + breed_hits;
+            let less_likely = pattern_hits < rule.min_hits && breed_hits == 0;
+
+            Some((
+                rule.concern_level.rank(),
+                less_likely,
+                hits,
+                possibility_from_rule(rule, less_likely, text, context, breed),
+            ))
         })
         .collect::<Vec<_>>();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
-    scored.into_iter().take(3).map(|(_, item)| item).collect()
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| b.2.cmp(&a.2))
+    });
+
+    scored.into_iter().map(|(_, _, _, item)| item).collect()
 }
 
 fn urgency_message(urgency: Urgency, pet_name: &str) -> String {
@@ -697,7 +1248,7 @@ fn vet_guidance(urgency: Urgency) -> String {
     }
 }
 
-fn context_notes(context: &PetContext) -> Vec<String> {
+fn context_notes(context: &PetContext, text: &str) -> Vec<String> {
     let mut notes = Vec::new();
     if !context.conditions.trim().is_empty()
         && !context.conditions.eq_ignore_ascii_case("none noted")
@@ -707,22 +1258,17 @@ fn context_notes(context: &PetContext) -> Vec<String> {
             context.name, context.conditions
         ));
     }
-    if context.age.to_lowercase().contains("senior")
-        || context.age.to_lowercase().contains("year")
-    {
-        notes.push(
-            "Older cats often hide illness — subtle changes can be more significant.".to_string(),
-        );
-    }
     if context.lifestyle.eq_ignore_ascii_case("outdoor") {
         notes.push(
             "Outdoor cats have higher exposure to trauma, parasites, and infections.".to_string(),
         );
     }
-    if !context.breed.is_empty() {
+    if let Some(breed) = breed_health::resolve_breed(&context.breed) {
+        notes.extend(breed_health::breed_context_notes(&breed, &context.age, text));
+    } else if !context.breed.trim().is_empty() {
         notes.push(format!(
-            "Breed-specific risks for {} may matter — check your breed care guide or ask your vet.",
-            context.breed
+            "Tell your vet {} is a {} — some mixed-breed cats still carry breed-linked risks from their ancestry.",
+            context.name, context.breed
         ));
     }
     notes
@@ -760,17 +1306,28 @@ pub fn analyze_symptoms(symptoms: &str, quick_picks: &[String], context: &PetCon
     }
 
     let (urgency, signals) = collect_signals(&normalized);
-    let mut possibilities = score_conditions(&normalized);
+    let breed = breed_health::resolve_breed(&context.breed);
+    let mut possibilities = score_conditions(&normalized, context, breed.as_ref());
     if possibilities.is_empty() && !signals.is_empty() {
+        let mut summary = "Infection, inflammation, pain, toxin exposure, organ disease, and stress can all overlap early on. Several common illnesses look similar at first, so a vet exam, history, and basic tests are the safest way to narrow the cause.".to_string();
+        if let Some(ref breed) = breed {
+            summary = format!(
+                "{summary} Because {} is a {}, share breed and age with your vet — some conditions are more common in certain breeds even when symptoms are vague.",
+                pet_name, breed.name
+            );
+        }
         possibilities.push(Possibility {
             name: "Non-specific illness signs".to_string(),
-            summary: "Several common illnesses can look similar early on. A vet exam and basic tests are the safest way to narrow possibilities.".to_string(),
+            summary,
             home_care: general_home_care(urgency),
+            concern_label: ConcernLevel::Moderate.label().to_string(),
+            concern_level: ConcernLevel::Moderate,
+            less_likely: false,
         });
     }
 
     let mut home_care = general_home_care(urgency);
-    home_care.extend(context_notes(context));
+    home_care.extend(context_notes(context, &normalized));
 
     SymptomAnalysis {
         urgency_label: urgency.label().to_string(),
@@ -818,12 +1375,14 @@ pub fn render_health_tab_card(pet_name: &str) -> String {
       <legend>Quick picks (optional)</legend>
       <div class="symptom-quick-grid">{quick_options}</div>
     </fieldset>
+    {hardship_prompt}
     <button type="submit" class="download-btn login-submit symptom-checker-submit">Get guidance 🩺</button>
   </form>
   <div class="symptom-checker-results" id="symptom-checker-results" hidden aria-live="polite"></div>
 </article>"#,
         pet = pet,
         quick_options = quick_options,
+        hardship_prompt = crate::vet_financial_resources::render_symptom_hardship_prompt(),
     )
 }
 
@@ -866,6 +1425,65 @@ mod tests {
     }
 
     #[test]
+    fn possibilities_sort_from_mild_to_severe() {
+        let analysis = analyze_symptoms(
+            "vomiting diarrhea straining in litter box blood in urine lethargy drinking more",
+            &[],
+            &test_context(),
+        );
+        assert!(analysis.possibilities.len() > 1);
+        let ranks: Vec<u8> = analysis
+            .possibilities
+            .iter()
+            .map(|item| item.concern_level.rank())
+            .collect();
+        assert!(
+            ranks.windows(2).all(|pair| pair[0] <= pair[1]),
+            "expected mild-to-severe ordering, got {ranks:?}"
+        );
+        assert!(analysis.possibilities.iter().any(|item| {
+            item.name.contains("Urinary blockage") || item.name.contains("Poisoning")
+        }));
+        assert!(
+            analysis.possibilities.last().is_some_and(|item| {
+                item.concern_level == ConcernLevel::Severe
+            })
+        );
+    }
+
+    #[test]
+    fn single_symptom_includes_less_likely_matches() {
+        let analysis = analyze_symptoms("vomiting", &[], &test_context());
+        assert!(!analysis.possibilities.is_empty());
+        assert!(analysis
+            .possibilities
+            .iter()
+            .any(|item| item.less_likely));
+    }
+
+    #[test]
+    fn poison_symptoms_include_toxin_possibility() {
+        let analysis = analyze_symptoms(
+            "vomiting drooling ate lily plant lethargy",
+            &[],
+            &test_context(),
+        );
+        assert!(analysis
+            .possibilities
+            .iter()
+            .any(|item| item.name.contains("Poisoning")));
+    }
+
+    #[test]
+    fn infection_symptoms_include_bacterial_possibility() {
+        let analysis = analyze_symptoms("fever lethargy not eating wound swollen", &[], &test_context());
+        assert!(analysis
+            .possibilities
+            .iter()
+            .any(|item| item.name.contains("infection")));
+    }
+
+    #[test]
     fn empty_input_returns_wellness_guidance() {
         let analysis = analyze_symptoms("   ", &[], &test_context());
         assert_eq!(analysis.urgency, Urgency::Wellness);
@@ -879,10 +1497,49 @@ mod tests {
     }
 
     #[test]
+    fn persian_wheezing_includes_breed_specific_summary() {
+        let context = PetContext {
+            breed: "Persian".to_string(),
+            ..test_context()
+        };
+        let analysis = analyze_symptoms("wheezing and coughing", &[], &context);
+        assert!(analysis.possibilities.iter().any(|item| {
+            item.name.contains("Asthma") && item.summary.contains("Flat-faced")
+        }));
+    }
+
+    #[test]
+    fn maine_coon_breathing_includes_hcm_note() {
+        let context = PetContext {
+            breed: "Maine Coon".to_string(),
+            ..test_context()
+        };
+        let analysis = analyze_symptoms("breathing fast hiding lethargy", &[], &context);
+        assert!(analysis.possibilities.iter().any(|item| {
+            item.summary.contains("HCM") || item.summary.contains("cardiomyopathy")
+        }));
+    }
+
+    #[test]
+    fn breed_context_notes_replace_generic_breed_hint() {
+        let context = PetContext {
+            breed: "Siamese".to_string(),
+            ..test_context()
+        };
+        let analysis = analyze_symptoms("coughing wheezing", &[], &context);
+        assert!(analysis
+            .home_care
+            .iter()
+            .any(|note| note.contains("asthma") || note.contains("Siamese")));
+    }
+
+    #[test]
     fn health_tab_card_includes_disclaimer_and_form() {
         let html = render_health_tab_card("Mochi");
         assert!(html.contains("symptom-checker-form"));
         assert!(html.contains("Not a vet"));
         assert!(html.contains("Get guidance"));
+        assert!(html.contains(r#"value="lethargy""#));
+        assert!(html.contains("> Lethargy</label>"));
     }
 }

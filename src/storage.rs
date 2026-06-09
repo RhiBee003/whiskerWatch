@@ -863,6 +863,24 @@ impl Storage {
         Ok(count > 0)
     }
 
+    pub fn email_for_username(&self, username: &str) -> Result<Option<String>, StorageError> {
+        let username = username.trim();
+        if username.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        let result = conn.query_row(
+            "SELECT email FROM users WHERE username = ?1 COLLATE NOCASE",
+            params![username],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(email) => Ok(Some(email)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     pub fn set_user_password(&self, email: &str, new_password: &str) -> Result<(), StorageError> {
         let hashed = hash_password(new_password)?;
         self.update_password_hash(email, &hashed)
@@ -1754,6 +1772,30 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
     }
 
+    pub fn list_outgoing_friend_requests(
+        &self,
+        email: &str,
+    ) -> Result<Vec<StoredFriendRequest>, StorageError> {
+        let email = Self::normalize_social_email(email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, from_email, to_email, status, created_at
+             FROM friend_requests
+             WHERE from_email = ?1 COLLATE NOCASE AND status = 'pending'
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![email], |row| {
+            Ok(StoredFriendRequest {
+                id: row.get(0)?,
+                from_email: row.get(1)?,
+                to_email: row.get(2)?,
+                status: row.get(3)?,
+                created_at: row.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
     pub fn list_friends(&self, email: &str) -> Result<Vec<StoredFriendSummary>, StorageError> {
         let email = Self::normalize_social_email(email);
         let conn = self.conn.lock().expect("storage lock");
@@ -1902,6 +1944,45 @@ impl Storage {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+
+    pub fn list_outgoing_pet_shares(
+        &self,
+        owner_email: &str,
+    ) -> Result<Vec<StoredPetShare>, StorageError> {
+        let owner_email = Self::normalize_social_email(owner_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, owner_email, shared_with_email, pet_id, status, created_at
+             FROM pet_shares
+             WHERE owner_email = ?1 COLLATE NOCASE AND status IN ('pending', 'accepted')
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![owner_email], |row| {
+            Ok(StoredPetShare {
+                id: row.get(0)?,
+                owner_email: row.get(1)?,
+                shared_with_email: row.get(2)?,
+                pet_id: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get::<_, i64>(5)? as u64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn revoke_pet_share(&self, share_id: &str, owner_email: &str) -> Result<(), StorageError> {
+        let owner_email = Self::normalize_social_email(owner_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let removed = conn.execute(
+            "DELETE FROM pet_shares
+             WHERE id = ?1 AND owner_email = ?2 COLLATE NOCASE AND status IN ('pending', 'accepted')",
+            params![share_id, owner_email],
+        )?;
+        if removed == 0 {
+            return Err(StorageError::InvalidInput("share not found".into()));
+        }
+        Ok(())
     }
 }
 
@@ -2493,10 +2574,22 @@ mod tests {
         storage
             .create_friend_request("owner@example.com", "friend@example.com", 1)
             .expect("create friend request");
+        let outgoing = storage
+            .list_outgoing_friend_requests("owner@example.com")
+            .expect("outgoing");
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].to_email, "friend@example.com");
         let incoming = storage
             .list_incoming_friend_requests("friend@example.com")
             .expect("incoming");
         assert_eq!(incoming.len(), 1);
+        assert_eq!(
+            storage
+                .email_for_username("friend")
+                .expect("lookup username")
+                .as_deref(),
+            Some("friend@example.com")
+        );
         storage
             .respond_friend_request(&incoming[0].id, "friend@example.com", true)
             .expect("accept friend");
@@ -2520,5 +2613,18 @@ mod tests {
         assert!(storage
             .has_accepted_pet_share("owner@example.com", "friend@example.com", "primary")
             .expect("accepted share"));
+
+        let outgoing = storage
+            .list_outgoing_pet_shares("owner@example.com")
+            .expect("outgoing shares");
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].status, "accepted");
+
+        storage
+            .revoke_pet_share(&outgoing[0].id, "owner@example.com")
+            .expect("revoke share");
+        assert!(!storage
+            .has_accepted_pet_share("owner@example.com", "friend@example.com", "primary")
+            .expect("share removed"));
     }
 }

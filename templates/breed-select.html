@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>WhiskerWatch — Choose a Breed</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260609j" />
   </head>
-  <body class="dashboard-body">
+  <body class="dashboard-body breed-select-body">
     <header class="dashboard-topbar">
       <div class="brand" aria-label="WhiskerWatch">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
@@ -24,15 +24,39 @@
     </header>
 
     <main class="breed-select-shell section">
-      <h1>Choose your cat's breed</h1>
-      <p class="panel-intro">{{BREED_INTRO}}</p>
-      <div class="breed-catalog">
-        {{BREED_CATALOG}}
+      <div id="breed-select-loading" class="breed-select-loading" role="status" aria-live="polite" aria-busy="true">
+        <div class="breed-select-loading-card">
+          <div class="breed-select-loading-sky" aria-hidden="true">
+            <span class="breed-select-cloud breed-select-cloud-1">☁️</span>
+            <span class="breed-select-cloud breed-select-cloud-2">☁️</span>
+            <span class="breed-select-cloud breed-select-cloud-3">☁️</span>
+            <span class="breed-select-sparkle">✨</span>
+            <span class="breed-select-cat">🐱</span>
+            <span class="breed-select-paw">🐾</span>
+          </div>
+          <p class="breed-select-loading-kicker">Breed picker</p>
+          <h1 class="breed-select-loading-title">{{BREED_LOADING_TITLE}}</h1>
+          <p class="breed-select-loading-copy">{{BREED_LOADING_COPY}}</p>
+          <div class="breed-select-loading-dots" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
       </div>
-      <p class="breed-back-wrap">
-        <a href="{{BREED_BACK_URL}}" class="download-btn auth-link-btn breed-back-btn">Back</a>
-      </p>
+
+      <div id="breed-select-content" class="breed-select-content" hidden>
+        <h1>Choose your cat's breed</h1>
+        <p class="panel-intro">{{BREED_INTRO}}</p>
+        <div class="breed-catalog">
+          {{BREED_CATALOG}}
+        </div>
+        <p class="breed-back-wrap">
+          <a href="{{BREED_BACK_URL}}" class="download-btn auth-link-btn breed-back-btn">Back</a>
+        </p>
+      </div>
     </main>
     <script src="/paw-cursor.js"></script>
+    <script src="/breed-select-loading.js?v=20260609j"></script>
   </body>
 </html>

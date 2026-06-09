@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WhiskerWatch — Keep Going</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="dashboard-body streak-keep-body">
+    <header class="dashboard-topbar">
+      <div class="brand" aria-label="WhiskerWatch">
+        <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
+        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+      </div>
+      <nav class="dashboard-nav">
+        <a href="/home?tab=pet">HOME</a>
+        <a href="/home?tab=tasks">TASKS</a>
+        {{ADMIN_NAV_LINK}}
+        <a href="/contact">CONTACT</a>
+        <form class="admin-logout-form" action="/logout" method="post">
+          <button type="submit" class="admin-logout-btn">LOG OUT</button>
+        </form>
+      </nav>
+    </header>
+
+    <main class="streak-keep-shell section">
+      {{STATUS_BLOCK}}
+
+      <header class="streak-keep-hero">
+        <div class="streak-keep-sky" aria-hidden="true">
+          <span class="streak-keep-cloud streak-keep-cloud-1">☁️</span>
+          <span class="streak-keep-cloud streak-keep-cloud-2">☁️</span>
+          <span class="streak-keep-flame">💗</span>
+          <span class="streak-keep-paw">🐾</span>
+        </div>
+        <p class="streak-keep-kicker">Care streak rewards</p>
+        <h1>Keep going for {{PET}}!</h1>
+        <p class="streak-keep-streak-count">{{STREAK_LABEL}}</p>
+        {{BEST_LINE}}
+        {{PROGRESS}}
+        {{COLLECT_HINT}}
+        <p class="streak-keep-intro">Complete at least one daily care task each day to grow your streak and unlock paw point rewards along the way.</p>
+      </header>
+
+      <section class="streak-reward-grid" aria-labelledby="streak-rewards-title">
+        <h2 id="streak-rewards-title">Streak rewards</h2>
+        <p class="field-hint streak-reward-grid-hint">Hit a milestone, then tap collect — your paw points are waiting.</p>
+        {{REWARD_CARDS}}
+      </section>
+
+      <div class="streak-keep-actions">
+        <a href="/home?tab=tasks" class="download-btn streak-keep-primary-btn">Complete a care task ✨</a>
+        <a href="/home?tab=points" class="streak-keep-back-btn">← Back to dashboard</a>
+      </div>
+    </main>
+
+    <script src="/paw-cursor.js"></script>
+    <script src="/alerts.js"></script>
+  </body>
+</html>

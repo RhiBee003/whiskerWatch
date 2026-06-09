@@ -13,6 +13,10 @@ pub const CATALOG: &[BreedCategory] = &[
         title: "Long-Haired Breeds",
         breeds: &[
             BreedEntry {
+                name: "Domestic Longhair",
+                description: "mixed ancestry, fluffy coat, independent and adaptable",
+            },
+            BreedEntry {
                 name: "Persian",
                 description: "flat face, silky coat, calm and gentle",
             },

@@ -281,24 +281,59 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
     )
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CuteStreakStyle {
+    Chip,
+    Card,
+    Hero,
+}
+
+pub fn format_cute_streak_markup(days: u32, style: CuteStreakStyle) -> String {
+    if days == 0 {
+        let text = match style {
+            CuteStreakStyle::Hero => "Start your streak today ✨",
+            _ => "Start today",
+        };
+        return format!(
+            r#"<span class="care-streak-cute care-streak-cute--start">{text}</span>"#
+        );
+    }
+
+    let unit = if days == 1 { "day" } else { "days" };
+    let hero_class = if matches!(style, CuteStreakStyle::Hero) {
+        " care-streak-cute--hero"
+    } else {
+        ""
+    };
+    let suffix = if matches!(style, CuteStreakStyle::Hero) {
+        " strong"
+    } else {
+        ""
+    };
+
+    format!(
+        r#"<span class="care-streak-cute{hero_class}"><span class="care-streak-num">{days}</span><span class="care-streak-unit">{unit}</span>{suffix}</span>"#,
+        hero_class = hero_class,
+        days = days,
+        unit = unit,
+        suffix = suffix,
+    )
+}
+
 pub fn render_streak_card(profile: &UserProfile, app_base_url: &str, created_at: u64) -> String {
     if profile.care_streak_days == 0 {
         return format!(
             r#"<article class="dashboard-card care-streak-card care-streak-card--empty">
-  <h2>Care streak</h2>
-  <p class="care-streak-big">Start today</p>
-  <p class="field-hint">Complete at least one daily care task each day to start your streak.</p>
+  <h2><a href="/home/streak" class="care-streak-card-link">Care streak</a></h2>
+  <p class="care-streak-big"><a href="/home/streak" class="care-streak-card-link">Start today</a></p>
+  <p class="field-hint">Complete at least one daily care task each day to start your streak. <a href="/home/streak" class="care-streak-card-link">See rewards waiting for you →</a></p>
   <div class="care-streak-actions"><p class="field-hint">Hit a {next}-day streak to unlock a shareable card.</p></div>
 </article>"#,
             next = STREAK_MILESTONES[0],
         );
     }
 
-    let streak_label = if profile.care_streak_days == 1 {
-        "1 day".to_string()
-    } else {
-        format!("{} days", profile.care_streak_days)
-    };
+    let streak_label = format_cute_streak_markup(profile.care_streak_days, CuteStreakStyle::Card);
 
     let best_line = if profile.best_care_streak > profile.care_streak_days {
         format!(
@@ -334,9 +369,9 @@ pub fn render_streak_card(profile: &UserProfile, app_base_url: &str, created_at:
 
     format!(
         r#"<article class="dashboard-card care-streak-card">
-  <h2>Care streak</h2>
-  <p class="care-streak-big">{streak_label}</p>
-  <p class="field-hint">Complete at least one daily care task each day to keep your streak alive.</p>
+  <h2><a href="/home/streak" class="care-streak-card-link">Care streak</a></h2>
+  <p class="care-streak-big"><a href="/home/streak" class="care-streak-card-link">{streak_label}</a></p>
+  <p class="field-hint">Complete at least one daily care task each day to keep your streak alive. <a href="/home/streak" class="care-streak-card-link">View streak rewards →</a></p>
   {best_line}
   <div class="care-streak-actions">{share_button}</div>
 </article>"#,

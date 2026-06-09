@@ -1,8 +1,5 @@
 pub const PREMIUM_PRICE_CENTS: u32 = 1499;
 pub const PREMIUM_PRICE_LABEL: &str = "$14.99";
-pub const MAX_PETS_FREE: usize = 1;
-pub const MAX_PETS_PREMIUM: usize = 3;
-
 pub fn is_admin_email(email: &str) -> bool {
     email.trim().eq_ignore_ascii_case("rhibee003@gmail.com")
 }
@@ -13,14 +10,6 @@ pub fn has_premium(premium_unlocked: bool, email: &str) -> bool {
 
 pub fn can_access_health_records(premium_unlocked: bool, email: &str) -> bool {
     has_premium(premium_unlocked, email)
-}
-
-pub fn max_pets(premium_unlocked: bool, email: &str) -> usize {
-    if has_premium(premium_unlocked, email) {
-        MAX_PETS_PREMIUM
-    } else {
-        MAX_PETS_FREE
-    }
 }
 
 pub fn total_pet_count(has_primary_pet: bool, additional_pet_count: usize) -> usize {
@@ -35,11 +24,9 @@ pub fn can_add_pet(
     premium_unlocked: bool,
     email: &str,
     has_primary_pet: bool,
-    additional_pet_count: usize,
+    _additional_pet_count: usize,
 ) -> bool {
-    has_premium(premium_unlocked, email)
-        && total_pet_count(has_primary_pet, additional_pet_count)
-            < max_pets(premium_unlocked, email)
+    has_premium(premium_unlocked, email) && has_primary_pet
 }
 
 fn escape_html(text: &str) -> String {
@@ -65,7 +52,7 @@ pub fn render_health_records_upsell_compact(stripe_enabled: bool) -> String {
     <span class="premium-upsell-badge" aria-hidden="true">WhiskerWatch Plus</span>
     <h2>Unlock vet records &amp; health history</h2>
   </div>
-  <p class="field-hint">Log vaccines, vet visits, and health notes. Breed care guides above are a separate one-time purchase per breed.</p>
+  <p class="field-hint">Log vaccines, vet visits, and health notes. WhiskerWatch Plus also unlocks full breed care guides.</p>
   <p class="premium-price-line"><strong>{price}</strong> one-time · lifetime access</p>
   <div class="premium-upsell-actions">{checkout}</div>
 </article>"#,
@@ -82,7 +69,7 @@ pub fn render_account_premium_section(
     if has_premium(premium_unlocked, email) {
         return r#"<article class="dashboard-card premium-status-card">
   <h2>WhiskerWatch Plus</h2>
-  <p class="premium-status-active"><span class="premium-upsell-badge premium-upsell-badge-active">Active</span> You have lifetime access to health records, vet logging, and multi-pet profiles.</p>
+  <p class="premium-status-active"><span class="premium-upsell-badge premium-upsell-badge-active">Active</span> You have lifetime access to health records, vet logging, multi-pet profiles, and breed care guides.</p>
 </article>"#
             .to_string();
     }
@@ -99,7 +86,8 @@ pub fn render_account_premium_section(
     <li>Full health &amp; vaccine history</li>
     <li>Vet visit records &amp; notes</li>
     <li>Automated vet calendar reminders</li>
-    <li>Up to 3 cats on one account</li>
+    <li>Unlimited cats on one account</li>
+    <li>All breed care guides unlocked</li>
   </ul>
   <p class="premium-price-line"><strong>{price}</strong> one-time · lifetime access</p>
   <div class="premium-upsell-actions">{checkout}</div>
@@ -124,40 +112,63 @@ pub fn render_multi_pet_section(
 
     if !has_premium(premium_unlocked, email) {
         return format!(
-            r#"<article class="dashboard-card premium-multi-pet-locked">
-  <h2>More cats?</h2>
-  <p class="field-hint">WhiskerWatch Plus lets you track up to 3 cats. Upgrade to add household kitties.</p>
-  <div class="premium-upsell-actions">{}</div>
+            r#"<article class="dashboard-card premium-multi-pet-locked your-cats-card your-cats-card-locked">
+  <div class="your-cats-header">
+    <span class="your-cats-icon" aria-hidden="true">🐱</span>
+    <div>
+      <h2>More cats?</h2>
+      <p class="your-cats-kicker">Build your whisker household</p>
+    </div>
+  </div>
+  <p class="your-cats-blurb">WhiskerWatch Plus lets you track every kitty in your household — each with their own tasks, health notes, and care routine.</p>
+  <div class="premium-upsell-actions your-cats-upgrade-action">{}</div>
 </article>"#,
             render_premium_checkout_button(stripe_enabled),
         );
     }
 
     let pet_count = total_pet_count(has_primary_pet, additional_pet_count);
-    let can_add = can_add_pet(
-        premium_unlocked,
-        email,
-        has_primary_pet,
-        additional_pet_count,
-    );
-
-    let add_action = if can_add {
-        r#"<p class="add-cat-action"><button type="button" class="download-btn add-cat-trigger">Add cat</button></p>"#
+    let has_multiple_cats = additional_pet_count > 0;
+    let household_kicker = if has_multiple_cats {
+        "Multi-kitty household"
     } else {
-        "<p class=\"field-hint\">You've reached the 3-cat limit on WhiskerWatch Plus.</p>"
+        "Single kitty household"
+    };
+    let add_action = r#"<p class="add-cat-action"><button type="button" class="add-cat-btn add-cat-trigger">Add another cat 🐱</button></p>"#;
+
+    let roster = if additional_pets_html.trim().is_empty() {
+        r#"<p class="your-cats-empty"><span class="your-cats-empty-icon" aria-hidden="true">💕</span> Room for more whiskers — add another kitty when you're ready.</p>"#
+            .to_string()
+    } else {
+        format!(
+            r#"<div class="additional-pet-list your-cats-roster">{additional_pets_html}</div>"#,
+            additional_pets_html = additional_pets_html,
+        )
     };
 
     format!(
-        r#"<article class="dashboard-card premium-multi-pet-card">
-  <h2>Your cats</h2>
-  <p class="field-hint">{pet_count} of {max_pets} profiles · Primary: <strong>{primary}</strong></p>
-  <div class="additional-pet-list">{additional_pets_html}</div>
+        r#"<article class="dashboard-card premium-multi-pet-card your-cats-card">
+  <div class="your-cats-header">
+    <span class="your-cats-icon" aria-hidden="true">🐾</span>
+    <div class="your-cats-heading">
+      <h2>Your cats</h2>
+      <p class="your-cats-kicker">{household_kicker}</p>
+    </div>
+    <span class="your-cats-count-badge" aria-label="{pet_count} cat profiles">{pet_count}</span>
+  </div>
+  <p class="your-cats-primary">Caring for <strong>{primary}</strong>{household_note}</p>
+  {roster}
   {add_action}
 </article>"#,
         pet_count = pet_count,
-        max_pets = MAX_PETS_PREMIUM,
+        household_kicker = household_kicker,
         primary = escape_html(primary_pet_name),
-        additional_pets_html = additional_pets_html,
+        household_note = if additional_pets_html.trim().is_empty() {
+            " — and any future fur friends"
+        } else {
+            " plus household friends"
+        },
+        roster = roster,
         add_action = add_action,
     )
 }
@@ -166,16 +177,9 @@ pub fn should_render_add_cat_modal(
     premium_unlocked: bool,
     email: &str,
     has_primary_pet: bool,
-    additional_pet_count: usize,
+    _additional_pet_count: usize,
 ) -> bool {
-    has_primary_pet
-        && has_premium(premium_unlocked, email)
-        && can_add_pet(
-            premium_unlocked,
-            email,
-            has_primary_pet,
-            additional_pet_count,
-        )
+    has_primary_pet && has_premium(premium_unlocked, email)
 }
 
 pub fn render_add_cat_modal() -> String {
@@ -207,8 +211,21 @@ pub fn render_additional_pet_cards(pets: &[(String, String, String)]) -> String 
 
     pets.iter()
         .map(|(name, breed, color)| {
+            let initial = name
+                .chars()
+                .find(|ch| ch.is_alphanumeric())
+                .map(|ch| ch.to_uppercase().to_string())
+                .unwrap_or_else(|| "🐱".to_string());
             format!(
-                r#"<div class="additional-pet-card"><strong>{}</strong> · {} · {}</div>"#,
+                r#"<div class="additional-pet-card your-cat-chip">
+  <span class="your-cat-avatar" aria-hidden="true">{}</span>
+  <div class="your-cat-chip-body">
+    <strong class="your-cat-name">{}</strong>
+    <span class="your-cat-meta">{} · {}</span>
+  </div>
+  <span class="your-cat-paw" aria-hidden="true">🐾</span>
+</div>"#,
+                escape_html(&initial),
                 escape_html(name),
                 escape_html(breed),
                 escape_html(color),

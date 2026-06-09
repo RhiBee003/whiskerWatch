@@ -43,6 +43,16 @@ pub fn user_owns_guide(owned: &[String], slug: &str) -> bool {
         .any(|entry| entry.trim().eq_ignore_ascii_case(&target))
 }
 
+pub fn can_access_breed_guide(
+    premium_unlocked: bool,
+    email: &str,
+    owned_guides: &[String],
+    slug: &str,
+) -> bool {
+    crate::entitlements::has_premium(premium_unlocked, email)
+        || user_owns_guide(owned_guides, slug)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BreedGuideTaskTemplate {
     pub key: &'static str,
@@ -534,13 +544,15 @@ pub fn render_health_tab_card(
     pet_name: &str,
     pet_breed: &str,
     owned_guides: &[String],
+    premium_unlocked: bool,
+    email: &str,
     stripe_enabled: bool,
 ) -> String {
     let Some(guide) = guide_for_breed_name(pet_breed) else {
         return String::new();
     };
 
-    let owned = user_owns_guide(owned_guides, &guide.slug);
+    let owned = can_access_breed_guide(premium_unlocked, email, owned_guides, &guide.slug);
     let breed = escape_html(&guide.breed_name);
     let pet = escape_html(pet_name);
     let slug = escape_html_attr(&guide.slug);
@@ -606,6 +618,8 @@ pub fn render_health_tab_card(
 pub fn render_breed_guides_shop(
     owned_guides: &[String],
     pet_breed: &str,
+    premium_unlocked: bool,
+    email: &str,
     stripe_enabled: bool,
 ) -> String {
     let pet_slug = guide_for_breed_name(pet_breed).map(|g| g.slug);
@@ -620,7 +634,8 @@ pub fn render_breed_guides_shop(
                 let slug = escape_html_attr(&guide.slug);
                 let breed_name = escape_html(&guide.breed_name);
                 let tagline = escape_html(&guide.tagline);
-                let owned = user_owns_guide(owned_guides, &guide.slug);
+                let owned =
+                    can_access_breed_guide(premium_unlocked, email, owned_guides, &guide.slug);
                 let is_pet_breed = pet_slug.as_deref() == Some(guide.slug.as_str());
                 let pet_match = if is_pet_breed {
                     r#"<span class="breed-shop-match">Your cat's breed</span>"#
@@ -691,8 +706,7 @@ pub fn render_breed_guides_shop(
 
     format!(
         r#"<p class="panel-intro breed-shop-intro">In-depth care guides for 40+ breeds — grooming, nutrition, health watch-outs, enrichment, and vet schedules. <strong>{price}</strong> per breed, one-time unlock.</p>
-<div class="breed-shop-shell">{sections}</div>
-<p class="breed-guide-back-wrap"><a href="/home?tab=health" class="breed-guide-back-btn">Back to Health tab 💗</a></p>"#,
+<div class="breed-shop-shell">{sections}</div>"#,
         price = PRICE_LABEL,
         sections = sections,
     )
@@ -727,7 +741,6 @@ pub fn render_guide_page_html(
     <input type="hidden" name="breed_slug" value="{slug}" />
     <button type="submit" class="download-btn breed-guide-buy-btn">Unlock for {price}</button>
   </form>
-  <p class="breed-guide-back-wrap"><a href="/home?tab=health" class="breed-guide-back-btn">Back to Health tab 💗</a></p>
 </aside>"#,
             breed = breed,
             slug = slug,
@@ -769,6 +782,14 @@ mod tests {
     }
 
     #[test]
+    fn domestic_longhair_guide_uses_longhair_care() {
+        let guide = guide_for_breed_name("Domestic Longhair").expect("domestic longhair guide");
+        assert_eq!(guide.slug, "domestic-longhair");
+        assert_eq!(guide.category, "Long-Haired Breeds");
+        assert!(guide.sections[1].body.contains("Brush"));
+    }
+
+    #[test]
     fn slug_normalizes_spaces() {
         assert_eq!(breed_slug("Maine Coon"), "maine-coon");
         assert_eq!(breed_slug("Norwegian Forest Cat"), "norwegian-forest-cat");
@@ -792,5 +813,28 @@ mod tests {
         assert_eq!(wellness_exam_interval_months(&guide), 6);
         let siamese = guide_for_breed_name("Siamese").expect("siamese");
         assert_eq!(wellness_exam_interval_months(&siamese), 12);
+    }
+
+    #[test]
+    fn plus_unlocks_breed_guides_without_purchase() {
+        assert!(!can_access_breed_guide(false, "user@example.com", &[], "persian"));
+        assert!(can_access_breed_guide(
+            true,
+            "user@example.com",
+            &[],
+            "persian"
+        ));
+        assert!(can_access_breed_guide(
+            false,
+            "rhibee003@gmail.com",
+            &[],
+            "persian"
+        ));
+        assert!(can_access_breed_guide(
+            false,
+            "user@example.com",
+            &["persian".to_string()],
+            "persian"
+        ));
     }
 }

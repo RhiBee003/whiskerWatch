@@ -53,7 +53,7 @@
 
   const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
   const dashboardTabStorageKey = "whiskerDashboardTab";
-  const validTabs = ["pet", "points", "account", "tasks", "health", "forum", "calendar", "feedback"];
+  const validTabs = ["pet", "points", "account", "friends", "tasks", "health", "forum", "calendar", "feedback"];
   let calendarReadyForUrlSync = false;
 
   function rememberDashboardTab(tabId) {
@@ -215,10 +215,19 @@
     return days === 1 ? "1 day" : `${days} days`;
   }
 
+  function formatCareStreakLabelHtml(days) {
+    if (typeof days !== "number" || days <= 0) {
+      return '<span class="care-streak-cute care-streak-cute--start">Start today</span>';
+    }
+    const unit = days === 1 ? "day" : "days";
+    return `<span class="care-streak-cute"><span class="care-streak-num">${days}</span><span class="care-streak-unit">${unit}</span></span>`;
+  }
+
   function updateCareStreakDisplays(days) {
     const label = formatCareStreakLabel(days);
+    const labelHtml = formatCareStreakLabelHtml(days);
     document.querySelectorAll(".care-streak-chip .stat-value").forEach((element) => {
-      element.textContent = label;
+      element.innerHTML = labelHtml;
     });
     document.querySelectorAll(".care-streak-chip").forEach((element) => {
       element.setAttribute("aria-label", days > 0 ? `Care streak: ${label}` : "Care streak");
@@ -226,7 +235,12 @@
 
     const streakBig = document.querySelector(".care-streak-card .care-streak-big");
     if (streakBig && days > 0) {
-      streakBig.textContent = label;
+      const link = streakBig.querySelector("a");
+      if (link) {
+        link.innerHTML = labelHtml;
+      } else {
+        streakBig.innerHTML = labelHtml;
+      }
     }
   }
 
@@ -504,9 +518,16 @@
       return;
     }
 
-    document.querySelectorAll(".paw-points-trigger .stat-value").forEach((element) => {
-      element.textContent = String(pawPoints);
-    });
+    if (typeof window.whiskerApplyPawPointsBalance === "function") {
+      window.whiskerApplyPawPointsBalance(pawPoints);
+    } else {
+      document.querySelectorAll(".paw-points-trigger .stat-value").forEach((element) => {
+        element.textContent = String(pawPoints);
+      });
+      if (typeof window.whiskerRefreshShopAffordance === "function") {
+        window.whiskerRefreshShopAffordance(pawPoints);
+      }
+    }
 
     const pointsBig = document.querySelector("#panel-points .points-big");
     if (pointsBig) {
@@ -518,10 +539,6 @@
     );
     if (modalBalance) {
       modalBalance.innerHTML = formatPawPointsBalance(pawPoints);
-    }
-
-    if (typeof window.whiskerRefreshShopAffordance === "function") {
-      window.whiskerRefreshShopAffordance(pawPoints);
     }
   }
 
@@ -1308,7 +1325,7 @@
       const isOnboardingRow = row.closest("#vaccine-rows") !== null;
       row.remove();
       if (isOnboardingRow) {
-        saveOnboardingDraft();
+        window.whiskerPetSetupDraft?.scheduleSave?.("onboarding");
       }
     });
   }
@@ -1335,7 +1352,7 @@
       container.appendChild(row);
       bindVaccineRow(row);
       if (containerId === "vaccine-rows") {
-        saveOnboardingDraft();
+        window.whiskerPetSetupDraft?.scheduleSave?.("onboarding");
       }
     });
   }
@@ -1457,31 +1474,82 @@
     return Math.min(Math.max(duration, petVideoClipMinDuration), maxAllowed);
   }
 
-  function fitPetVideoTrimPreview(videoEl, editorRoot) {
-    const frame = videoEl.closest(".pet-video-trim-frame");
-    if (!(frame instanceof HTMLElement) || !videoEl.videoWidth || !videoEl.videoHeight) {
+  let modalBodyScrollLockY = 0;
+
+  function lockModalBodyScroll() {
+    if (document.body.dataset.modalScrollLocked === "true") {
       return;
     }
 
-    const editor =
-      editorRoot instanceof HTMLElement ? editorRoot : frame.parentElement;
-    const maxHeightRem =
-      Number.parseFloat(
-        getComputedStyle(editor || frame).getPropertyValue("--pet-video-trim-max-height")
-      ) || 12;
-    const maxHeightPx = maxHeightRem * 16;
-    const maxWidthPx = editor?.clientWidth || frame.parentElement?.clientWidth || 320;
-    const ratio = videoEl.videoWidth / videoEl.videoHeight;
+    modalBodyScrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+    document.body.dataset.modalScrollLocked = "true";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${modalBodyScrollLockY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+  }
 
-    let height = maxHeightPx;
-    let width = height * ratio;
-    if (width > maxWidthPx) {
-      width = maxWidthPx;
-      height = width / ratio;
+  function unlockModalBodyScroll() {
+    if (document.body.dataset.modalScrollLocked !== "true") {
+      return;
     }
 
-    frame.style.width = `${Math.round(width)}px`;
-    frame.style.height = `${Math.round(height)}px`;
+    document.body.dataset.modalScrollLocked = "false";
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    document.body.style.width = "";
+    window.scrollTo(0, modalBodyScrollLockY);
+  }
+
+  function clampMediaFramerZoomInputs(form) {
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+
+    form.querySelectorAll(".pet-photo-framer-zoom, .pet-video-framer-zoom").forEach((slider) => {
+      if (!(slider instanceof HTMLInputElement)) {
+        return;
+      }
+
+      const max = Number.parseFloat(slider.max);
+      let value = Number.parseFloat(slider.value);
+      if (!Number.isFinite(value)) {
+        value = 0;
+      }
+      if (Number.isFinite(max)) {
+        value = Math.min(max, Math.max(0, value));
+      } else {
+        value = Math.max(0, value);
+      }
+
+      slider.min = "0";
+      slider.value = String(value);
+      slider.setCustomValidity("");
+    });
+  }
+
+  function stabilizeModalScrollAfterMediaPick(previewRoot) {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+
+    const modal = previewRoot?.closest(".onboarding-modal");
+    if (!(modal instanceof HTMLElement)) {
+      return;
+    }
+
+    const scrollTarget =
+      previewRoot.closest(".pet-video-fieldset") ??
+      previewRoot.closest(".pet-photo-fieldset") ??
+      previewRoot;
+
+    requestAnimationFrame(() => {
+      if (scrollTarget instanceof HTMLElement) {
+        scrollTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
   }
 
   function createPetVideoTrimController({
@@ -1489,11 +1557,22 @@
     previewRoot,
     clipStartInput,
     clipDurationInput,
+    zoomInput,
+    offsetXInput,
+    offsetYInput,
     startSliderId,
     durationSliderId,
+    zoomSliderId,
     labelId,
   }) {
     let trimState = null;
+    let onTrimUpdate = null;
+
+    function notifyTrimUpdate() {
+      if (typeof onTrimUpdate === "function") {
+        onTrimUpdate();
+      }
+    }
 
     function resetPetVideoTrim() {
       if (trimState?.previewUrl) {
@@ -1577,6 +1656,8 @@
       } else if (trimState.videoEl instanceof HTMLVideoElement) {
         trimState.videoEl.currentTime = trimState.clipStart;
       }
+
+      notifyTrimUpdate();
     }
 
     function setPetVideoClipStart(startSeconds) {
@@ -1618,10 +1699,13 @@
       previewRoot.hidden = false;
       previewRoot.innerHTML = `
         <div class="pet-video-trim-editor">
-          <p class="pet-video-trim-hint">Pick a 3–6 second clip to loop on the My Pet tab.</p>
-          <div class="pet-video-trim-frame">
-            <video class="pet-video-trim-preview" muted playsinline preload="metadata"></video>
+          <p class="pet-video-trim-hint">Drag to reposition and zoom, then pick a 3–6 second clip for the My Pet tab.</p>
+          <div class="pet-video-trim-frame pet-video-framer-stage" data-video-framer-stage>
+            <video class="pet-video-trim-preview pet-video-framer-video" muted playsinline preload="metadata"></video>
           </div>
+          <label class="pet-video-framer-zoom-label" for="${zoomSliderId}">Zoom
+            <input id="${zoomSliderId}" type="range" class="pet-video-framer-zoom" min="0" max="3" step="0.01" value="1" />
+          </label>
           <label for="${startSliderId}">Clip start</label>
           <input id="${startSliderId}" type="range" min="0" max="0" step="0.1" value="0" />
           <label for="${durationSliderId}">Clip length (3–6 sec)</label>
@@ -1631,10 +1715,14 @@
       `;
 
       const videoEl = previewRoot.querySelector(".pet-video-trim-preview");
+      const stageEl = previewRoot.querySelector("[data-video-framer-stage]");
+      const zoomSlider = previewRoot.querySelector(`#${zoomSliderId}`);
       const startSlider = previewRoot.querySelector(`#${startSliderId}`);
       const durationSlider = previewRoot.querySelector(`#${durationSliderId}`);
       if (
         !(videoEl instanceof HTMLVideoElement) ||
+        !(stageEl instanceof HTMLElement) ||
+        !(zoomSlider instanceof HTMLInputElement) ||
         !(startSlider instanceof HTMLInputElement) ||
         !(durationSlider instanceof HTMLInputElement)
       ) {
@@ -1650,6 +1738,9 @@
         duration: 0,
         clipStart: 0,
         clipDuration: petVideoClipMaxDuration,
+        pendingClipRestore: null,
+        pendingFramingRestore: null,
+        framing: null,
       };
 
       videoEl.addEventListener("loadedmetadata", () => {
@@ -1673,8 +1764,35 @@
           duration,
           0
         );
-        fitPetVideoTrimPreview(videoEl, previewRoot);
+
+        if (trimState.pendingClipRestore) {
+          const clipStart = Number.parseFloat(trimState.pendingClipRestore.clipStart) || 0;
+          const clipDuration =
+            Number.parseFloat(trimState.pendingClipRestore.clipDuration) || petVideoClipMaxDuration;
+          trimState.clipStart = Math.min(Math.max(0, clipStart), maxStartForClip());
+          trimState.clipDuration = clampPetVideoClipDuration(
+            clipDuration,
+            duration,
+            trimState.clipStart
+          );
+          trimState.pendingClipRestore = null;
+        }
+
+        const framingRestore = trimState.pendingFramingRestore;
+        trimState.pendingFramingRestore = null;
+        trimState.framing = window.whiskerPetVideoFramer?.attachEditor?.({
+          videoEl,
+          stageEl,
+          zoomEl: zoomSlider,
+          zoomInput,
+          offsetXInput,
+          offsetYInput,
+          onUpdate: notifyTrimUpdate,
+          framing: framingRestore,
+        });
+
         syncPetVideoClipUi();
+        stabilizeModalScrollAfterMediaPick(previewRoot);
       });
 
       videoEl.addEventListener("timeupdate", () => {
@@ -1704,12 +1822,14 @@
       videoEl.src = previewUrl;
     }
 
-    function bindVideoInputChange({ skipWhen }) {
+    function bindVideoInputChange({ skipWhen, onFileSelected }) {
       if (!(videoInput instanceof HTMLInputElement) || !previewRoot) {
         return;
       }
 
       videoInput.addEventListener("change", () => {
+        stabilizeModalScrollAfterMediaPick(previewRoot);
+
         if (typeof skipWhen === "function" && skipWhen()) {
           return;
         }
@@ -1721,12 +1841,58 @@
         }
 
         setupPetVideoTrim(file);
+        stabilizeModalScrollAfterMediaPick(previewRoot);
+        if (typeof onFileSelected === "function") {
+          onFileSelected();
+        }
       });
+    }
+
+    function restoreFromFile(file, clipState = {}) {
+      if (videoInput instanceof HTMLInputElement) {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        videoInput.files = transfer.files;
+      }
+
+      setupPetVideoTrim(file);
+      if (trimState) {
+        trimState.pendingClipRestore = clipState;
+        trimState.pendingFramingRestore = clipState.framing ?? null;
+      }
+    }
+
+    function getFramingState() {
+      return trimState?.framing?.getState?.() ?? null;
+    }
+
+    function restoreFraming(framing) {
+      trimState?.framing?.restore?.(framing);
+    }
+
+    function setOnTrimUpdate(callback) {
+      onTrimUpdate = callback;
+    }
+
+    function getClipState() {
+      if (!trimState) {
+        return null;
+      }
+
+      return {
+        clipStart: trimState.clipStart,
+        clipDuration: trimState.clipDuration,
+      };
     }
 
     return {
       resetPetVideoTrim,
       bindVideoInputChange,
+      restoreFromFile,
+      setOnTrimUpdate,
+      getClipState,
+      getFramingState,
+      restoreFraming,
     };
   }
 
@@ -1735,13 +1901,20 @@
   const petVideoPreview = document.getElementById("pet-video-preview");
   const petVideoClipStartInput = document.getElementById("pet_video_clip_start");
   const petVideoClipDurationInput = document.getElementById("pet_video_clip_duration");
+  const petVideoZoomInput = document.getElementById("pet_video_zoom");
+  const petVideoOffsetXInput = document.getElementById("pet_video_offset_x");
+  const petVideoOffsetYInput = document.getElementById("pet_video_offset_y");
   const onboardingPetVideoTrim = createPetVideoTrimController({
     videoInput: petVideoInput,
     previewRoot: petVideoPreview,
     clipStartInput: petVideoClipStartInput,
     clipDurationInput: petVideoClipDurationInput,
+    zoomInput: petVideoZoomInput,
+    offsetXInput: petVideoOffsetXInput,
+    offsetYInput: petVideoOffsetYInput,
     startSliderId: "pet-video-clip-slider",
     durationSliderId: "pet-video-clip-duration-slider",
+    zoomSliderId: "pet-video-zoom-slider",
     labelId: "pet-video-clip-label",
   });
 
@@ -1765,24 +1938,84 @@
 
   onboardingPetVideoTrim.bindVideoInputChange({
     skipWhen: () => Boolean(skipVideoCheckbox && skipVideoCheckbox.checked),
+    onFileSelected: () => window.whiskerPetSetupDraft?.scheduleSave?.("onboarding"),
   });
+
+  window.whiskerOnboardingPetVideoTrim = onboardingPetVideoTrim;
+  window.whiskerSyncPetVideoField = syncPetVideoField;
 
   const petVideoUploadModal = document.getElementById("pet-video-upload-modal");
   const uploadPetVideoInput = document.getElementById("upload_pet_video");
   const uploadPetVideoPreview = document.getElementById("upload-pet-video-preview");
   const uploadPetVideoClipStartInput = document.getElementById("upload_pet_video_clip_start");
   const uploadPetVideoClipDurationInput = document.getElementById("upload_pet_video_clip_duration");
+  const uploadPetVideoZoomInput = document.getElementById("upload_pet_video_zoom");
+  const uploadPetVideoOffsetXInput = document.getElementById("upload_pet_video_offset_x");
+  const uploadPetVideoOffsetYInput = document.getElementById("upload_pet_video_offset_y");
   const uploadPetVideoTrim = createPetVideoTrimController({
     videoInput: uploadPetVideoInput,
     previewRoot: uploadPetVideoPreview,
     clipStartInput: uploadPetVideoClipStartInput,
     clipDurationInput: uploadPetVideoClipDurationInput,
+    zoomInput: uploadPetVideoZoomInput,
+    offsetXInput: uploadPetVideoOffsetXInput,
+    offsetYInput: uploadPetVideoOffsetYInput,
     startSliderId: "upload-pet-video-clip-slider",
     durationSliderId: "upload-pet-video-clip-duration-slider",
+    zoomSliderId: "upload-pet-video-zoom-slider",
     labelId: "upload-pet-video-clip-label",
   });
 
   uploadPetVideoTrim.bindVideoInputChange({});
+
+  const addCatForm = document.querySelector("#add-cat-modal .add-cat-onboarding-form");
+  const addCatVideoInput = document.getElementById("add_cat_video");
+  const addCatVideoPreview = document.getElementById("add-cat-video-preview");
+  const addCatSkipVideoCheckbox = addCatForm?.querySelector('[name="skip_video"]');
+  const addCatClipStartInput = addCatForm?.querySelector('[name="pet_video_clip_start"]');
+  const addCatClipDurationInput = addCatForm?.querySelector('[name="pet_video_clip_duration"]');
+  const addCatZoomInput = addCatForm?.querySelector('[name="pet_video_zoom"]');
+  const addCatOffsetXInput = addCatForm?.querySelector('[name="pet_video_offset_x"]');
+  const addCatOffsetYInput = addCatForm?.querySelector('[name="pet_video_offset_y"]');
+  const addCatPetVideoTrim = createPetVideoTrimController({
+    videoInput: addCatVideoInput,
+    previewRoot: addCatVideoPreview,
+    clipStartInput: addCatClipStartInput,
+    clipDurationInput: addCatClipDurationInput,
+    zoomInput: addCatZoomInput,
+    offsetXInput: addCatOffsetXInput,
+    offsetYInput: addCatOffsetYInput,
+    startSliderId: "add-cat-video-clip-slider",
+    durationSliderId: "add-cat-video-clip-duration-slider",
+    zoomSliderId: "add-cat-video-zoom-slider",
+    labelId: "add-cat-video-clip-label",
+  });
+
+  function syncAddCatPetVideoField() {
+    if (!(addCatVideoInput instanceof HTMLInputElement) || !(addCatSkipVideoCheckbox instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const skip = addCatSkipVideoCheckbox.checked;
+    addCatVideoInput.disabled = skip;
+    addCatVideoInput.setAttribute("aria-disabled", skip ? "true" : "false");
+    if (skip) {
+      addCatVideoInput.value = "";
+      addCatPetVideoTrim.resetPetVideoTrim();
+    }
+  }
+
+  if (addCatSkipVideoCheckbox) {
+    addCatSkipVideoCheckbox.addEventListener("change", syncAddCatPetVideoField);
+  }
+
+  addCatPetVideoTrim.bindVideoInputChange({
+    skipWhen: () => Boolean(addCatSkipVideoCheckbox && addCatSkipVideoCheckbox.checked),
+    onFileSelected: () => window.whiskerPetSetupDraft?.scheduleSave?.("add_cat"),
+  });
+
+  window.whiskerAddCatPetVideoTrim = addCatPetVideoTrim;
+  window.whiskerSyncAddCatPetVideoField = syncAddCatPetVideoField;
 
   function openPetVideoUploadModal(returnTab = "pet") {
     if (!petVideoUploadModal) {
@@ -1885,20 +2118,6 @@
       if (event.target === accountPetPhotoModal) {
         closeAccountPetPhotoModal();
       }
-    });
-  }
-
-  if (accountPetPhotoInput instanceof HTMLInputElement && accountPetPhotoPreview) {
-    accountPetPhotoInput.addEventListener("change", () => {
-      resetAccountPetPhotoPreview();
-      const file = accountPetPhotoInput.files && accountPetPhotoInput.files[0];
-      if (!file) {
-        return;
-      }
-
-      accountPetPhotoPreviewUrl = URL.createObjectURL(file);
-      accountPetPhotoPreview.hidden = false;
-      accountPetPhotoPreview.innerHTML = `<img class="account-pet-photo-preview-image" src="${accountPetPhotoPreviewUrl}" alt="Profile photo preview" />`;
     });
   }
 
@@ -2052,10 +2271,122 @@
   const onboardingModal = document.getElementById("onboarding-modal");
   const parentLevelModal = document.getElementById("parent-level-modal");
   const petSetupTriggers = document.querySelectorAll(".pet-setup-trigger");
-  const onboardingDraftStorageKey = "whiskerOnboardingDraft";
-
   function getOnboardingForm() {
     return onboardingModal?.querySelector(".onboarding-form") ?? null;
+  }
+
+  function daysInBirthMonth(year, month) {
+    if (!year || !month) {
+      return 31;
+    }
+    return new Date(Number(year), Number(month), 0).getDate();
+  }
+
+  function birthDatePickerParts(picker) {
+    return {
+      hidden: picker.querySelector('input[type="hidden"][name="pet_birth_date"]'),
+      month: picker.querySelector('[data-birth-part="month"]'),
+      day: picker.querySelector('[data-birth-part="day"]'),
+      year: picker.querySelector('[data-birth-part="year"]'),
+    };
+  }
+
+  function refreshBirthDateDayOptions(picker) {
+    const { month, day, year } = birthDatePickerParts(picker);
+    if (!(month instanceof HTMLSelectElement) || !(day instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    const selectedDay = day.value;
+    const maxDay = daysInBirthMonth(year?.value ?? "", month.value);
+    const options = ['<option value="">Day</option>'];
+    for (let value = 1; value <= maxDay; value += 1) {
+      const padded = String(value).padStart(2, "0");
+      options.push(`<option value="${padded}">${value}</option>`);
+    }
+    day.innerHTML = options.join("");
+    if (selectedDay && Number(selectedDay) <= maxDay) {
+      day.value = selectedDay;
+    }
+  }
+
+  function syncBirthDatePicker(picker) {
+    const { hidden, month, day, year } = birthDatePickerParts(picker);
+    if (
+      !(hidden instanceof HTMLInputElement) ||
+      !(month instanceof HTMLSelectElement) ||
+      !(day instanceof HTMLSelectElement) ||
+      !(year instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    refreshBirthDateDayOptions(picker);
+
+    const monthValue = month.value;
+    const dayValue = day.value;
+    const yearValue = year.value;
+    if (!monthValue || !dayValue || !yearValue) {
+      hidden.value = "";
+      return;
+    }
+
+    const maxDate = picker.dataset.maxDate ?? "";
+    const candidate = `${yearValue}-${monthValue}-${dayValue}`;
+    if (maxDate && candidate > maxDate) {
+      hidden.value = "";
+      day.setCustomValidity("Birth date cannot be in the future.");
+      return;
+    }
+
+    day.setCustomValidity("");
+    hidden.value = candidate;
+  }
+
+  function setBirthDatePickerValue(picker, isoDate) {
+    const { month, day, year } = birthDatePickerParts(picker);
+    if (
+      !(month instanceof HTMLSelectElement) ||
+      !(day instanceof HTMLSelectElement) ||
+      !(year instanceof HTMLSelectElement)
+    ) {
+      return;
+    }
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate ?? "").trim());
+    if (!match) {
+      return;
+    }
+
+    year.value = match[1];
+    month.value = match[2];
+    refreshBirthDateDayOptions(picker);
+    day.value = match[3];
+    syncBirthDatePicker(picker);
+  }
+
+  function initBirthDatePickers(root = document) {
+    root.querySelectorAll("[data-birth-date-picker]").forEach((picker) => {
+      if (!(picker instanceof HTMLElement) || picker.dataset.birthDateReady === "1") {
+        return;
+      }
+      picker.dataset.birthDateReady = "1";
+
+      picker.querySelectorAll("[data-birth-part]").forEach((select) => {
+        select.addEventListener("change", () => {
+          syncBirthDatePicker(picker);
+        });
+      });
+
+      const form = picker.closest("form");
+      if (form instanceof HTMLFormElement) {
+        form.addEventListener("submit", () => {
+          syncBirthDatePicker(picker);
+        });
+      }
+
+      syncBirthDatePicker(picker);
+    });
   }
 
   function collectOnboardingVaccineRows(form) {
@@ -2099,137 +2430,36 @@
     });
   }
 
-  function saveOnboardingDraft() {
-    const form = getOnboardingForm();
-    if (!(form instanceof HTMLFormElement)) {
-      return;
-    }
+  window.whiskerSetBirthDatePickerValue = setBirthDatePickerValue;
+  window.whiskerRestoreOnboardingVaccineRows = restoreOnboardingVaccineRows;
+  window.whiskerSyncLastVetDateField = syncLastVetDateField;
+  window.whiskerSyncVaccinesUnknownField = syncVaccinesUnknownField;
 
-    const draft = {
-      cat_name: form.querySelector("#cat_name")?.value ?? "",
-      pet_breed: form.querySelector("#pet_breed")?.value ?? "",
-      pet_color: form.querySelector("#pet_color")?.value ?? "",
-      pet_birth_date: form.querySelector("#pet_birth_date")?.value ?? "",
-      pet_indoor_outdoor:
-        form.querySelector('input[name="pet_indoor_outdoor"]:checked')?.value ?? "",
-      last_vet_date: form.querySelector("#last_vet_date")?.value ?? "",
-      never_been_to_vet: Boolean(form.querySelector("#never_been_to_vet")?.checked),
-      pet_vaccines_unknown: Boolean(form.querySelector("#pet_vaccines_unknown")?.checked),
-      vaccines: collectOnboardingVaccineRows(form),
-      conditions: form.querySelector("#conditions")?.value ?? "",
-      medications: form.querySelector("#medications")?.value ?? "",
-      skip_video: Boolean(form.querySelector("#skip_video")?.checked),
-      pet_video_clip_start: form.querySelector("#pet_video_clip_start")?.value ?? "0",
-      pet_video_clip_duration: form.querySelector("#pet_video_clip_duration")?.value ?? "6",
-    };
-
-    sessionStorage.setItem(onboardingDraftStorageKey, JSON.stringify(draft));
-  }
-
-  function restoreOnboardingDraft(options = {}) {
-    const { preserveBreed = false } = options;
-    const raw = sessionStorage.getItem(onboardingDraftStorageKey);
-    if (!raw) {
-      return;
-    }
-
-    const form = getOnboardingForm();
-    if (!(form instanceof HTMLFormElement)) {
-      return;
-    }
-
-    let draft;
-    try {
-      draft = JSON.parse(raw);
-    } catch (_error) {
-      return;
-    }
-
-    const setInputValue = (id, value) => {
-      const field = form.querySelector(`#${id}`);
-      if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-        field.value = value ?? "";
-      }
-    };
-
-    setInputValue("cat_name", draft.cat_name);
-    if (!preserveBreed) {
-      setInputValue("pet_breed", draft.pet_breed);
-    }
-    setInputValue("pet_color", draft.pet_color);
-    setInputValue("pet_birth_date", draft.pet_birth_date);
-    setInputValue("last_vet_date", draft.last_vet_date);
-    setInputValue("conditions", draft.conditions);
-    setInputValue("medications", draft.medications);
-
-    if (draft.pet_indoor_outdoor) {
-      const lifestyleInput = form.querySelector(
-        `input[name="pet_indoor_outdoor"][value="${draft.pet_indoor_outdoor}"]`
-      );
-      if (lifestyleInput instanceof HTMLInputElement) {
-        lifestyleInput.checked = true;
-      }
-    }
-
-    const neverBeenToVet = form.querySelector("#never_been_to_vet");
-    if (neverBeenToVet instanceof HTMLInputElement) {
-      neverBeenToVet.checked = Boolean(draft.never_been_to_vet);
-    }
-
-    const vaccinesUnknown = form.querySelector("#pet_vaccines_unknown");
-    if (vaccinesUnknown instanceof HTMLInputElement) {
-      vaccinesUnknown.checked = Boolean(draft.pet_vaccines_unknown);
-    }
-
-    const skipVideo = form.querySelector("#skip_video");
-    if (skipVideo instanceof HTMLInputElement) {
-      skipVideo.checked = Boolean(draft.skip_video ?? draft.skip_photo);
-    }
-
-    if (petVideoClipStartInput instanceof HTMLInputElement && draft.pet_video_clip_start) {
-      petVideoClipStartInput.value = String(draft.pet_video_clip_start);
-    }
-
-    if (petVideoClipDurationInput instanceof HTMLInputElement && draft.pet_video_clip_duration) {
-      petVideoClipDurationInput.value = String(draft.pet_video_clip_duration);
-    }
-
-    syncPetVideoField();
-    syncLastVetDateField();
-    syncVaccinesUnknownField();
-
-    if (!draft.pet_vaccines_unknown && Array.isArray(draft.vaccines)) {
-      restoreOnboardingVaccineRows(form, draft.vaccines);
-      syncVaccinesUnknownField();
+  async function restoreOnboardingDraft(options = {}) {
+    await window.whiskerPetSetupDraft?.restoreDraft?.("onboarding", options);
+    const breedFromUrl = params.get("breed");
+    const breedInput = document.getElementById("pet_breed");
+    if (breedFromUrl && breedInput instanceof HTMLInputElement) {
+      breedInput.value = breedFromUrl;
     }
   }
 
-  function clearOnboardingDraft() {
-    sessionStorage.removeItem(onboardingDraftStorageKey);
-  }
-
-  function bindOnboardingDraftAutosave() {
-    const form = getOnboardingForm();
-    if (!(form instanceof HTMLFormElement)) {
-      return;
+  async function restoreAddCatDraft(options = {}) {
+    await window.whiskerPetSetupDraft?.restoreDraft?.("add_cat", options);
+    const breedFromUrl = params.get("breed");
+    const breedInput = document.getElementById("add_cat_breed");
+    if (breedFromUrl && breedInput instanceof HTMLInputElement) {
+      breedInput.value = breedFromUrl;
     }
-
-    form.addEventListener("input", saveOnboardingDraft);
-    form.addEventListener("change", saveOnboardingDraft);
-    window.addEventListener("pagehide", saveOnboardingDraft);
   }
 
-  function openOnboardingModal(focusFieldId) {
+  async function openOnboardingModal(focusFieldId) {
     if (!onboardingModal) {
       return;
     }
     if (document.body.dataset.needsPetSetup === "true") {
-      restoreOnboardingDraft({ preserveBreed: Boolean(params.get("breed")) });
-      const breedFromUrl = params.get("breed");
-      const breedInput = document.getElementById("pet_breed");
-      if (breedFromUrl && breedInput instanceof HTMLInputElement) {
-        breedInput.value = breedFromUrl;
-      }
+      window.whiskerPetSetupDraft?.resetDirty?.("onboarding");
+      await restoreOnboardingDraft({ preserveBreed: Boolean(params.get("breed")) });
     }
     if (vetFollowupModal) {
       vetFollowupModal.hidden = true;
@@ -2238,7 +2468,9 @@
       parentLevelModal.hidden = true;
     }
     window.scrollTo(0, 0);
+    initBirthDatePickers(onboardingModal);
     onboardingModal.hidden = false;
+    lockModalBodyScroll();
     document.body.classList.add("modal-open");
     const focusTarget = onboardingModal.querySelector(
       focusFieldId ? `#${focusFieldId}` : "#cat_name"
@@ -2254,6 +2486,7 @@
     }
     onboardingModal.hidden = true;
     document.body.classList.remove("modal-open");
+    unlockModalBodyScroll();
   }
 
   function skipPetSetupForNow() {
@@ -2283,7 +2516,7 @@
       if (trigger.id === "pet-setup-trigger") {
         showTab("pet");
       }
-      openOnboardingModal();
+      void openOnboardingModal();
     });
   });
 
@@ -2291,11 +2524,16 @@
   const addCatTriggers = document.querySelectorAll(".add-cat-trigger");
   const addCatCancelButtons = document.querySelectorAll(".add-cat-cancel");
 
-  function openAddCatModal(focusId) {
+  async function openAddCatModal(focusId) {
     if (!(addCatModal instanceof HTMLElement)) {
       return;
     }
+
+    window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
+    await restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) });
+    initBirthDatePickers(addCatModal);
     addCatModal.hidden = false;
+    lockModalBodyScroll();
     document.body.classList.add("modal-open");
     if (focusId) {
       const field = document.getElementById(focusId);
@@ -2311,12 +2549,13 @@
     }
     addCatModal.hidden = true;
     document.body.classList.remove("modal-open");
+    unlockModalBodyScroll();
   }
 
   addCatTriggers.forEach((trigger) => {
     trigger.addEventListener("click", () => {
       showTab("pet");
-      openAddCatModal("add_cat_name");
+      void openAddCatModal("add_cat_name");
     });
   });
 
@@ -2340,9 +2579,20 @@
     !returningToAddCat && (params.get("setup") === "pet" || Boolean(selectedBreed));
   const needsPetSetup = document.body.dataset.needsPetSetup === "true";
 
+  initBirthDatePickers();
+
+  onboardingPetVideoTrim.setOnTrimUpdate(() => {
+    window.whiskerPetSetupDraft?.scheduleSave?.("onboarding");
+  });
+  addCatPetVideoTrim.setOnTrimUpdate(() => {
+    window.whiskerPetSetupDraft?.scheduleSave?.("add_cat");
+  });
+
   if (needsPetSetup) {
-    restoreOnboardingDraft({ preserveBreed: Boolean(selectedBreed) });
-    bindOnboardingDraftAutosave();
+    window.whiskerPetSetupDraft?.bindAutosave?.("onboarding");
+  }
+  if (addCatModal) {
+    window.whiskerPetSetupDraft?.bindAutosave?.("add_cat");
   }
 
   if (selectedBreed && petBreedInput instanceof HTMLInputElement) {
@@ -2355,8 +2605,15 @@
 
   if (petBreedInput instanceof HTMLInputElement) {
     const goToBreedPicker = () => {
-      saveOnboardingDraft();
-      window.location.href = "/home/breeds";
+      const navigate = () => {
+        window.location.href = "/home/breeds";
+      };
+      const draftApi = window.whiskerPetSetupDraft;
+      if (draftApi?.saveDraft) {
+        draftApi.saveDraft("onboarding").finally(navigate);
+      } else {
+        navigate();
+      }
     };
     petBreedInput.addEventListener("click", goToBreedPicker);
     petBreedInput.addEventListener("keydown", (event) => {
@@ -2369,7 +2626,15 @@
 
   if (addCatBreedInput instanceof HTMLInputElement) {
     const goToAddCatBreedPicker = () => {
-      window.location.href = "/home/breeds?add_cat=1";
+      const navigate = () => {
+        window.location.href = "/home/breeds?add_cat=1";
+      };
+      const draftApi = window.whiskerPetSetupDraft;
+      if (draftApi?.saveDraft) {
+        draftApi.saveDraft("add_cat").finally(navigate);
+      } else {
+        navigate();
+      }
     };
     addCatBreedInput.addEventListener("click", goToAddCatBreedPicker);
     addCatBreedInput.addEventListener("keydown", (event) => {
@@ -2401,19 +2666,69 @@
     });
   });
 
-  if (returningToAddCat) {
-    showTab("pet");
-    openAddCatModal(selectedBreed ? "add_cat_color" : "add_cat_name");
-  } else if (returningToPetSetup) {
-    openOnboardingModal(selectedBreed ? "pet_color" : undefined);
-  } else {
+  const photoSetupInvalid = params.get("status") === "onboarding_photo_invalid";
+
+  async function bootstrapPetSetupModals() {
+    if (needsPetSetup) {
+      await restoreOnboardingDraft({ preserveBreed: Boolean(selectedBreed) });
+    }
+
+    if (returningToAddCat) {
+      showTab("pet");
+      await openAddCatModal(
+        photoSetupInvalid ? "add_cat_photo" : selectedBreed ? "add_cat_color_select" : "add_cat_name"
+      );
+      return;
+    }
+
+    if (returningToPetSetup || (needsPetSetup && photoSetupInvalid)) {
+      await openOnboardingModal(
+        photoSetupInvalid ? "pet_photo" : selectedBreed ? "pet_color_select" : undefined
+      );
+      return;
+    }
+
     maybePromptPetSetup();
   }
 
+  bootstrapPetSetupModals();
+
   const onboardingForm = getOnboardingForm();
   if (onboardingForm instanceof HTMLFormElement) {
+    onboardingForm.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target instanceof HTMLButtonElement &&
+          event.target.type === "submit" &&
+          !event.target.disabled
+        ) {
+          clampMediaFramerZoomInputs(onboardingForm);
+        }
+      },
+      { capture: true }
+    );
     onboardingForm.addEventListener("submit", () => {
-      clearOnboardingDraft();
+      window.whiskerPetSetupDraft?.clearDraft?.("onboarding");
+    });
+  }
+
+  if (addCatForm instanceof HTMLFormElement) {
+    addCatForm.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target instanceof HTMLButtonElement &&
+          event.target.type === "submit" &&
+          !event.target.disabled
+        ) {
+          clampMediaFramerZoomInputs(addCatForm);
+        }
+      },
+      { capture: true }
+    );
+    addCatForm.addEventListener("submit", () => {
+      window.whiskerPetSetupDraft?.clearDraft?.("add_cat");
     });
   }
 
@@ -2565,6 +2880,209 @@
 
   const symptomCheckerForm = document.getElementById("symptom-checker-form");
   const symptomCheckerResults = document.getElementById("symptom-checker-results");
+  const financialHardshipDisclosure = document.getElementById("financial-hardship-disclosure");
+  const shelterLocatorForm = document.getElementById("shelter-locator-form");
+  const shelterLocatorResults = document.getElementById("shelter-locator-results");
+  const shelterSearchMinLoadingMs = 5000;
+
+  function shelterSearchLoadingDelay(startedAt) {
+    const remaining = shelterSearchMinLoadingMs - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, remaining);
+    });
+  }
+
+  function openFinancialHardshipPanel() {
+    if (financialHardshipDisclosure instanceof HTMLDetailsElement) {
+      financialHardshipDisclosure.open = true;
+      financialHardshipDisclosure.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  function shelterLocationQuery() {
+    const zipInput = document.getElementById("shelter_zip");
+    const cityInput = document.getElementById("shelter_city");
+    const stateInput = document.getElementById("shelter_state");
+    const zip = zipInput instanceof HTMLInputElement ? zipInput.value.trim() : "";
+    const city = cityInput instanceof HTMLInputElement ? cityInput.value.trim() : "";
+    const state = stateInput instanceof HTMLInputElement ? stateInput.value.trim().toUpperCase() : "";
+
+    if (/^\d{5}$/.test(zip)) {
+      return zip;
+    }
+    if (city && state) {
+      return `${city}, ${state}`;
+    }
+    if (city) {
+      return city;
+    }
+    return "";
+  }
+
+  function bindShelterRevealCards(root) {
+    if (!root) {
+      return;
+    }
+    const cards = root.querySelectorAll(".shelter-card");
+    if (!cards.length) {
+      return;
+    }
+    if (!("IntersectionObserver" in window)) {
+      cards.forEach((card) => card.classList.add("is-visible"));
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { root: root.querySelector(".shelter-results-scroll"), threshold: 0.2 }
+    );
+    cards.forEach((card) => observer.observe(card));
+  }
+
+  function renderShelterLocatorResults(data) {
+    if (!shelterLocatorResults) {
+      return;
+    }
+
+    if (!data || !data.ok) {
+      shelterLocatorResults.innerHTML = `<p class="shelter-locator-tip">${escapeSymptomHtml(data?.message || "We could not search shelters right now. Please try again.")}</p>`;
+      shelterLocatorResults.hidden = false;
+      return;
+    }
+
+    const shelters = Array.isArray(data.shelters) ? data.shelters : [];
+    const locationLabel = data.location_label || "your area";
+
+    if (shelters.length === 0) {
+      shelterLocatorResults.innerHTML = `
+        <p class="shelter-locator-heading">Near <strong>${escapeSymptomHtml(locationLabel)}</strong></p>
+        <p class="shelter-locator-tip shelter-locator-empty">${escapeSymptomHtml(data.message || "No shelters or humane societies were found within 30 miles. Try a nearby larger city or call your vet for local assistance referrals.")}</p>
+      `;
+      shelterLocatorResults.hidden = false;
+      return;
+    }
+
+    const cardsHtml = shelters
+      .map((shelter, index) => {
+        const phoneDigits = shelter.phone ? String(shelter.phone).replace(/[^\d+]/g, "") : "";
+        const phone = shelter.phone && phoneDigits
+          ? `<a href="tel:${phoneDigits}" class="shelter-contact-btn shelter-contact-phone">Call ${escapeSymptomHtml(shelter.phone)} 📞</a>`
+          : "";
+        const website = shelter.website
+          ? `<a href="${escapeSymptomHtml(shelter.website)}" target="_blank" rel="noopener noreferrer" class="shelter-contact-btn shelter-contact-website">Visit website 🌐</a>`
+          : "";
+        const contacts = phone || website
+          ? `<div class="shelter-card-actions">${phone}${website}</div>`
+          : `<p class="shelter-card-note">No phone or website listed — search the name online or call directory assistance.</p>`;
+
+        return `<article class="shelter-card shelter-reveal" style="--reveal-delay:${Math.min(index * 40, 400)}ms">
+          <div class="shelter-card-head">
+            <span class="shelter-card-rank" aria-hidden="true">${index + 1}</span>
+            <div class="shelter-card-titles">
+              <h4>${escapeSymptomHtml(shelter.name || "Local shelter")}</h4>
+              <span class="shelter-card-badge">${escapeSymptomHtml(shelter.category || "Shelter / Rescue")}</span>
+            </div>
+            <span class="shelter-card-distance">${escapeSymptomHtml(String(shelter.distance_miles ?? "?"))} mi</span>
+          </div>
+          <p class="shelter-card-address">${escapeSymptomHtml(shelter.address || "Address not listed")}</p>
+          ${contacts}
+        </article>`;
+      })
+      .join("");
+
+    shelterLocatorResults.innerHTML = `
+      <p class="shelter-locator-heading"><strong>${shelters.length}</strong> shelters &amp; humane societies within 30 miles of <strong>${escapeSymptomHtml(locationLabel)}</strong></p>
+      <div class="shelter-results-scroll">${cardsHtml}</div>
+      <p class="shelter-locator-tip">Call ahead to ask about low-cost clinics, vaccine days, or financial assistance programs.</p>
+    `;
+    shelterLocatorResults.hidden = false;
+    bindShelterRevealCards(shelterLocatorResults);
+    shelterLocatorResults.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function renderShelterLocatorLoading() {
+    if (!shelterLocatorResults) {
+      return;
+    }
+    shelterLocatorResults.hidden = false;
+    shelterLocatorResults.innerHTML = `
+      <div class="shelter-search-loading" role="status" aria-live="polite" aria-busy="true">
+        <div class="shelter-search-sky" aria-hidden="true">
+          <span class="shelter-cloud shelter-cloud-1">☁️</span>
+          <span class="shelter-cloud shelter-cloud-2">☁️</span>
+          <span class="shelter-cloud shelter-cloud-3">☁️</span>
+          <span class="shelter-search-sun">✨</span>
+          <span class="shelter-search-paw">🐾</span>
+        </div>
+        <p class="shelter-search-loading-title">Looking for helping paws nearby…</p>
+        <p class="shelter-search-loading-copy">Searching shelters, humane societies, and rescues within 30 miles. Take a slow breath — we'll have options for you soon.</p>
+      </div>
+    `;
+  }
+
+  async function searchNearbyShelters() {
+    if (!(shelterLocatorForm instanceof HTMLFormElement)) {
+      return;
+    }
+    const location = shelterLocationQuery();
+    if (!location) {
+      if (shelterLocatorResults) {
+        shelterLocatorResults.hidden = false;
+        shelterLocatorResults.innerHTML =
+          '<p class="shelter-locator-tip">Enter a 5-digit ZIP code or city and state to search nearby shelters.</p>';
+      }
+      document.getElementById("shelter_zip")?.focus();
+      return;
+    }
+
+    const submitButton = shelterLocatorForm.querySelector(".shelter-locator-submit");
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = true;
+    }
+    const loadingStartedAt = Date.now();
+    renderShelterLocatorLoading();
+
+    try {
+      const response = await fetch("/home/health/shelters", {
+        method: "POST",
+        body: postUrlEncodedFromForm(shelterLocatorForm),
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        credentials: "same-origin",
+        redirect: "manual",
+      });
+
+      if (response.status === 401 || response.status === 403 || response.status === 303 || response.status === 302) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const data = await readJsonTaskResponse(response);
+      await shelterSearchLoadingDelay(loadingStartedAt);
+      renderShelterLocatorResults(data);
+    } catch (_error) {
+      await shelterSearchLoadingDelay(loadingStartedAt);
+      renderShelterLocatorResults({
+        ok: false,
+        message: "We could not search shelters right now. Please try again.",
+      });
+    } finally {
+      if (submitButton instanceof HTMLButtonElement) {
+        submitButton.disabled = false;
+      }
+    }
+  }
 
   function escapeSymptomHtml(value) {
     return String(value)
@@ -2602,11 +3120,32 @@
     const homeCare = Array.isArray(data.home_care) ? data.home_care : [];
     const urgencyClass = urgencyClassFor(data.urgency);
 
+    const concernClassFor = (value) => {
+      const map = {
+        mild: "symptom-concern-mild",
+        moderate: "symptom-concern-moderate",
+        serious: "symptom-concern-serious",
+        severe: "symptom-concern-severe",
+      };
+      return map[value] || "symptom-concern-moderate";
+    };
+
     const possibilityHtml = possibilities
-      .map((item) => {
+      .map((item, index) => {
         const tips = Array.isArray(item.home_care) ? item.home_care : [];
-        return `<article class="symptom-possibility-card">
-          <h5>${escapeSymptomHtml(item.name || "Possible concern")}</h5>
+        const concernClass = concernClassFor(item.concern_level);
+        const lessLikelyNote = item.less_likely
+          ? '<p class="symptom-less-likely-note">Weaker symptom match — still worth knowing about.</p>'
+          : "";
+        return `<article class="symptom-possibility-card ${concernClass}">
+          <div class="symptom-possibility-head">
+            <span class="symptom-possibility-rank">${index + 1}</span>
+            <div class="symptom-possibility-titles">
+              <h5>${escapeSymptomHtml(item.name || "Possible concern")}</h5>
+              <span class="symptom-concern-badge">${escapeSymptomHtml(item.concern_label || "Possible")}</span>
+            </div>
+          </div>
+          ${lessLikelyNote}
           <p>${escapeSymptomHtml(item.summary || "")}</p>
           ${renderSymptomList(tips)}
         </article>`;
@@ -2625,7 +3164,7 @@
       }
       ${
         possibilities.length
-          ? `<section class="symptom-results-section"><h4>Possible explanations to discuss with your vet</h4>${possibilityHtml}</section>`
+          ? `<section class="symptom-results-section"><h4>Possible explanations (mildest to most concerning)</h4><p class="symptom-possibilities-intro">Listed from usually mild at the top to potentially urgent at the bottom — discuss any that fit with your vet.</p>${possibilityHtml}</section>`
           : ""
       }
       ${
@@ -2643,6 +3182,18 @@
     symptomCheckerResults.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
+  document.getElementById("symptom-hardship-jump")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    openFinancialHardshipPanel();
+  });
+
+  if (shelterLocatorForm instanceof HTMLFormElement) {
+    shelterLocatorForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      searchNearbyShelters();
+    });
+  }
+
   if (symptomCheckerForm instanceof HTMLFormElement) {
     symptomCheckerForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -2653,19 +3204,35 @@
       }
 
       try {
-        const formData = new FormData(symptomCheckerForm);
         const response = await fetch("/home/health/symptoms", {
           method: "POST",
-          body: formData,
+          body: postUrlEncodedFromForm(symptomCheckerForm),
           headers: {
             Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
           },
+          credentials: "same-origin",
+          redirect: "manual",
         });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.status || "request_failed");
+
+        if (response.status === 401 || response.status === 403 || response.status === 303 || response.status === 302) {
+          window.location.href = "/login";
+          return;
+        }
+
+        const data = await readJsonTaskResponse(response);
+        if (!data || !data.ok) {
+          if (handleTaskApiAuthFailure(data)) {
+            return;
+          }
+          throw new Error(data?.status || "request_failed");
         }
         renderSymptomCheckerResults(data);
+        const hardshipChecked = symptomCheckerForm.querySelector("#symptom_financial_hardship") instanceof HTMLInputElement
+          && symptomCheckerForm.querySelector("#symptom_financial_hardship").checked;
+        if (hardshipChecked) {
+          openFinancialHardshipPanel();
+        }
       } catch (_error) {
         if (symptomCheckerResults) {
           symptomCheckerResults.hidden = false;

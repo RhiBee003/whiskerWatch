@@ -1,6 +1,7 @@
 use crate::{
-    escape_html, escape_html_attr, household_pet_is_complete, pet_snapshot, profile_has_pet,
-    user_for_email, visible_calendar_events, AppState, CalendarEvent, UserProfile, PRIMARY_PET_ID,
+    escape_html, escape_html_attr, household_pet_is_complete, memorial, pet_snapshot,
+    profile_has_pet, user_for_email, visible_calendar_events, AppState, CalendarEvent, UserProfile,
+    PRIMARY_PET_ID,
 };
 use chrono::{Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,65 @@ pub struct FriendRequestForm {
     pub friend_email: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendLookupError {
+    Empty,
+    NotFound,
+}
+
+pub fn resolve_friend_identifier(state: &AppState, raw: &str) -> Result<String, FriendLookupError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(FriendLookupError::Empty);
+    }
+
+    if trimmed.contains('@') {
+        return Ok(normalize_email(trimmed));
+    }
+
+    state
+        .storage
+        .email_for_username(trimmed)
+        .map_err(|_| FriendLookupError::NotFound)?
+        .map(|email| normalize_email(&email))
+        .ok_or(FriendLookupError::NotFound)
+}
+
+pub fn accepted_friend_emails(state: &AppState, email: &str) -> Vec<String> {
+    state
+        .storage
+        .list_friends(email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|summary| summary.friend_email)
+        .collect()
+}
+
+pub fn friends_pending_count(state: &AppState, email: &str) -> usize {
+    let incoming = state
+        .storage
+        .list_incoming_friend_requests(email)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let shares = state
+        .storage
+        .list_incoming_pet_shares(email)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    incoming + shares
+}
+
+pub fn render_friends_tab_label(state: &AppState, email: &str) -> String {
+    let pending = friends_pending_count(state, email);
+    if pending > 0 {
+        format!(
+            r#"Friends <span class="friends-tab-badge" aria-label="{pending} pending">{pending}</span>"#
+        )
+    } else {
+        "Friends".to_string()
+    }
+}
+
 #[derive(Deserialize)]
 pub struct FriendRespondForm {
     pub request_id: String,
@@ -76,6 +136,11 @@ pub struct PetShareForm {
 pub struct PetShareRespondForm {
     pub share_id: String,
     pub action: String,
+}
+
+#[derive(Deserialize)]
+pub struct PetShareRevokeForm {
+    pub share_id: String,
 }
 
 pub fn normalize_email(value: &str) -> String {
@@ -327,6 +392,13 @@ pub fn apply_snapshot_to_profile_view(mut view: UserProfile, snapshot: &crate::P
     view.pet_video_url = snapshot.pet_video_url.clone();
     view.pet_video_clip_start = snapshot.pet_video_clip_start;
     view.pet_video_clip_duration = snapshot.pet_video_clip_duration;
+    view.pet_video_zoom = snapshot.pet_video_zoom;
+    view.pet_video_offset_x = snapshot.pet_video_offset_x;
+    view.pet_video_offset_y = snapshot.pet_video_offset_y;
+    view.deceased = snapshot.deceased;
+    view.deceased_at = snapshot.deceased_at.clone();
+    view.memorial_videos = snapshot.memorial_videos.clone();
+    view.memorial_comfort_seen = snapshot.memorial_comfort_seen;
     view
 }
 
@@ -502,8 +574,9 @@ pub fn render_pet_switcher(state: &AppState, profile: &UserProfile) -> String {
             } else {
                 ""
             };
+            let angel = memorial::pet_switcher_angel_suffix(profile, &pet.pet_id, &pet.owner_email);
             let label = if pet.is_owned {
-                escape_html(&pet.pet_name)
+                format!("{}{}", escape_html(&pet.pet_name), angel)
             } else {
                 format!(
                     "{} · {}",
@@ -539,11 +612,72 @@ pub fn render_pet_switcher(state: &AppState, profile: &UserProfile) -> String {
     )
 }
 
+fn render_pet_share_options(owned_pets: &[(String, String)]) -> String {
+    if owned_pets.is_empty() {
+        return r#"<option value="">Set up a cat first</option>"#.to_string();
+    }
+    owned_pets
+        .iter()
+        .map(|(pet_id, pet_name)| {
+            format!(
+                r#"<option value="{}">{}</option>"#,
+                escape_html_attr(pet_id),
+                escape_html(pet_name),
+            )
+        })
+        .collect()
+}
+
+pub fn render_tasks_shared_banner(profile: &UserProfile, state: &AppState) -> String {
+    if !is_viewing_shared_pet(profile) {
+        return String::new();
+    }
+    let owner = active_pet_owner_email(profile);
+    let pet_name = pet_name_for_owner(state, owner, &profile.active_pet_id);
+    format!(
+        r#"<p class="shared-care-banner" role="status">You can complete <strong>{pet}</strong>'s care tasks and earn paw points — changes save to {owner}'s schedule.</p>"#,
+        pet = escape_html(&pet_name),
+        owner = escape_html(&user_label(state, owner)),
+    )
+}
+
+pub fn render_calendar_shared_banner(state: &AppState, viewer: &UserProfile) -> String {
+    let accepted = state
+        .storage
+        .list_accepted_pet_shares_for_recipient(&viewer.email)
+        .unwrap_or_default();
+    if accepted.is_empty() && !is_viewing_shared_pet(viewer) {
+        return String::new();
+    }
+    if is_viewing_shared_pet(viewer) {
+        let owner = active_pet_owner_email(viewer);
+        let pet_name = pet_name_for_owner(state, owner, &viewer.active_pet_id);
+        return format!(
+            r#"<p class="shared-care-banner" role="status">Calendar shows <strong>{pet}</strong>'s feeding schedule, vet reminders, and shared events from {owner}.</p>"#,
+            pet = escape_html(&pet_name),
+            owner = escape_html(&user_label(state, owner)),
+        );
+    }
+    format!(
+        r#"<p class="shared-care-banner" role="status">Your calendar also includes care schedules and vet reminders for <strong>{}</strong> shared cat{}.</p>"#,
+        accepted.len(),
+        if accepted.len() == 1 { "" } else { "s" }
+    )
+}
+
 pub fn render_account_friends_section(
     state: &AppState,
     viewer_email: &str,
     owned_pets: &[(String, String)],
 ) -> String {
+    format!(
+        "{}{}",
+        render_friends_card(state, viewer_email),
+        render_pet_sharing_card(state, viewer_email, owned_pets),
+    )
+}
+
+fn render_friends_card(state: &AppState, viewer_email: &str) -> String {
     let friends = state
         .storage
         .list_friends(viewer_email)
@@ -558,50 +692,22 @@ pub fn render_account_friends_section(
         .into_iter()
         .map(stored_friend_request)
         .collect::<Vec<_>>();
-    let incoming_shares = state
+    let outgoing = state
         .storage
-        .list_incoming_pet_shares(viewer_email)
+        .list_outgoing_friend_requests(viewer_email)
         .unwrap_or_default()
         .into_iter()
-        .map(stored_pet_share)
+        .map(stored_friend_request)
         .collect::<Vec<_>>();
-    let accepted_shared = state
-        .storage
-        .list_accepted_pet_shares_for_recipient(viewer_email)
-        .unwrap_or_default()
-        .into_iter()
-        .map(stored_pet_share)
-        .collect::<Vec<_>>();
-
-    let friend_options: String = if friends.is_empty() {
-        r#"<option value="">Add a friend first</option>"#.to_string()
-    } else {
-        friends
-            .iter()
-            .map(|friend| {
-                format!(
-                    r#"<option value="{}">{}</option>"#,
-                    escape_html_attr(&friend.friend_email),
-                    escape_html(&user_label(state, &friend.friend_email)),
-                )
-            })
-            .collect()
-    };
-
-    let pet_options: String = if owned_pets.is_empty() {
-        r#"<option value="">Set up a cat first</option>"#.to_string()
-    } else {
-        owned_pets
-            .iter()
-            .map(|(pet_id, pet_name)| {
-                format!(
-                    r#"<option value="{}">{}</option>"#,
-                    escape_html_attr(pet_id),
-                    escape_html(pet_name),
-                )
-            })
-            .collect()
-    };
+    let outgoing_friend_html: String = outgoing
+        .iter()
+        .map(|req| {
+            format!(
+                r#"<li class="friend-request-item friend-request-outgoing"><span>Waiting on <strong>{to}</strong></span><span class="field-hint">Request sent</span></li>"#,
+                to = escape_html(&user_label(state, &req.to_email)),
+            )
+        })
+        .collect();
 
     let incoming_friend_html: String = incoming
         .iter()
@@ -625,7 +731,7 @@ pub fn render_account_friends_section(
         .collect();
 
     let friends_list_html = if friends.is_empty() {
-        r#"<p class="field-hint">No friends yet — add someone by email below.</p>"#.to_string()
+        r#"<p class="field-hint">No friends yet — open Add friends above to connect by email or username.</p>"#.to_string()
     } else {
         format!(
             "<ul class=\"friend-list\">{}</ul>",
@@ -643,22 +749,172 @@ pub fn render_account_friends_section(
         )
     };
 
+    format!(
+        r#"<article class="dashboard-card friends-sharing-card">
+  <details class="friends-add-card">
+    <summary class="friends-add-summary">
+      <span class="friends-add-summary-text">Add friends</span>
+    </summary>
+    <div class="friends-add-body">
+      <p class="field-hint">Connect with another WhiskerWatch parent first — then you can share specific cats, tasks, and schedules from the card below.</p>
+      <form class="login-form add-friend-form" action="/home/friends/request" method="post">
+        <label for="friend_email">Friend's email or username</label>
+        <input id="friend_email" name="friend_email" type="text" required autocomplete="off" placeholder="friend@example.com or whiskerparent42" />
+        <button type="submit" class="download-btn login-submit">Send friend request 💌</button>
+      </form>
+    </div>
+  </details>
+  {incoming_friends}
+  {outgoing_friends}
+  <h3 class="friends-subhead">Your friends</h3>
+  {friends_list}
+</article>"#,
+        incoming_friends = if incoming_friend_html.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<h3 class=\"friends-subhead\">Friend requests for you</h3><ul class=\"friend-request-list\">{incoming_friend_html}</ul>"
+            )
+        },
+        outgoing_friends = if outgoing_friend_html.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<h3 class=\"friends-subhead\">Requests you sent</h3><ul class=\"friend-request-list\">{outgoing_friend_html}</ul>"
+            )
+        },
+        friends_list = friends_list_html,
+    )
+}
+
+fn render_pet_sharing_card(
+    state: &AppState,
+    viewer_email: &str,
+    owned_pets: &[(String, String)],
+) -> String {
+    let friends = state
+        .storage
+        .list_friends(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(stored_friend_summary)
+        .collect::<Vec<_>>();
+    let incoming_shares = state
+        .storage
+        .list_incoming_pet_shares(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(stored_pet_share)
+        .collect::<Vec<_>>();
+    let accepted_shared = state
+        .storage
+        .list_accepted_pet_shares_for_recipient(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(stored_pet_share)
+        .collect::<Vec<_>>();
+    let outgoing_shares = state
+        .storage
+        .list_outgoing_pet_shares(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(stored_pet_share)
+        .collect::<Vec<_>>();
+
+    let pet_options = render_pet_share_options(owned_pets);
+
+    let friend_options: String = if friends.is_empty() {
+        r#"<option value="">Add a friend first</option>"#.to_string()
+    } else {
+        friends
+            .iter()
+            .map(|friend| {
+                format!(
+                    r#"<option value="{}">{}</option>"#,
+                    escape_html_attr(&friend.friend_email),
+                    escape_html(&user_label(state, &friend.friend_email)),
+                )
+            })
+            .collect()
+    };
+
+    let per_friend_share_html = if owned_pets.is_empty() || friends.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<ul class=\"friend-share-list\">{}</ul>",
+            friends
+                .iter()
+                .map(|friend| {
+                    format!(
+                        r#"<li class="friend-share-item">
+  <span class="friend-share-label">Share with <strong>{label}</strong></span>
+  <form class="login-form friend-quick-share-form" action="/home/pets/share" method="post">
+    <input type="hidden" name="friend_email" value="{email}" />
+    <label class="visually-hidden" for="share_pet_{email_id}">Cat to share with {label}</label>
+    <select id="share_pet_{email_id}" name="pet_id" required>{pet_options}</select>
+    <button type="submit" class="download-btn">Share tasks &amp; schedule</button>
+  </form>
+</li>"#,
+                        label = escape_html(&user_label(state, &friend.friend_email)),
+                        email = escape_html_attr(&friend.friend_email),
+                        email_id = escape_html_attr(&friend.friend_email.replace('@', "_at_")),
+                        pet_options = pet_options,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        )
+    };
+
+    let share_form = if owned_pets.is_empty() {
+        r#"<p class="field-hint">Set up a cat on the My Pet tab before sharing care schedules.</p>"#.to_string()
+    } else if friends.is_empty() {
+        r#"<p class="field-hint">Add a friend above to share a specific cat's tasks, feeding schedule, and calendar.</p>"#.to_string()
+    } else {
+        format!(
+            r#"<form class="login-form share-cat-form" action="/home/pets/share" method="post">
+  <label for="share_friend_email">Share with</label>
+  <select id="share_friend_email" name="friend_email" required>{friend_options}</select>
+  <label for="share_pet_id">Which cat</label>
+  <select id="share_pet_id" name="pet_id" required>{pet_options}</select>
+  <p class="field-hint">Your friend will see this cat's care tasks, feeding times, vet reminders, health records, and calendar events. They can complete tasks on your behalf.</p>
+  <button type="submit" class="download-btn login-submit">Share cat care 🐾</button>
+</form>
+{per_friend_share}"#,
+            friend_options = friend_options,
+            pet_options = pet_options,
+            per_friend_share = if per_friend_share_html.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<h3 class=\"friends-subhead\">Quick share with a friend</h3>{per_friend_share_html}"
+                )
+            },
+        )
+    };
+
     let incoming_share_html: String = incoming_shares
         .iter()
         .map(|share| {
             let cat_name = pet_name_for_owner(state, &share.owner_email, &share.pet_id);
             format!(
-                r#"<li class="share-request-item"><span><strong>{cat}</strong> from {owner}</span>
+                r#"<li class="share-request-item">
+  <div class="share-request-copy">
+    <strong>{cat}</strong> from {owner}
+    <span class="field-hint">Includes care tasks, feeding schedule, and calendar reminders</span>
+  </div>
   <form action="/home/pets/share/respond" method="post" class="inline-action-form">
     <input type="hidden" name="share_id" value="{id}" />
     <input type="hidden" name="action" value="accept" />
-    <button type="submit" class="download-btn">Accept</button>
+    <button type="submit" class="download-btn">Accept care access</button>
   </form>
   <form action="/home/pets/share/respond" method="post" class="inline-action-form">
     <input type="hidden" name="share_id" value="{id}" />
     <input type="hidden" name="action" value="decline" />
     <button type="submit" class="onboarding-skip-btn">Decline</button>
-  </form></li>"#,
+  </form>
+</li>"#,
                 cat = escape_html(&cat_name),
                 owner = escape_html(&user_label(state, &share.owner_email)),
                 id = escape_html_attr(&share.id),
@@ -667,7 +923,7 @@ pub fn render_account_friends_section(
         .collect();
 
     let shared_with_me_html = if accepted_shared.is_empty() {
-        r#"<p class="field-hint">No cats shared with you yet.</p>"#.to_string()
+        r#"<p class="field-hint">No cats shared with you yet. When a friend shares, you'll see their tasks and schedule here.</p>"#.to_string()
     } else {
         format!(
             "<ul class=\"shared-pet-list\">{}</ul>",
@@ -675,12 +931,20 @@ pub fn render_account_friends_section(
                 .iter()
                 .map(|share| {
                     let cat_name = pet_name_for_owner(state, &share.owner_email, &share.pet_id);
+                    let owner_label = user_label(state, &share.owner_email);
                     format!(
-                        r#"<li><a href="/home?tab=pet&amp;pet={pet_id}&amp;pet_owner={owner}"><strong>{cat}</strong> · shared by {owner_label}</a></li>"#,
+                        r#"<li class="shared-pet-list-item">
+  <a href="/home?tab=pet&amp;pet={pet_id}&amp;pet_owner={owner}"><strong>{cat}</strong> · shared by {owner_label}</a>
+  <span class="shared-pet-links">
+    <a href="/home?tab=tasks&amp;pet={pet_id}&amp;pet_owner={owner}">Tasks</a>
+    <a href="/home?tab=calendar&amp;pet={pet_id}&amp;pet_owner={owner}">Calendar</a>
+    <a href="/home?tab=health&amp;pet={pet_id}&amp;pet_owner={owner}">Health</a>
+  </span>
+</li>"#,
                         pet_id = escape_html_attr(&share.pet_id),
                         owner = escape_html_attr(&share.owner_email),
                         cat = escape_html(&cat_name),
-                        owner_label = escape_html(&user_label(state, &share.owner_email)),
+                        owner_label = escape_html(&owner_label),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -688,56 +952,114 @@ pub fn render_account_friends_section(
         )
     };
 
-    let share_form = if owned_pets.is_empty() || friends.is_empty() {
-        String::new()
+    let outgoing_share_html = if outgoing_shares.is_empty() {
+        r#"<p class="field-hint">You have not shared any cats yet.</p>"#.to_string()
     } else {
         format!(
-            r#"<form class="login-form share-cat-form" action="/home/pets/share" method="post">
-  <label for="share_friend_email">Share a cat with</label>
-  <select id="share_friend_email" name="friend_email" required>{friend_options}</select>
-  <label for="share_pet_id">Cat</label>
-  <select id="share_pet_id" name="pet_id" required>{pet_options}</select>
-  <p class="field-hint">Friends get this cat's health records, care tasks, and calendar events on their account.</p>
-  <button type="submit" class="download-btn login-submit">Share cat</button>
-</form>"#,
-            friend_options = friend_options,
-            pet_options = pet_options,
+            "<ul class=\"outgoing-share-list\">{}</ul>",
+            outgoing_shares
+                .iter()
+                .map(|share| {
+                    let cat_name = pet_name_for_owner(state, viewer_email, &share.pet_id);
+                    let status_label = if share.status == SHARE_STATUS_PENDING {
+                        "Invite pending"
+                    } else {
+                        "Sharing tasks & schedule"
+                    };
+                    format!(
+                        r#"<li class="outgoing-share-item">
+  <div class="outgoing-share-copy">
+    <strong>{cat}</strong> with {friend}
+    <span class="field-hint">{status}</span>
+  </div>
+  <form action="/home/pets/share/revoke" method="post" class="inline-action-form">
+    <input type="hidden" name="share_id" value="{id}" />
+    <button type="submit" class="onboarding-skip-btn">Stop sharing</button>
+  </form>
+</li>"#,
+                        cat = escape_html(&cat_name),
+                        friend = escape_html(&user_label(state, &share.shared_with_email)),
+                        status = escape_html(status_label),
+                        id = escape_html_attr(&share.id),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("")
         )
     };
 
     format!(
-        r#"<article class="dashboard-card friends-sharing-card">
-  <h2>Friends &amp; shared cats</h2>
-  <p class="field-hint">Add friends by email, then share a cat so they can help with care tasks, vet health, and calendar reminders.</p>
-  <form class="login-form add-friend-form" action="/home/friends/request" method="post">
-    <label for="friend_email">Friend's email</label>
-    <input id="friend_email" name="friend_email" type="email" required placeholder="friend@example.com" />
-    <button type="submit" class="download-btn login-submit">Send friend request</button>
-  </form>
-  {incoming_friends}
-  <h3 class="friends-subhead">Your friends</h3>
-  {friends_list}
+        r#"<article class="dashboard-card pet-sharing-card">
+  <h2>Share pets, tasks &amp; schedules</h2>
+  <p class="field-hint">Pick a specific cat to share its care tasks, feeding times, vet reminders, and calendar with a friend — perfect for co-parents, sitters, and family helpers.</p>
+  {share_form}
+  <h3 class="friends-subhead">Cats you're sharing</h3>
+  {outgoing_shares}
   <h3 class="friends-subhead">Cats shared with you</h3>
   {shared_with_me}
   {incoming_shares}
-  {share_form}
 </article>"#,
-        incoming_friends = if incoming_friend_html.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<h3 class=\"friends-subhead\">Friend requests</h3><ul class=\"friend-request-list\">{incoming_friend_html}</ul>"
-            )
-        },
-        friends_list = friends_list_html,
+        share_form = share_form,
+        outgoing_shares = outgoing_share_html,
         shared_with_me = shared_with_me_html,
         incoming_shares = if incoming_share_html.is_empty() {
             String::new()
         } else {
             format!(
-                "<h3 class=\"friends-subhead\">Cat share invites</h3><ul class=\"share-request-list\">{incoming_share_html}</ul>"
+                "<h3 class=\"friends-subhead\">Care share invites for you</h3><ul class=\"share-request-list\">{incoming_share_html}</ul>"
             )
         },
-        share_form = share_form,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::User;
+
+    fn test_state_with_users() -> AppState {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = crate::storage::Storage::open_at(temp.path().to_path_buf()).expect("storage");
+        let state = AppState { storage };
+        state
+            .storage
+            .save_user(&User {
+                username: "mochi_mom".to_string(),
+                first_name: "Mochi".to_string(),
+                last_name: "Mom".to_string(),
+                email: "mom@example.com".to_string(),
+                password: "secret1!".to_string(),
+                created_at: 1,
+            })
+            .expect("save mom");
+        state
+            .storage
+            .save_user(&User {
+                username: "catdad".to_string(),
+                first_name: "Cat".to_string(),
+                last_name: "Dad".to_string(),
+                email: "dad@example.com".to_string(),
+                password: "secret2!".to_string(),
+                created_at: 2,
+            })
+            .expect("save dad");
+        state
+    }
+
+    #[test]
+    fn resolve_friend_identifier_accepts_username_or_email() {
+        let state = test_state_with_users();
+        assert_eq!(
+            resolve_friend_identifier(&state, "catdad").expect("username"),
+            "dad@example.com"
+        );
+        assert_eq!(
+            resolve_friend_identifier(&state, "DAD@example.com").expect("email"),
+            "dad@example.com"
+        );
+        assert_eq!(
+            resolve_friend_identifier(&state, "missing").err(),
+            Some(FriendLookupError::NotFound)
+        );
+    }
 }

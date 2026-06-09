@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#fac8dd" />
     <title>WhiskerWatch — My Home</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260609m" />
   </head>
   <body class="dashboard-body" {{NEEDS_PET_SETUP_DATA}}>
     <header class="dashboard-topbar">
@@ -44,6 +44,7 @@
         <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true" aria-label="My Pet"><span class="dashboard-tab-label-long" aria-hidden="true">My Pet</span><span class="dashboard-tab-label-short" aria-hidden="true">Pet</span></button>
         <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false" aria-label="Paw Points"><span class="dashboard-tab-label-long" aria-hidden="true">Paw Points</span><span class="dashboard-tab-label-short" aria-hidden="true">Points</span></button>
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
+        <button type="button" class="dashboard-tab" data-tab="friends" role="tab" aria-selected="false" aria-label="Friends">{{FRIENDS_TAB_LABEL}}</button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Community</button>
@@ -117,10 +118,10 @@
                 <dd>{{MEMBER_SINCE}}</dd>
               </dl>
             </article>
+            {{ACCOUNT_MEMORIAL_SECTION}}
             {{ACCOUNT_PASSWORD_SECTION}}
             {{ACCOUNT_PREMIUM_SECTION}}
             {{COMMUNITY_VISIBILITY_SECTION}}
-            {{FRIENDS_AND_SHARING_SECTION}}
             {{ACCOUNT_NOTIFICATIONS_SECTION}}
             {{ACCOUNT_ONBOARDING_EMAILS_SECTION}}
             <article class="dashboard-card">
@@ -134,8 +135,16 @@
           </div>
         </section>
 
+        <section id="panel-friends" class="dashboard-panel" role="tabpanel" hidden>
+          <h1>Friends</h1>
+          <div class="friends-panel-grid">
+            {{FRIENDS_AND_SHARING_SECTION}}
+          </div>
+        </section>
+
         <section id="panel-tasks" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Care Tasks</h1>
+          {{TASKS_SHARED_BANNER}}
           {{TASKS_PET_SETUP_PROMPT}}
           <p class="panel-intro">Complete tasks to earn paw points. Feeding tasks adjust automatically for your cat's age. Tap any time to change it.</p>
           <ul class="task-list" id="tasks-panel-list">
@@ -159,6 +168,7 @@
 
         <section id="panel-calendar" class="dashboard-panel" role="tabpanel" hidden>
           <h1>Calendar</h1>
+          {{CALENDAR_SHARED_BANNER}}
           {{CALENDAR_PET_SETUP_PROMPT}}
           {{CALENDAR_VET_ALERT}}
           <p class="panel-intro">Browse months to see tasks and events, or add your own.</p>
@@ -221,12 +231,18 @@
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
-    <script src="/shop-affordance.js"></script>
-    <script src="/alerts.js"></script>
-    <script src="/dashboard.js"></script>
+    <script src="/shop-affordance.js?v=20260609m"></script>
+    <script src="/alerts.js?v=20260609m"></script>
+    <script src="/pet-setup-draft.js?v=20260609m"></script>
+    <script src="/pet-color-picker.js?v=20260609m"></script>
+    <script src="/pet-photo-framer.js?v=20260609n"></script>
+    <script src="/pet-video-framer.js?v=20260609n"></script>
+    <script src="/dashboard.js?v=20260609n"></script>
     <script src="/push-notifications.js"></script>
     <script src="/password-toggle.js"></script>
     <script src="/feedback-forum.js"></script>
     <script src="/cinder-pet.js"></script>
+    <script src="/memorial.js"></script>
+    {{MEMORIAL_COMFORT_MODAL}}
   </body>
 </html>

@@ -14,7 +14,7 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function openNeedPawPointsModal(options) {
+  window.whiskerOpenNeedPawPointsModal = function openNeedPawPointsModal(options) {
     if (!(pawPointsModal instanceof HTMLElement)) {
       return;
     }
@@ -26,6 +26,13 @@
     );
     const pointsNeeded = Math.max(0, itemPrice - balance);
     const itemEmoji = options.itemEmoji?.trim() || "🐾";
+
+    if (itemPrice > 0 && pointsNeeded === 0) {
+      if (typeof window.whiskerRefreshShopAffordance === "function") {
+        window.whiskerRefreshShopAffordance(balance);
+      }
+      return;
+    }
 
     if (pawPointsHeroEmoji) {
       pawPointsHeroEmoji.textContent = itemEmoji;
@@ -53,7 +60,7 @@
     pawPointsModal.removeAttribute("hidden");
     document.body.classList.add("need-paw-points-open");
     pawPointsClose?.focus();
-  }
+  };
 
   function closeNeedPawPointsModal() {
     if (!(pawPointsModal instanceof HTMLElement)) {
@@ -111,6 +118,16 @@
         itemEmoji: pawPointsModal.dataset.itemEmoji,
         balance: pawPointsModal.dataset.balance,
       });
+    } else {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("status") === "need_paw_points") {
+        url.searchParams.delete("status");
+        url.searchParams.delete("decor_id");
+        url.searchParams.delete("outfit_id");
+        url.searchParams.delete("boost_id");
+        url.searchParams.delete("petting_bonus_id");
+        window.history.replaceState({}, "", url);
+      }
     }
   }
 
@@ -256,6 +273,11 @@
 
   function updateCatHomePawPoints(pawPoints) {
     if (typeof pawPoints !== "number") {
+      return;
+    }
+
+    if (typeof window.whiskerApplyPawPointsBalance === "function") {
+      window.whiskerApplyPawPointsBalance(pawPoints);
       return;
     }
 
