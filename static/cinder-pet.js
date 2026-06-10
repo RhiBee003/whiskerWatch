@@ -117,14 +117,37 @@
       return;
     }
 
-    const viewport = video.closest(".pet-user-video-optional, .account-pet-video-optional, .account-pet-photo-wrap");
-    const viewportPx = viewport instanceof HTMLElement ? viewport.clientWidth : undefined;
-    window.whiskerPetVideoFramer?.applyPlaybackFraming?.(video, viewportPx);
+    window.whiskerPetVideoFramer?.applyPlaybackFraming?.(video);
+  }
+
+  function watchPetVideoFraming(video) {
+    if (!(video instanceof HTMLVideoElement)) {
+      return;
+    }
+
+    const frame =
+      video.closest(".pet-video-framed-viewport, .cinder-pet-image-wrap, .account-pet-photo-wrap");
+    if (!(frame instanceof HTMLElement)) {
+      return;
+    }
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      applyPetVideoFraming(video);
+    });
+    observer.observe(frame);
   }
 
   document.querySelectorAll(".pet-user-video-player, .account-pet-video-player").forEach((video) => {
     bindPetVideoClipLoop(video);
     applyPetVideoFraming(video);
+    video.addEventListener("loadedmetadata", () => {
+      applyPetVideoFraming(video);
+    });
+    watchPetVideoFraming(video);
   });
 
   const stage = document.getElementById("cinder-pet-stage");
@@ -152,8 +175,10 @@
 
       if (showVideo) {
         window.requestAnimationFrame(() => {
-          applyPetVideoFraming(videoPlayer);
-          playPetVideoClip(videoPlayer);
+          window.requestAnimationFrame(() => {
+            applyPetVideoFraming(videoPlayer);
+            playPetVideoClip(videoPlayer);
+          });
         });
       } else {
         pausePetVideoClip(videoPlayer);
@@ -229,11 +254,15 @@
     }
   });
 
-  document.querySelectorAll(".community-cat-media").forEach((media) => {
-    const toggle = media.querySelector(".community-cat-media-toggle");
+  document.querySelectorAll(".community-cat-card").forEach((card) => {
+    const media = card.querySelector(".community-cat-media");
+    const toggle = card.querySelector(".community-cat-media-toggle");
+    if (!(media instanceof HTMLElement) || !(toggle instanceof HTMLElement)) {
+      return;
+    }
     const videoWrap = media.querySelector(".community-cat-video-optional");
     const videoPlayer = media.querySelector(".community-cat-video-player");
-    if (!(toggle instanceof HTMLElement) || !(videoWrap instanceof HTMLElement)) {
+    if (!(videoWrap instanceof HTMLElement)) {
       return;
     }
 
@@ -242,6 +271,11 @@
     if (videoPlayer instanceof HTMLVideoElement) {
       bindPetVideoClipLoop(videoPlayer);
     }
+
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
 
     bindToggleControl(toggle, () => {
       const showVideo = !videoWrap.classList.contains("is-visible");

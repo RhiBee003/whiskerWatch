@@ -169,17 +169,18 @@
       setValue('[name="pet_breed"]', draft.pet_breed);
     }
     setValue('[name="pet_color"]', draft.pet_color);
-    setValue("#last_vet_date", draft.last_vet_date);
+    const vetPicker = form.querySelector('[data-cute-date-picker][data-kind="vet"]');
+    if (vetPicker instanceof HTMLElement && draft.last_vet_date) {
+      window.whiskerSetCuteDatePickerValue?.(vetPicker, draft.last_vet_date);
+    } else {
+      setValue("#last_vet_date", draft.last_vet_date);
+    }
     setValue("#conditions", draft.conditions);
     setValue("#medications", draft.medications);
 
-    const birthPicker = form.querySelector("[data-birth-date-picker]");
+    const birthPicker = form.querySelector('[data-cute-date-picker][data-kind="birthday"]');
     if (birthPicker instanceof HTMLElement && draft.pet_birth_date) {
-      if (typeof window.whiskerSetBirthDatePickerValue === "function") {
-        window.whiskerSetBirthDatePickerValue(birthPicker, draft.pet_birth_date);
-      } else {
-        setValue('input[name="pet_birth_date"]', draft.pet_birth_date);
-      }
+      window.whiskerSetCuteDatePickerValue?.(birthPicker, draft.pet_birth_date);
     } else {
       setValue('input[name="pet_birth_date"]', draft.pet_birth_date);
     }

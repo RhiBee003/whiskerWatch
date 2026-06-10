@@ -29,6 +29,18 @@ pub fn can_add_pet(
     has_premium(premium_unlocked, email) && has_primary_pet
 }
 
+fn escape_js_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "")
+}
+
+fn delete_pet_confirm_message(pet_name: &str) -> String {
+    format!("Are you sure? This will delete all of {pet_name}'s info.")
+}
+
 fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -101,9 +113,8 @@ pub fn render_multi_pet_section(
     premium_unlocked: bool,
     email: &str,
     has_primary_pet: bool,
-    primary_pet_name: &str,
     additional_pet_count: usize,
-    additional_pets_html: &str,
+    household_pets_html: &str,
     stripe_enabled: bool,
 ) -> String {
     if !has_primary_pet {
@@ -136,14 +147,20 @@ pub fn render_multi_pet_section(
     };
     let add_action = r#"<p class="add-cat-action"><button type="button" class="add-cat-btn add-cat-trigger">Add another cat 🐱</button></p>"#;
 
-    let roster = if additional_pets_html.trim().is_empty() {
+    let roster = if household_pets_html.trim().is_empty() {
         r#"<p class="your-cats-empty"><span class="your-cats-empty-icon" aria-hidden="true">💕</span> Room for more whiskers — add another kitty when you're ready.</p>"#
             .to_string()
     } else {
         format!(
-            r#"<div class="additional-pet-list your-cats-roster">{additional_pets_html}</div>"#,
-            additional_pets_html = additional_pets_html,
+            r#"<div class="additional-pet-list your-cats-roster">{household_pets_html}</div>"#,
+            household_pets_html = household_pets_html,
         )
+    };
+
+    let roster_footer = if additional_pet_count == 0 && !household_pets_html.trim().is_empty() {
+        r#"<p class="your-cats-empty"><span class="your-cats-empty-icon" aria-hidden="true">💕</span> Room for more whiskers — add another kitty when you're ready.</p>"#
+    } else {
+        ""
     };
 
     format!(
@@ -156,19 +173,14 @@ pub fn render_multi_pet_section(
     </div>
     <span class="your-cats-count-badge" aria-label="{pet_count} cat profiles">{pet_count}</span>
   </div>
-  <p class="your-cats-primary">Caring for <strong>{primary}</strong>{household_note}</p>
   {roster}
+  {roster_footer}
   {add_action}
 </article>"#,
         pet_count = pet_count,
         household_kicker = household_kicker,
-        primary = escape_html(primary_pet_name),
-        household_note = if additional_pets_html.trim().is_empty() {
-            " — and any future fur friends"
-        } else {
-            " plus household friends"
-        },
         roster = roster,
+        roster_footer = roster_footer,
         add_action = add_action,
     )
 }
@@ -204,18 +216,19 @@ pub fn render_add_cat_modal() -> String {
         .to_string()
 }
 
-pub fn render_additional_pet_cards(pets: &[(String, String, String)]) -> String {
+pub fn render_household_pet_cards(pets: &[(String, String, String, String)]) -> String {
     if pets.is_empty() {
         return String::new();
     }
 
     pets.iter()
-        .map(|(name, breed, color)| {
+        .map(|(id, name, breed, color)| {
             let initial = name
                 .chars()
                 .find(|ch| ch.is_alphanumeric())
                 .map(|ch| ch.to_uppercase().to_string())
                 .unwrap_or_else(|| "🐱".to_string());
+            let confirm = escape_js_string(&delete_pet_confirm_message(name));
             format!(
                 r#"<div class="additional-pet-card your-cat-chip">
   <span class="your-cat-avatar" aria-hidden="true">{}</span>
@@ -223,13 +236,19 @@ pub fn render_additional_pet_cards(pets: &[(String, String, String)]) -> String 
     <strong class="your-cat-name">{}</strong>
     <span class="your-cat-meta">{} · {}</span>
   </div>
-  <span class="your-cat-paw" aria-hidden="true">🐾</span>
+  <form class="your-cat-delete-form" action="/home/pets/delete" method="post" onsubmit="return confirm('{confirm}');">
+    <input type="hidden" name="pet_id" value="{}" />
+    <button type="submit" class="your-cat-delete-btn" aria-label="Delete {}">Remove</button>
+  </form>
 </div>"#,
                 escape_html(&initial),
                 escape_html(name),
                 escape_html(breed),
                 escape_html(color),
+                escape_html(id),
+                escape_html(name),
             )
         })
         .collect()
 }
+

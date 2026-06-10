@@ -53,7 +53,7 @@
 
   const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
   const dashboardTabStorageKey = "whiskerDashboardTab";
-  const validTabs = ["pet", "points", "account", "friends", "tasks", "health", "forum", "calendar", "feedback"];
+  const validTabs = ["pet", "points", "account", "friends", "tasks", "health", "forum", "profile", "calendar", "feedback"];
   let calendarReadyForUrlSync = false;
 
   function rememberDashboardTab(tabId) {
@@ -73,7 +73,10 @@
       params.has("status") ||
       params.has("vet_followup") ||
       params.has("thread") ||
-      params.has("feedback")
+      params.has("feedback") ||
+      params.has("chat") ||
+      params.has("posts_view") ||
+      params.has("parent")
     );
   }
 
@@ -92,6 +95,10 @@
 
     if (window.location.pathname === "/home" && !window.location.search) {
       return "pet";
+    }
+
+    if (params.has("parent")) {
+      return "profile";
     }
 
     const urlTab = params.get("tab");
@@ -136,6 +143,11 @@
       cleanParams.delete("thread");
       cleanParams.delete("community");
       cleanParams.delete("breed");
+      cleanParams.delete("posts_view");
+    }
+
+    if (tabId !== "profile") {
+      cleanParams.delete("parent");
     }
 
     if (tabId !== "feedback") {
@@ -166,7 +178,17 @@
   }
 
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => showTab(tab.dataset.tab));
+    tab.addEventListener("click", () => {
+      const tabId = tab.dataset.tab;
+      if (tabId === "profile") {
+        const currentParams = new URLSearchParams(window.location.search);
+        if (currentParams.get("parent")) {
+          window.location.assign("/home?tab=profile");
+          return;
+        }
+      }
+      showTab(tabId);
+    });
   });
 
   const params = new URLSearchParams(window.location.search);
@@ -198,15 +220,6 @@
   function showTaskCompleteToast() {
     showStatusToast("Task completed! Paw Points and XP added.");
   }
-
-  const shareCardModal = document.getElementById("share-card-modal");
-  const shareCardPreview = document.getElementById("share-card-preview");
-  const shareCardCopyBtn = document.getElementById("share-card-copy");
-  const shareCardNativeBtn = document.getElementById("share-card-native");
-  const shareCardTweetBtn = document.getElementById("share-card-tweet");
-  const shareCardCloseBtn = document.getElementById("share-card-close");
-  const shareCardDismissBtn = document.getElementById("share-card-dismiss");
-  let activeShareCard = null;
 
   function formatCareStreakLabel(days) {
     if (typeof days !== "number" || days <= 0) {
@@ -244,135 +257,6 @@
     }
   }
 
-  function renderShareCardPreview(card) {
-    if (!(shareCardPreview instanceof HTMLElement) || !card) {
-      return;
-    }
-
-    const badge =
-      card.kind === "streak"
-        ? `${card.value}-day streak`
-        : `Level ${card.value}`;
-    shareCardPreview.innerHTML = `
-      <span class="share-card-preview-badge">${badge}</span>
-      <p class="share-card-preview-emoji" aria-hidden="true">🐾</p>
-      <p class="share-card-preview-headline">${card.headline}</p>
-      <p class="share-card-preview-subline">${card.subline}</p>
-    `;
-  }
-
-  function closeShareCardModal() {
-    if (!(shareCardModal instanceof HTMLElement)) {
-      return;
-    }
-    shareCardModal.hidden = true;
-    activeShareCard = null;
-  }
-
-  function openShareCardModal(card) {
-    if (!(shareCardModal instanceof HTMLElement) || !card?.url) {
-      return;
-    }
-
-    activeShareCard = card;
-    renderShareCardPreview(card);
-
-    if (shareCardTweetBtn instanceof HTMLAnchorElement) {
-      const text = `${card.headline} ${card.url}`;
-      shareCardTweetBtn.href = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-    }
-
-    if (shareCardNativeBtn instanceof HTMLButtonElement) {
-      const canShare = typeof navigator.share === "function";
-      shareCardNativeBtn.hidden = !canShare;
-    }
-
-    shareCardModal.hidden = false;
-  }
-
-  async function copyActiveShareLink() {
-    if (!activeShareCard?.url) {
-      return;
-    }
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(activeShareCard.url);
-      } else {
-        throw new Error("clipboard unavailable");
-      }
-      showStatusToast("Share link copied!");
-    } catch (_error) {
-      showStatusToast("Could not copy the link. Try again.", true);
-    }
-  }
-
-  async function nativeShareActiveCard() {
-    if (!activeShareCard?.url || typeof navigator.share !== "function") {
-      return;
-    }
-
-    try {
-      await navigator.share({
-        title: activeShareCard.headline,
-        text: activeShareCard.subline,
-        url: activeShareCard.url,
-      });
-    } catch (error) {
-      if (error?.name !== "AbortError") {
-        showStatusToast("Could not open the share sheet.", true);
-      }
-    }
-  }
-
-  if (shareCardCopyBtn instanceof HTMLButtonElement) {
-    shareCardCopyBtn.addEventListener("click", () => {
-      copyActiveShareLink();
-    });
-  }
-
-  if (shareCardNativeBtn instanceof HTMLButtonElement) {
-    shareCardNativeBtn.addEventListener("click", () => {
-      nativeShareActiveCard();
-    });
-  }
-
-  if (shareCardCloseBtn instanceof HTMLButtonElement) {
-    shareCardCloseBtn.addEventListener("click", closeShareCardModal);
-  }
-
-  if (shareCardDismissBtn instanceof HTMLButtonElement) {
-    shareCardDismissBtn.addEventListener("click", closeShareCardModal);
-  }
-
-  if (shareCardModal instanceof HTMLElement) {
-    shareCardModal.addEventListener("click", (event) => {
-      if (event.target === shareCardModal) {
-        closeShareCardModal();
-      }
-    });
-  }
-
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-
-    const shareBtn = target.closest(".share-streak-btn");
-    if (!(shareBtn instanceof HTMLButtonElement)) {
-      return;
-    }
-
-    openShareCardModal({
-      url: shareBtn.dataset.shareUrl || "",
-      headline: shareBtn.dataset.shareHeadline || "",
-      subline: "Daily cat care on WhiskerWatch",
-      kind: shareBtn.dataset.shareKind || "streak",
-      value: Number(shareBtn.dataset.shareValue || 0),
-    });
-  });
-
   const requestedTab = params.get("tab");
   const initialTab = resolveInitialTab(params);
   showTab(initialTab);
@@ -380,9 +264,26 @@
 
   if (tabList) {
     tabList.addEventListener("scroll", updateDashboardTabsEdgeFade, { passive: true });
+    tabList.addEventListener(
+      "wheel",
+      (event) => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+          return;
+        }
+        if (tabList.scrollWidth <= tabList.clientWidth + 1) {
+          return;
+        }
+        tabList.scrollLeft += event.deltaY;
+        event.preventDefault();
+        updateDashboardTabsEdgeFade();
+      },
+      { passive: false }
+    );
   }
 
   window.addEventListener("resize", updateDashboardTabsEdgeFade);
+  window.addEventListener("pageshow", releaseDashboardScrollIfIdle);
+  releaseDashboardScrollIfIdle();
 
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) {
@@ -393,6 +294,12 @@
       showTab(savedTab);
     }
   });
+
+  const requestedParent = params.get("parent");
+  if (requestedTab === "profile" && requestedParent) {
+    const profilePanel = document.getElementById("panel-profile");
+    profilePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   const requestedThread = params.get("thread");
   if (requestedTab === "forum" && requestedThread) {
@@ -542,10 +449,237 @@
     }
   }
 
+  const tasksPetSelectionStorageKey = "whiskerTasksPetSelection";
+
+  function readTasksPetSelection() {
+    try {
+      const raw = sessionStorage.getItem(tasksPetSelectionStorageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.petId !== "string") {
+        return null;
+      }
+      return {
+        petId: parsed.petId,
+        petOwner: typeof parsed.petOwner === "string" ? parsed.petOwner : "",
+      };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeTasksPetSelection(petId, petOwner) {
+    sessionStorage.setItem(
+      tasksPetSelectionStorageKey,
+      JSON.stringify({ petId, petOwner: petOwner || "" })
+    );
+  }
+
+  function readTasksPetTargets(carousel) {
+    return Array.from(carousel.querySelectorAll(".tasks-pet-dot"))
+      .filter((dot) => dot instanceof HTMLButtonElement)
+      .map((dot) => ({
+        petId: dot.dataset.petId || "",
+        petOwner: dot.dataset.petOwner || "",
+        petLabel: dot.dataset.petLabel || "",
+      }));
+  }
+
+  function activeTasksPetIndex(targets, petId, petOwner) {
+    const owner = petOwner || "";
+    return targets.findIndex(
+      (target) => target.petId === petId && target.petOwner === owner
+    );
+  }
+
+  function updateTasksPetArrows(carousel, activeIndex, total) {
+    const prev = carousel.querySelector(".tasks-pet-arrow-prev");
+    const next = carousel.querySelector(".tasks-pet-arrow-next");
+    if (prev instanceof HTMLButtonElement) {
+      prev.disabled = activeIndex <= 0;
+    }
+    if (next instanceof HTMLButtonElement) {
+      next.disabled = activeIndex < 0 || activeIndex >= total - 1;
+    }
+  }
+
+  function showTasksPetPanel(carousel, petId, petOwner) {
+    if (!(carousel instanceof HTMLElement)) {
+      return;
+    }
+
+    const owner = petOwner || "";
+    const panels = carousel.querySelectorAll(".tasks-pet-panel");
+    const dots = carousel.querySelectorAll(".tasks-pet-dot");
+    const label = carousel.querySelector(".tasks-pet-dot-label");
+    let activeLabel = "";
+
+    panels.forEach((panel) => {
+      if (!(panel instanceof HTMLElement)) {
+        return;
+      }
+      const match =
+        panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
+      panel.hidden = !match;
+      panel.classList.toggle("is-active", match);
+      if (match) {
+        activeLabel = panel.dataset.petLabel || "";
+      }
+    });
+
+    dots.forEach((dot) => {
+      if (!(dot instanceof HTMLButtonElement)) {
+        return;
+      }
+      const match =
+        dot.dataset.petId === petId && (dot.dataset.petOwner || "") === owner;
+      dot.classList.toggle("is-active", match);
+      dot.setAttribute("aria-current", match ? "true" : "false");
+      if (match) {
+        activeLabel = dot.dataset.petLabel || activeLabel;
+      }
+    });
+
+    if (label instanceof HTMLElement && activeLabel) {
+      label.textContent = activeLabel;
+    }
+
+    const targets = readTasksPetTargets(carousel);
+    updateTasksPetArrows(
+      carousel,
+      activeTasksPetIndex(targets, petId, owner),
+      targets.length
+    );
+
+    writeTasksPetSelection(petId, owner);
+  }
+
+  function showTasksPetPanelAtIndex(carousel, index) {
+    const targets = readTasksPetTargets(carousel);
+    const target = targets[index];
+    if (!target) {
+      return;
+    }
+    showTasksPetPanel(carousel, target.petId, target.petOwner);
+  }
+
+  function setupTasksPetSwitcher(carousel) {
+    if (!(carousel instanceof HTMLElement)) {
+      return;
+    }
+
+    const dots = carousel.querySelectorAll(".tasks-pet-dot");
+    dots.forEach((dot) => {
+      if (!(dot instanceof HTMLButtonElement)) {
+        return;
+      }
+      dot.addEventListener("click", () => {
+        showTasksPetPanel(
+          carousel,
+          dot.dataset.petId || "",
+          dot.dataset.petOwner || ""
+        );
+      });
+    });
+
+    const prevArrow = carousel.querySelector(".tasks-pet-arrow-prev");
+    const nextArrow = carousel.querySelector(".tasks-pet-arrow-next");
+    if (prevArrow instanceof HTMLButtonElement) {
+      prevArrow.addEventListener("click", () => {
+        const targets = readTasksPetTargets(carousel);
+        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
+        const currentIndex =
+          activePanel instanceof HTMLElement
+            ? activeTasksPetIndex(
+                targets,
+                activePanel.dataset.petId || "",
+                activePanel.dataset.petOwner || ""
+              )
+            : 0;
+        if (currentIndex > 0) {
+          showTasksPetPanelAtIndex(carousel, currentIndex - 1);
+        }
+      });
+    }
+    if (nextArrow instanceof HTMLButtonElement) {
+      nextArrow.addEventListener("click", () => {
+        const targets = readTasksPetTargets(carousel);
+        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
+        const currentIndex =
+          activePanel instanceof HTMLElement
+            ? activeTasksPetIndex(
+                targets,
+                activePanel.dataset.petId || "",
+                activePanel.dataset.petOwner || ""
+              )
+            : 0;
+        if (currentIndex >= 0 && currentIndex < targets.length - 1) {
+          showTasksPetPanelAtIndex(carousel, currentIndex + 1);
+        }
+      });
+    }
+
+    const saved = readTasksPetSelection();
+    if (saved) {
+      const hasPanel = Array.from(carousel.querySelectorAll(".tasks-pet-panel")).some(
+        (panel) =>
+          panel instanceof HTMLElement &&
+          panel.dataset.petId === saved.petId &&
+          (panel.dataset.petOwner || "") === saved.petOwner
+      );
+      if (hasPanel) {
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
+        return;
+      }
+    }
+
+    const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
+    if (activePanel instanceof HTMLElement) {
+      showTasksPetPanel(
+        carousel,
+        activePanel.dataset.petId || "",
+        activePanel.dataset.petOwner || ""
+      );
+    }
+  }
+
+  function mountTasksPanel(html) {
+    const container = document.getElementById("tasks-panel-content");
+    if (!(container instanceof HTMLElement) || typeof html !== "string") {
+      return;
+    }
+
+    const saved = readTasksPetSelection();
+    container.innerHTML = html;
+    const carousel = container.querySelector("#tasks-panel-carousel");
+    if (!(carousel instanceof HTMLElement)) {
+      return;
+    }
+
+    setupTasksPetSwitcher(carousel);
+    if (saved) {
+      const hasPanel = Array.from(carousel.querySelectorAll(".tasks-pet-panel")).some(
+        (panel) =>
+          panel instanceof HTMLElement &&
+          panel.dataset.petId === saved.petId &&
+          (panel.dataset.petOwner || "") === saved.petOwner
+      );
+      if (hasPanel) {
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
+      }
+    }
+  }
+
   function updateDashboardFromTaskToggle(data) {
-    const tasksPanelList = document.getElementById("tasks-panel-list");
-    if (tasksPanelList && typeof data.tasks_html === "string") {
-      tasksPanelList.innerHTML = data.tasks_html;
+    if (typeof data.tasks_panel_html === "string") {
+      mountTasksPanel(data.tasks_panel_html);
+    } else if (typeof data.tasks_html === "string") {
+      const activePanel = document.querySelector(".tasks-pet-panel.is-active .tasks-pet-task-list");
+      if (activePanel instanceof HTMLElement) {
+        activePanel.innerHTML = data.tasks_html;
+      }
     }
 
     const activityList = document.querySelector("#panel-points .activity-list");
@@ -715,8 +849,8 @@
         showStatusToast("Custom task removed.");
       } else if (data.status === "completed") {
         showTaskCompleteToast();
-        if (data.share_card) {
-          openShareCardModal(data.share_card);
+        if (data.share_card && typeof window.whiskerOpenShareCard === "function") {
+          window.whiskerOpenShareCard(data.share_card);
         }
       } else if (data.status === "reopened") {
         showStatusToast("Task marked incomplete. Paw points for that task were deducted.");
@@ -789,6 +923,7 @@
     }
     taskTimeModal.setAttribute("hidden", "");
     document.body.classList.remove("modal-open");
+    unlockModalBodyScroll();
     activeTaskTimeId = "";
     activeTaskTimePetId = "";
   }
@@ -817,6 +952,7 @@
     taskTimeSlider.value = String(minutes);
     updateTaskTimeLabel();
     taskTimeModal.removeAttribute("hidden");
+    lockModalBodyScroll();
     document.body.classList.add("modal-open");
     taskTimeSlider.focus();
   }
@@ -933,12 +1069,11 @@
   document.addEventListener("pointerup", handleTaskTimeButtonActivate, true);
 
   const calendarDataEl = document.getElementById("calendar-data");
-  const eventList = document.getElementById("event-list");
-  const taskList = document.getElementById("calendar-day-tasks");
   const eventsHeading = document.getElementById("calendar-events-heading");
-  const tasksHeading = document.getElementById("calendar-tasks-heading");
-  const eventsSubheading = document.getElementById("calendar-events-subheading");
   const dayHint = document.getElementById("calendar-day-hint");
+  const dayProgress = document.getElementById("calendar-day-progress");
+  const dayDetail = document.getElementById("calendar-day-detail");
+  const scheduleList = document.getElementById("calendar-schedule");
   const calendarGrid = document.getElementById("calendar-grid");
   const calendarMonthLabel = document.getElementById("calendar-month-label");
   const calendarPrevMonth = document.getElementById("calendar-prev-month");
@@ -1008,79 +1143,172 @@
       .replace(/"/g, "&quot;");
   }
 
-  function taskSchedulePrefix(taskId) {
-    return taskId === "play_session" ? "Today" : "Daily";
+  function isTodayDate(day, month, year) {
+    return (
+      day === now.getDate() &&
+      month === now.getMonth() + 1 &&
+      year === now.getFullYear()
+    );
+  }
+
+  function sortByTime(left, right) {
+    return (
+      (left.time_minutes ?? 600) - (right.time_minutes ?? 600) ||
+      String(left.title).localeCompare(String(right.title))
+    );
   }
 
   function sortTasksByTime(tasks) {
     return [...tasks].sort(
       (left, right) =>
-        (left.time_minutes ?? 600) - (right.time_minutes ?? 600) ||
-        String(left.title).localeCompare(String(right.title)) ||
-        String(left.id).localeCompare(String(right.id))
+        sortByTime(left, right) || String(left.id).localeCompare(String(right.id))
     );
   }
 
-  function renderTaskDueHtml(task) {
+  function formatScheduleTime(timeMinutes) {
+    return formatTimeLabelFromMinutes(timeMinutes ?? 600);
+  }
+
+  function shortenCareEventTitle(title) {
+    const value = String(title);
+    if (/^feed\b/i.test(value) || value.includes("feeding")) {
+      return "Feeding";
+    }
+    if (value.includes("water bowl")) {
+      return value.toLowerCase().includes("evening") ? "Evening water" : "Morning water";
+    }
+    if (value.includes("litter")) {
+      return value.includes("Replace") ? "Replace litter" : "Litter check";
+    }
+    if (value.includes("play session")) {
+      return "Playtime";
+    }
+    return value.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  }
+
+  function renderCalendarTaskTimeControl(task) {
     if (!task.adjustable_time) {
-      return `${escapeHtml(task.due_label)} · +${task.reward} pts`;
+      return `<span class="calendar-schedule-meta">+${task.reward} pts</span>`;
     }
 
-    const prefix = taskSchedulePrefix(task.id);
     const timeValue = task.time_value || "08:00";
     const timeMinutes = task.time_minutes ?? 480;
-    const timeLabel = formatTimeLabelFromMinutes(timeMinutes);
     const petId = task.pet_id || "";
-    return `<span class="task-schedule-prefix">${prefix}</span> · <button type="button" class="task-time-btn" data-task-id="${escapeHtml(task.id)}" data-pet-id="${escapeHtml(petId)}" data-time="${escapeHtml(timeValue)}" data-time-minutes="${timeMinutes}" data-task-title="${escapeHtml(task.title)}" aria-label="Change time for ${escapeHtml(task.title)}">${escapeHtml(timeLabel)}</button> · +${task.reward} pts`;
+    return `<button type="button" class="calendar-schedule-time-btn task-time-btn" data-task-id="${escapeHtml(task.id)}" data-pet-id="${escapeHtml(petId)}" data-time="${escapeHtml(timeValue)}" data-time-minutes="${timeMinutes}" data-task-title="${escapeHtml(task.title)}" aria-label="Change time for ${escapeHtml(task.title)}">${escapeHtml(formatScheduleTime(timeMinutes))}</button>`;
   }
 
-  function renderDayTasks(tasks) {
-    if (!taskList || !tasksHeading) {
-      return;
-    }
-
-    if (tasks.length === 0) {
-      tasksHeading.hidden = true;
-      taskList.hidden = true;
-      taskList.innerHTML = "";
-      return;
-    }
-
-    tasksHeading.hidden = false;
-    taskList.hidden = false;
-    taskList.innerHTML = sortTasksByTime(tasks)
-      .map((task) => {
-        const completedClass = task.completed ? " completed" : "";
-        const buttonLabel = task.completed ? "Mark incomplete" : "Complete";
-        const petId = task.pet_id || "";
-        return `<li class="task-item${completedClass}"><div><p class="task-title">${escapeHtml(task.title)}</p><p class="task-due">${renderTaskDueHtml(task)}</p></div><form action="/home/tasks/toggle" method="post"><input type="hidden" name="task_id" value="${escapeHtml(task.id)}" /><input type="hidden" name="pet_id" value="${escapeHtml(petId)}" /><button type="submit" class="download-btn task-toggle-btn">${buttonLabel}</button></form></li>`;
-      })
-      .join("");
+  function renderCalendarTaskDeleteForm(task) {
+    const petId = task.pet_id || "";
+    return `<form class="calendar-schedule-delete" action="/home/tasks/delete" method="post" onsubmit="return confirm('Remove this task?');">
+      <input type="hidden" name="task_id" value="${escapeHtml(task.id)}" />
+      <input type="hidden" name="pet_id" value="${escapeHtml(petId)}" />
+      <button type="submit" class="calendar-task-delete" aria-label="Remove ${escapeHtml(task.title)}">−</button>
+    </form>`;
   }
 
-  function renderDayEvents(events) {
-    if (!eventList || !eventsSubheading) {
+  function renderCalendarTaskRow(task, actionable) {
+    const completedClass = task.completed ? " is-done" : "";
+    const timeMinutes = task.time_minutes ?? 600;
+    const petId = task.pet_id || "";
+    const toggleAction = actionable
+      ? `<form class="calendar-schedule-action" action="/home/tasks/toggle" method="post">
+          <input type="hidden" name="task_id" value="${escapeHtml(task.id)}" />
+          <input type="hidden" name="pet_id" value="${escapeHtml(petId)}" />
+          <button type="submit" class="calendar-task-check${task.completed ? " is-checked" : ""}" aria-label="${task.completed ? "Mark incomplete" : "Mark complete"}"></button>
+        </form>`
+      : `<span class="calendar-schedule-status${task.completed ? " is-done" : ""}" aria-hidden="true">${task.completed ? "✓" : "·"}</span>`;
+    const deleteAction =
+      actionable && task.deletable ? renderCalendarTaskDeleteForm(task) : "";
+    const action = `<div class="calendar-schedule-actions">${toggleAction}${deleteAction}</div>`;
+
+    return `<li class="calendar-schedule-item calendar-schedule-item--task${completedClass}">
+      <span class="calendar-schedule-time">${escapeHtml(formatScheduleTime(timeMinutes))}</span>
+      <div class="calendar-schedule-main">
+        <span class="calendar-schedule-label">${escapeHtml(task.title)}</span>
+        ${renderCalendarTaskTimeControl(task)}
+      </div>
+      ${action}
+    </li>`;
+  }
+
+  function renderCalendarEventRow(event) {
+    return `<li class="calendar-schedule-item calendar-schedule-item--event">
+      <span class="calendar-schedule-time">${escapeHtml(event.time_label || formatScheduleTime(event.time_minutes))}</span>
+      <div class="calendar-schedule-main">
+        <span class="calendar-schedule-label">${escapeHtml(event.title)}</span>
+        <span class="calendar-schedule-meta">Your event</span>
+      </div>
+    </li>`;
+  }
+
+  function renderCalendarCarePreviewRow(event) {
+    return `<li class="calendar-schedule-item calendar-schedule-item--preview">
+      <span class="calendar-schedule-time">${escapeHtml(event.time_label || formatScheduleTime(event.time_minutes))}</span>
+      <span class="calendar-schedule-label">${escapeHtml(shortenCareEventTitle(event.title))}</span>
+    </li>`;
+  }
+
+  function renderDaySchedule(day, month, year, tasks, events) {
+    if (!scheduleList || !dayDetail) {
       return;
     }
 
-    if (events.length === 0) {
-      eventsSubheading.hidden = true;
-      eventList.innerHTML = "";
-      return;
+    const isToday = isTodayDate(day, month, year);
+    const userEvents = events.filter((event) => event.user_created);
+    const generatedEvents = events.filter((event) => !event.user_created);
+    const sortedTasks = sortTasksByTime(tasks);
+    const useTaskChecklist = isToday && sortedTasks.length > 0;
+    const carePreviewEvents = useTaskChecklist
+      ? []
+      : [...generatedEvents].sort(sortByTime);
+
+    let html = "";
+
+    if (useTaskChecklist) {
+      html += `<li class="calendar-schedule-section">Today's care</li>`;
+      html += sortedTasks.map((task) => renderCalendarTaskRow(task, true)).join("");
+    } else if (carePreviewEvents.length > 0) {
+      const collapsed = carePreviewEvents.length > 4 ? "" : " open";
+      html += `<li class="calendar-schedule-group">
+        <details class="calendar-care-group"${collapsed}>
+          <summary class="calendar-care-group-summary">
+            <span class="calendar-care-group-title">Daily care routine</span>
+            <span class="calendar-care-group-count">${carePreviewEvents.length} reminders</span>
+          </summary>
+          <ul class="calendar-care-group-list">
+            ${carePreviewEvents.map((event) => renderCalendarCarePreviewRow(event)).join("")}
+          </ul>
+        </details>
+      </li>`;
+    } else if (sortedTasks.length > 0) {
+      html += `<li class="calendar-schedule-section">Scheduled tasks</li>`;
+      html += sortedTasks.map((task) => renderCalendarTaskRow(task, isToday)).join("");
     }
 
-    eventsSubheading.hidden = false;
-    const sortedEvents = [...events].sort(
-      (left, right) =>
-        (left.time_minutes ?? 600) - (right.time_minutes ?? 600) ||
-        String(left.title).localeCompare(String(right.title))
-    );
-    eventList.innerHTML = sortedEvents
-      .map(
-        (event) =>
-          `<li><strong>${escapeHtml(event.time_label)}</strong> — ${escapeHtml(event.title)}</li>`
-      )
-      .join("");
+    if (userEvents.length > 0) {
+      html += `<li class="calendar-schedule-section">Your events</li>`;
+      html += [...userEvents].sort(sortByTime).map((event) => renderCalendarEventRow(event)).join("");
+    }
+
+    const hasContent = Boolean(html);
+    dayDetail.hidden = !hasContent;
+    scheduleList.innerHTML = html;
+
+    if (dayProgress) {
+      if (useTaskChecklist) {
+        const done = sortedTasks.filter((task) => task.completed).length;
+        dayProgress.textContent = `${done} of ${sortedTasks.length} done today`;
+        dayProgress.hidden = false;
+      } else if (carePreviewEvents.length > 0) {
+        dayProgress.textContent = `${carePreviewEvents.length} daily reminders`;
+        dayProgress.hidden = false;
+      } else {
+        dayProgress.hidden = true;
+        dayProgress.textContent = "";
+      }
+    }
+
+    return hasContent;
   }
 
   function daysInMonth(month, year) {
@@ -1262,14 +1490,12 @@
 
     const dayEvents = calendarPayload.events.filter((event) => matchesDate(event, day, month, year));
     const dayTasks = calendarPayload.tasks.filter((task) => matchesDate(task, day, month, year));
+    const hasSchedule = renderDaySchedule(day, month, year, dayTasks, dayEvents);
 
-    renderDayTasks(dayTasks);
-    renderDayEvents(dayEvents);
-
-    if (dayEvents.length === 0 && dayTasks.length === 0 && eventList) {
-      eventList.innerHTML = '<li class="calendar-empty">Nothing scheduled for this day.</li>';
-      if (eventsSubheading) {
-        eventsSubheading.hidden = true;
+    if (dayHint) {
+      dayHint.hidden = hasSchedule;
+      if (!hasSchedule) {
+        dayHint.textContent = "Nothing scheduled for this day.";
       }
     }
 
@@ -1431,30 +1657,39 @@
     });
   }
 
-  const lastVetDateInput = document.getElementById("last_vet_date");
   const neverBeenToVetCheckbox = document.getElementById("never_been_to_vet");
 
+  function vetDatePickers() {
+    return document.querySelectorAll('[data-cute-date-picker][data-kind="vet"]');
+  }
+
   function syncLastVetDateField() {
-    if (!lastVetDateInput || !neverBeenToVetCheckbox) {
+    if (!neverBeenToVetCheckbox) {
       return;
     }
 
     const never = neverBeenToVetCheckbox.checked;
-    lastVetDateInput.disabled = never;
-    lastVetDateInput.setAttribute("aria-disabled", never ? "true" : "false");
-    if (never) {
-      lastVetDateInput.value = "";
-    }
+    vetDatePickers().forEach((picker) => {
+      if (!(picker instanceof HTMLElement)) {
+        return;
+      }
+      if (never) {
+        window.whiskerClearCuteDatePicker?.(picker);
+      }
+      window.whiskerSetCuteDatePickerDisabled?.(picker, never);
+    });
   }
 
-  if (neverBeenToVetCheckbox && lastVetDateInput) {
+  if (neverBeenToVetCheckbox) {
     neverBeenToVetCheckbox.addEventListener("change", syncLastVetDateField);
-    lastVetDateInput.addEventListener("input", () => {
-      if (lastVetDateInput.value && neverBeenToVetCheckbox.checked) {
-        neverBeenToVetCheckbox.checked = false;
-        lastVetDateInput.disabled = false;
-        lastVetDateInput.setAttribute("aria-disabled", "false");
-      }
+    vetDatePickers().forEach((picker) => {
+      const hidden = picker.querySelector('input[type="hidden"][name="last_vet_date"]');
+      hidden?.addEventListener("input", () => {
+        if (hidden instanceof HTMLInputElement && hidden.value && neverBeenToVetCheckbox.checked) {
+          neverBeenToVetCheckbox.checked = false;
+          syncLastVetDateField();
+        }
+      });
     });
   }
 
@@ -1504,6 +1739,26 @@
     window.scrollTo(0, modalBodyScrollLockY);
   }
 
+  function dashboardModalIsOpen() {
+    return Array.from(
+      document.querySelectorAll(".onboarding-backdrop, #share-card-modal")
+    ).some(
+      (element) =>
+        element instanceof HTMLElement &&
+        !element.hidden &&
+        !element.hasAttribute("hidden")
+    );
+  }
+
+  function releaseDashboardScrollIfIdle() {
+    if (dashboardModalIsOpen()) {
+      return;
+    }
+
+    document.body.classList.remove("modal-open");
+    unlockModalBodyScroll();
+  }
+
   function clampMediaFramerZoomInputs(form) {
     if (!(form instanceof HTMLFormElement)) {
       return;
@@ -1514,18 +1769,22 @@
         return;
       }
 
+      const min = Number.parseFloat(slider.min);
       const max = Number.parseFloat(slider.max);
       let value = Number.parseFloat(slider.value);
       if (!Number.isFinite(value)) {
-        value = 0;
+        value = Number.isFinite(min) ? min : 0;
       }
-      if (Number.isFinite(max)) {
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        value = Math.min(max, Math.max(min, value));
+      } else if (Number.isFinite(max)) {
         value = Math.min(max, Math.max(0, value));
+      } else if (Number.isFinite(min)) {
+        value = Math.max(min, value);
       } else {
         value = Math.max(0, value);
       }
 
-      slider.min = "0";
       slider.value = String(value);
       slider.setCustomValidity("");
     });
@@ -1822,6 +2081,133 @@
       videoEl.src = previewUrl;
     }
 
+    function loadFromUrl(url, clipState = {}) {
+      if (!previewRoot || !url) {
+        return;
+      }
+
+      resetPetVideoTrim();
+      previewRoot.hidden = false;
+      previewRoot.innerHTML = `
+        <div class="pet-video-trim-editor">
+          <p class="pet-video-trim-hint">Drag to reposition and zoom your current clip, then adjust the loop timing.</p>
+          <div class="pet-video-trim-frame pet-video-framer-stage" data-video-framer-stage>
+            <video class="pet-video-trim-preview pet-video-framer-video" muted playsinline preload="metadata"></video>
+          </div>
+          <label class="pet-video-framer-zoom-label" for="${zoomSliderId}">Zoom
+            <input id="${zoomSliderId}" type="range" class="pet-video-framer-zoom" min="0" max="3" step="0.01" value="1" />
+          </label>
+          <label for="${startSliderId}">Clip start</label>
+          <input id="${startSliderId}" type="range" min="0" max="0" step="0.1" value="0" />
+          <label for="${durationSliderId}">Clip length (3–6 sec)</label>
+          <input id="${durationSliderId}" type="range" min="${petVideoClipMinDuration}" max="${petVideoClipMaxDuration}" step="0.1" value="${petVideoClipMaxDuration}" />
+          <output id="${labelId}" class="pet-video-clip-label" for="${startSliderId}">0:00 – 0:06 (6.0s)</output>
+        </div>
+      `;
+
+      const videoEl = previewRoot.querySelector(".pet-video-trim-preview");
+      const stageEl = previewRoot.querySelector("[data-video-framer-stage]");
+      const zoomSlider = previewRoot.querySelector(`#${zoomSliderId}`);
+      const startSlider = previewRoot.querySelector(`#${startSliderId}`);
+      const durationSlider = previewRoot.querySelector(`#${durationSliderId}`);
+      if (
+        !(videoEl instanceof HTMLVideoElement) ||
+        !(stageEl instanceof HTMLElement) ||
+        !(zoomSlider instanceof HTMLInputElement) ||
+        !(startSlider instanceof HTMLInputElement) ||
+        !(durationSlider instanceof HTMLInputElement)
+      ) {
+        resetPetVideoTrim();
+        return;
+      }
+
+      trimState = {
+        active: true,
+        previewUrl: null,
+        videoEl,
+        duration: 0,
+        clipStart: 0,
+        clipDuration: petVideoClipMaxDuration,
+        pendingClipRestore: clipState,
+        pendingFramingRestore: clipState.framing ?? null,
+        framing: null,
+      };
+
+      videoEl.addEventListener("loadedmetadata", () => {
+        if (!trimState) {
+          return;
+        }
+
+        const duration = Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+        if (duration < petVideoClipMinDuration) {
+          resetPetVideoTrim();
+          showStatusToast("This clip is too short to resize.");
+          return;
+        }
+
+        trimState.duration = duration;
+        trimState.clipDuration = clampPetVideoClipDuration(
+          Math.min(petVideoClipMaxDuration, duration),
+          duration,
+          0
+        );
+
+        if (trimState.pendingClipRestore) {
+          const clipStart = Number.parseFloat(trimState.pendingClipRestore.clipStart) || 0;
+          const clipDuration =
+            Number.parseFloat(trimState.pendingClipRestore.clipDuration) || petVideoClipMaxDuration;
+          trimState.clipStart = Math.min(Math.max(0, clipStart), maxStartForClip());
+          trimState.clipDuration = clampPetVideoClipDuration(
+            clipDuration,
+            duration,
+            trimState.clipStart
+          );
+          trimState.pendingClipRestore = null;
+        }
+
+        const framingRestore = trimState.pendingFramingRestore;
+        trimState.pendingFramingRestore = null;
+        trimState.framing = window.whiskerPetVideoFramer?.attachEditor?.({
+          videoEl,
+          stageEl,
+          zoomEl: zoomSlider,
+          zoomInput,
+          offsetXInput,
+          offsetYInput,
+          onUpdate: notifyTrimUpdate,
+          framing: framingRestore,
+        });
+
+        syncPetVideoClipUi();
+        stabilizeModalScrollAfterMediaPick(previewRoot);
+      });
+
+      videoEl.addEventListener("timeupdate", () => {
+        if (!trimState) {
+          return;
+        }
+        const end = trimState.clipStart + trimState.clipDuration;
+        if (videoEl.currentTime >= end) {
+          videoEl.currentTime = trimState.clipStart;
+        }
+      });
+
+      startSlider.addEventListener("input", () => {
+        setPetVideoClipStart(Number(startSlider.value));
+      });
+
+      durationSlider.addEventListener("input", () => {
+        setPetVideoClipDuration(Number(durationSlider.value));
+      });
+
+      videoEl.addEventListener("error", () => {
+        resetPetVideoTrim();
+        showStatusToast("Could not load your current playing clip.");
+      });
+
+      videoEl.src = url;
+    }
+
     function bindVideoInputChange({ skipWhen, onFileSelected }) {
       if (!(videoInput instanceof HTMLInputElement) || !previewRoot) {
         return;
@@ -1889,6 +2275,7 @@
       resetPetVideoTrim,
       bindVideoInputChange,
       restoreFromFile,
+      loadFromUrl,
       setOnTrimUpdate,
       getClipState,
       getFramingState,
@@ -1967,6 +2354,7 @@
   });
 
   uploadPetVideoTrim.bindVideoInputChange({});
+  uploadPetVideoTrim.setOnTrimUpdate(syncUploadPetVideoHiddenInputs);
 
   const addCatForm = document.querySelector("#add-cat-modal .add-cat-onboarding-form");
   const addCatVideoInput = document.getElementById("add_cat_video");
@@ -2017,6 +2405,206 @@
   window.whiskerAddCatPetVideoTrim = addCatPetVideoTrim;
   window.whiskerSyncAddCatPetVideoField = syncAddCatPetVideoField;
 
+  const petVideoUploadForm = document.getElementById("pet-video-upload-form");
+  const petVideoUploadModePicker = document.getElementById("pet-video-upload-mode-picker");
+  const petVideoUploadIntro = document.getElementById("pet-video-upload-intro");
+  const petVideoUploadFieldHint = document.getElementById("pet-video-upload-field-hint");
+  const petVideoUploadPicker = document.getElementById("pet-video-upload-picker");
+  let accountVideoMode = "upload";
+
+  function readAccountPetMediaDataset() {
+    const stage = document.getElementById("account-pet-photo-stage");
+    if (!(stage instanceof HTMLElement)) {
+      return null;
+    }
+    return stage.dataset;
+  }
+
+  function readPetVideoFramingFromPreview(previewRoot, zoomSliderId, offsetXInput, offsetYInput) {
+    const zoomSlider = previewRoot?.querySelector(`#${zoomSliderId}`);
+    const scale = Number.parseFloat(zoomSlider?.value ?? "");
+    if (!Number.isFinite(scale) || scale <= 0) {
+      return null;
+    }
+
+    const offsetX = Number.parseFloat(offsetXInput?.value ?? "0");
+    const offsetY = Number.parseFloat(offsetYInput?.value ?? "0");
+    return {
+      scale,
+      offsetX: Number.isFinite(offsetX) ? offsetX : 0,
+      offsetY: Number.isFinite(offsetY) ? offsetY : 0,
+    };
+  }
+
+  function syncPetVideoHiddenInputs({
+    trimController,
+    previewRoot,
+    zoomSliderId,
+    clipStartInput,
+    clipDurationInput,
+    zoomInput,
+    offsetXInput,
+    offsetYInput,
+  }) {
+    const clip = trimController?.getClipState?.();
+    let framing = trimController?.getFramingState?.();
+    if (!framing) {
+      framing = readPetVideoFramingFromPreview(
+        previewRoot,
+        zoomSliderId,
+        offsetXInput,
+        offsetYInput
+      );
+    }
+
+    if (clip) {
+      if (clipStartInput instanceof HTMLInputElement) {
+        clipStartInput.value = String(clip.clipStart);
+      }
+      if (clipDurationInput instanceof HTMLInputElement) {
+        clipDurationInput.value = String(clip.clipDuration);
+      }
+    }
+    if (framing) {
+      if (zoomInput instanceof HTMLInputElement) {
+        zoomInput.value = String(framing.scale);
+      }
+      if (offsetXInput instanceof HTMLInputElement) {
+        offsetXInput.value = String(framing.offsetX);
+      }
+      if (offsetYInput instanceof HTMLInputElement) {
+        offsetYInput.value = String(framing.offsetY);
+      }
+    }
+  }
+
+  function syncUploadPetVideoHiddenInputs() {
+    syncPetVideoHiddenInputs({
+      trimController: uploadPetVideoTrim,
+      previewRoot: uploadPetVideoPreview,
+      zoomSliderId: "upload-pet-video-zoom-slider",
+      clipStartInput: uploadPetVideoClipStartInput,
+      clipDurationInput: uploadPetVideoClipDurationInput,
+      zoomInput: uploadPetVideoZoomInput,
+      offsetXInput: uploadPetVideoOffsetXInput,
+      offsetYInput: uploadPetVideoOffsetYInput,
+    });
+  }
+
+  function syncOnboardingPetVideoHiddenInputs() {
+    syncPetVideoHiddenInputs({
+      trimController: onboardingPetVideoTrim,
+      previewRoot: petVideoPreview,
+      zoomSliderId: "pet-video-zoom-slider",
+      clipStartInput: petVideoClipStartInput,
+      clipDurationInput: petVideoClipDurationInput,
+      zoomInput: petVideoZoomInput,
+      offsetXInput: petVideoOffsetXInput,
+      offsetYInput: petVideoOffsetYInput,
+    });
+  }
+
+  function syncAddCatPetVideoHiddenInputs() {
+    syncPetVideoHiddenInputs({
+      trimController: addCatPetVideoTrim,
+      previewRoot: addCatVideoPreview,
+      zoomSliderId: "add-cat-video-zoom-slider",
+      clipStartInput: addCatClipStartInput,
+      clipDurationInput: addCatClipDurationInput,
+      zoomInput: addCatZoomInput,
+      offsetXInput: addCatOffsetXInput,
+      offsetYInput: addCatOffsetYInput,
+    });
+  }
+
+  function buildPetVideoReframeBody(returnTabInput) {
+    syncUploadPetVideoHiddenInputs();
+    clampMediaFramerZoomInputs(petVideoUploadForm);
+
+    const clip = uploadPetVideoTrim.getClipState();
+    const framing = uploadPetVideoTrim.getFramingState();
+    if (!clip || !framing) {
+      return null;
+    }
+
+    const dataset = readAccountPetMediaDataset();
+    const params = new URLSearchParams();
+    params.set(
+      "return_tab",
+      returnTabInput instanceof HTMLInputElement ? returnTabInput.value : "account"
+    );
+    if (dataset?.petId) {
+      params.set("pet_id", dataset.petId);
+    }
+    params.set("pet_video_clip_start", String(clip.clipStart));
+    params.set("pet_video_clip_duration", String(clip.clipDuration));
+    params.set("pet_video_zoom", String(framing.scale));
+    params.set("pet_video_offset_x", String(framing.offsetX));
+    params.set("pet_video_offset_y", String(framing.offsetY));
+    return params;
+  }
+
+  function setAccountVideoMode(mode) {
+    accountVideoMode = mode === "resize" ? "resize" : "upload";
+    petVideoUploadModePicker
+      ?.querySelectorAll("[data-account-video-mode]")
+      .forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.accountVideoMode === accountVideoMode);
+      });
+
+    if (petVideoUploadIntro) {
+      petVideoUploadIntro.textContent =
+        accountVideoMode === "resize"
+          ? "Reposition, zoom, and trim your current playing clip."
+          : "Upload a video of your cat playing, then pick a 3–6 second clip that loops on the My Pet tab.";
+    }
+
+    if (petVideoUploadFieldHint) {
+      petVideoUploadFieldHint.textContent =
+        accountVideoMode === "resize"
+          ? "Drag to fit your cat in the frame, then adjust the loop timing."
+          : "MP4, WebM, or MOV up to 50MB. Pick a 3–6 second clip of your cat playing.";
+    }
+
+    if (petVideoUploadPicker instanceof HTMLElement) {
+      petVideoUploadPicker.hidden = accountVideoMode === "resize";
+    }
+
+    if (uploadPetVideoInput instanceof HTMLInputElement) {
+      uploadPetVideoInput.required = accountVideoMode === "upload";
+      if (accountVideoMode === "upload") {
+        uploadPetVideoInput.value = "";
+        uploadPetVideoTrim.resetPetVideoTrim();
+      }
+    }
+
+    if (accountVideoMode === "resize") {
+      const dataset = readAccountPetMediaDataset();
+      const videoUrl = dataset?.videoSrc;
+      if (!videoUrl) {
+        showStatusToast("No playing clip found to resize.");
+        setAccountVideoMode("upload");
+        return;
+      }
+
+      const zoom = Number.parseFloat(dataset.videoZoom || "");
+      const framing =
+        Number.isFinite(zoom) && zoom > 0
+          ? {
+              scale: zoom,
+              offsetX: Number.parseFloat(dataset.videoOffsetX || "0") || 0,
+              offsetY: Number.parseFloat(dataset.videoOffsetY || "0") || 0,
+            }
+          : null;
+
+      uploadPetVideoTrim.loadFromUrl(videoUrl, {
+        clipStart: dataset.clipStart || "0",
+        clipDuration: dataset.clipDuration || String(petVideoClipMaxDuration),
+        framing,
+      });
+    }
+  }
+
   function openPetVideoUploadModal(returnTab = "pet") {
     if (!petVideoUploadModal) {
       return;
@@ -2025,6 +2613,14 @@
     if (returnTabInput instanceof HTMLInputElement) {
       returnTabInput.value = returnTab === "account" ? "account" : "pet";
     }
+
+    const dataset = readAccountPetMediaDataset();
+    const showResize = returnTab === "account" && dataset?.hasVideo === "true";
+    if (petVideoUploadModePicker instanceof HTMLElement) {
+      petVideoUploadModePicker.hidden = !showResize;
+    }
+    setAccountVideoMode("upload");
+
     window.scrollTo(0, 0);
     petVideoUploadModal.hidden = false;
     document.body.classList.add("modal-open");
@@ -2039,8 +2635,67 @@
     document.body.classList.remove("modal-open");
     if (uploadPetVideoInput instanceof HTMLInputElement) {
       uploadPetVideoInput.value = "";
+      uploadPetVideoInput.required = true;
+    }
+    if (petVideoUploadPicker instanceof HTMLElement) {
+      petVideoUploadPicker.hidden = false;
     }
     uploadPetVideoTrim.resetPetVideoTrim();
+    accountVideoMode = "upload";
+  }
+
+  petVideoUploadModePicker?.querySelectorAll("[data-account-video-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setAccountVideoMode(button.dataset.accountVideoMode || "upload");
+    });
+  });
+
+  if (petVideoUploadForm instanceof HTMLFormElement) {
+    petVideoUploadForm.addEventListener("submit", async (event) => {
+      if (accountVideoMode === "resize") {
+        event.preventDefault();
+      } else {
+        syncUploadPetVideoHiddenInputs();
+        clampMediaFramerZoomInputs(petVideoUploadForm);
+        return;
+      }
+
+      const returnTabInput = document.getElementById("pet_video_return_tab");
+      const reframeBody = buildPetVideoReframeBody(returnTabInput);
+      if (!reframeBody) {
+        showStatusToast("Wait for your clip preview to finish loading, then try again.");
+        return;
+      }
+
+      const submitButton = petVideoUploadForm.querySelector(".login-submit");
+      if (submitButton instanceof HTMLButtonElement) {
+        submitButton.disabled = true;
+      }
+
+      try {
+        const response = await fetch("/home/pet-video-reframe", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          },
+          body: reframeBody.toString(),
+          credentials: "same-origin",
+        });
+        const returnTab =
+          returnTabInput instanceof HTMLInputElement && returnTabInput.value === "account"
+            ? "account"
+            : "pet";
+        if (response.redirected) {
+          window.location.href = response.url;
+          return;
+        }
+        window.location.href = `/home?tab=${returnTab}&status=${
+          response.ok ? "pet_video_done" : "pet_video_reframe_invalid"
+        }`;
+      } catch (_error) {
+        window.location.href = "/home?tab=account&status=pet_video_reframe_invalid";
+      }
+    });
   }
 
   document.querySelectorAll(".pet-video-upload-trigger").forEach((trigger) => {
@@ -2062,14 +2717,23 @@
     });
   }
 
-  if (params.get("status") === "pet_video_done" || params.get("status") === "pet_video_invalid") {
+  if (
+    params.get("status") === "pet_video_done" ||
+    params.get("status") === "pet_video_invalid" ||
+    params.get("status") === "pet_video_reframe_invalid"
+  ) {
     closePetVideoUploadModal();
   }
 
   const accountPetPhotoModal = document.getElementById("account-pet-photo-modal");
   const accountPetPhotoInput = document.getElementById("account_pet_photo");
   const accountPetPhotoPreview = document.getElementById("account-pet-photo-preview");
+  const accountPetPhotoModePicker = document.getElementById("account-pet-photo-mode-picker");
+  const accountPetPhotoIntro = document.getElementById("account-pet-photo-intro");
+  const accountPetPhotoFieldHint = document.getElementById("account-pet-photo-field-hint");
+  const accountPetPhotoUploadPicker = document.getElementById("account-pet-photo-upload-picker");
   let accountPetPhotoPreviewUrl = null;
+  let accountPhotoMode = "upload";
 
   function resetAccountPetPhotoPreview() {
     if (accountPetPhotoPreviewUrl) {
@@ -2082,10 +2746,64 @@
     }
   }
 
+  function setAccountPhotoMode(mode) {
+    accountPhotoMode = mode === "resize" ? "resize" : "upload";
+    accountPetPhotoModePicker
+      ?.querySelectorAll("[data-account-photo-mode]")
+      .forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.accountPhotoMode === accountPhotoMode);
+      });
+
+    if (accountPetPhotoIntro) {
+      accountPetPhotoIntro.textContent =
+        accountPhotoMode === "resize"
+          ? "Drag and zoom your current profile photo so your cat fits the circle."
+          : "Upload a photo of your cat for your account profile.";
+    }
+
+    if (accountPetPhotoFieldHint) {
+      accountPetPhotoFieldHint.textContent =
+        accountPhotoMode === "resize"
+          ? "Reposition and zoom your current photo, then save."
+          : "JPEG, PNG, or WebP up to 5MB.";
+    }
+
+    if (accountPetPhotoUploadPicker instanceof HTMLElement) {
+      accountPetPhotoUploadPicker.hidden = accountPhotoMode === "resize";
+    }
+
+    if (accountPetPhotoInput instanceof HTMLInputElement) {
+      accountPetPhotoInput.required = accountPhotoMode === "upload";
+      if (accountPhotoMode === "upload") {
+        accountPetPhotoInput.value = "";
+        resetAccountPetPhotoPreview();
+      }
+    }
+
+    if (accountPhotoMode === "resize") {
+      const dataset = readAccountPetMediaDataset();
+      const photoUrl = dataset?.photoSrc;
+      if (!photoUrl || dataset?.hasCustomPhoto !== "true") {
+        showStatusToast("No profile photo found to resize.");
+        setAccountPhotoMode("upload");
+        return;
+      }
+      window.whiskerPetPhotoFramer?.loadFromUrl?.("account_pet_photo", photoUrl);
+    }
+  }
+
   function openAccountPetPhotoModal() {
     if (!accountPetPhotoModal) {
       return;
     }
+
+    const dataset = readAccountPetMediaDataset();
+    const showResize = dataset?.hasCustomPhoto === "true";
+    if (accountPetPhotoModePicker instanceof HTMLElement) {
+      accountPetPhotoModePicker.hidden = !showResize;
+    }
+    setAccountPhotoMode("upload");
+
     window.scrollTo(0, 0);
     accountPetPhotoModal.hidden = false;
     document.body.classList.add("modal-open");
@@ -2100,9 +2818,20 @@
     document.body.classList.remove("modal-open");
     if (accountPetPhotoInput instanceof HTMLInputElement) {
       accountPetPhotoInput.value = "";
+      accountPetPhotoInput.required = true;
+    }
+    if (accountPetPhotoUploadPicker instanceof HTMLElement) {
+      accountPetPhotoUploadPicker.hidden = false;
     }
     resetAccountPetPhotoPreview();
+    accountPhotoMode = "upload";
   }
+
+  accountPetPhotoModePicker?.querySelectorAll("[data-account-photo-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setAccountPhotoMode(button.dataset.accountPhotoMode || "upload");
+    });
+  });
 
   document.querySelectorAll(".account-pet-photo-change-trigger").forEach((trigger) => {
     trigger.addEventListener("click", openAccountPetPhotoModal);
@@ -2275,118 +3004,8 @@
     return onboardingModal?.querySelector(".onboarding-form") ?? null;
   }
 
-  function daysInBirthMonth(year, month) {
-    if (!year || !month) {
-      return 31;
-    }
-    return new Date(Number(year), Number(month), 0).getDate();
-  }
-
-  function birthDatePickerParts(picker) {
-    return {
-      hidden: picker.querySelector('input[type="hidden"][name="pet_birth_date"]'),
-      month: picker.querySelector('[data-birth-part="month"]'),
-      day: picker.querySelector('[data-birth-part="day"]'),
-      year: picker.querySelector('[data-birth-part="year"]'),
-    };
-  }
-
-  function refreshBirthDateDayOptions(picker) {
-    const { month, day, year } = birthDatePickerParts(picker);
-    if (!(month instanceof HTMLSelectElement) || !(day instanceof HTMLSelectElement)) {
-      return;
-    }
-
-    const selectedDay = day.value;
-    const maxDay = daysInBirthMonth(year?.value ?? "", month.value);
-    const options = ['<option value="">Day</option>'];
-    for (let value = 1; value <= maxDay; value += 1) {
-      const padded = String(value).padStart(2, "0");
-      options.push(`<option value="${padded}">${value}</option>`);
-    }
-    day.innerHTML = options.join("");
-    if (selectedDay && Number(selectedDay) <= maxDay) {
-      day.value = selectedDay;
-    }
-  }
-
-  function syncBirthDatePicker(picker) {
-    const { hidden, month, day, year } = birthDatePickerParts(picker);
-    if (
-      !(hidden instanceof HTMLInputElement) ||
-      !(month instanceof HTMLSelectElement) ||
-      !(day instanceof HTMLSelectElement) ||
-      !(year instanceof HTMLSelectElement)
-    ) {
-      return;
-    }
-
-    refreshBirthDateDayOptions(picker);
-
-    const monthValue = month.value;
-    const dayValue = day.value;
-    const yearValue = year.value;
-    if (!monthValue || !dayValue || !yearValue) {
-      hidden.value = "";
-      return;
-    }
-
-    const maxDate = picker.dataset.maxDate ?? "";
-    const candidate = `${yearValue}-${monthValue}-${dayValue}`;
-    if (maxDate && candidate > maxDate) {
-      hidden.value = "";
-      day.setCustomValidity("Birth date cannot be in the future.");
-      return;
-    }
-
-    day.setCustomValidity("");
-    hidden.value = candidate;
-  }
-
-  function setBirthDatePickerValue(picker, isoDate) {
-    const { month, day, year } = birthDatePickerParts(picker);
-    if (
-      !(month instanceof HTMLSelectElement) ||
-      !(day instanceof HTMLSelectElement) ||
-      !(year instanceof HTMLSelectElement)
-    ) {
-      return;
-    }
-
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate ?? "").trim());
-    if (!match) {
-      return;
-    }
-
-    year.value = match[1];
-    month.value = match[2];
-    refreshBirthDateDayOptions(picker);
-    day.value = match[3];
-    syncBirthDatePicker(picker);
-  }
-
-  function initBirthDatePickers(root = document) {
-    root.querySelectorAll("[data-birth-date-picker]").forEach((picker) => {
-      if (!(picker instanceof HTMLElement) || picker.dataset.birthDateReady === "1") {
-        return;
-      }
-      picker.dataset.birthDateReady = "1";
-
-      picker.querySelectorAll("[data-birth-part]").forEach((select) => {
-        select.addEventListener("change", () => {
-          syncBirthDatePicker(picker);
-        });
-      });
-
-      const form = picker.closest("form");
-      if (form instanceof HTMLFormElement) {
-        form.addEventListener("submit", () => {
-          syncBirthDatePicker(picker);
-        });
-      }
-
-      syncBirthDatePicker(picker);
-    });
+  function initCuteDatePickers(root = document) {
+    window.whiskerInitCuteDatePickers?.(root);
   }
 
   function collectOnboardingVaccineRows(form) {
@@ -2430,7 +3049,6 @@
     });
   }
 
-  window.whiskerSetBirthDatePickerValue = setBirthDatePickerValue;
   window.whiskerRestoreOnboardingVaccineRows = restoreOnboardingVaccineRows;
   window.whiskerSyncLastVetDateField = syncLastVetDateField;
   window.whiskerSyncVaccinesUnknownField = syncVaccinesUnknownField;
@@ -2468,7 +3086,7 @@
       parentLevelModal.hidden = true;
     }
     window.scrollTo(0, 0);
-    initBirthDatePickers(onboardingModal);
+    initCuteDatePickers(onboardingModal);
     onboardingModal.hidden = false;
     lockModalBodyScroll();
     document.body.classList.add("modal-open");
@@ -2531,7 +3149,7 @@
 
     window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
     await restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) });
-    initBirthDatePickers(addCatModal);
+    initCuteDatePickers(addCatModal);
     addCatModal.hidden = false;
     lockModalBodyScroll();
     document.body.classList.add("modal-open");
@@ -2579,12 +3197,14 @@
     !returningToAddCat && (params.get("setup") === "pet" || Boolean(selectedBreed));
   const needsPetSetup = document.body.dataset.needsPetSetup === "true";
 
-  initBirthDatePickers();
+  initCuteDatePickers();
 
   onboardingPetVideoTrim.setOnTrimUpdate(() => {
+    syncOnboardingPetVideoHiddenInputs();
     window.whiskerPetSetupDraft?.scheduleSave?.("onboarding");
   });
   addCatPetVideoTrim.setOnTrimUpdate(() => {
+    syncAddCatPetVideoHiddenInputs();
     window.whiskerPetSetupDraft?.scheduleSave?.("add_cat");
   });
 
@@ -2651,9 +3271,16 @@
       if (!petId) {
         return;
       }
-      const petOwner = button.getAttribute("data-pet-owner");
+      const switcher = button.closest(".pet-switcher");
+      const returnTab = switcher?.dataset.returnTab || "pet";
+      const petOwner =
+        returnTab === "account" ? null : button.getAttribute("data-pet-owner");
       const url = new URL(window.location.href);
-      url.searchParams.set("tab", "pet");
+      if (returnTab === "pet") {
+        url.searchParams.delete("tab");
+      } else {
+        url.searchParams.set("tab", returnTab);
+      }
       url.searchParams.set("pet", petId);
       if (petOwner) {
         url.searchParams.set("pet_owner", petOwner);
@@ -2703,12 +3330,14 @@
           event.target.type === "submit" &&
           !event.target.disabled
         ) {
+          syncOnboardingPetVideoHiddenInputs();
           clampMediaFramerZoomInputs(onboardingForm);
         }
       },
       { capture: true }
     );
     onboardingForm.addEventListener("submit", () => {
+      syncOnboardingPetVideoHiddenInputs();
       window.whiskerPetSetupDraft?.clearDraft?.("onboarding");
     });
   }
@@ -2722,12 +3351,14 @@
           event.target.type === "submit" &&
           !event.target.disabled
         ) {
+          syncAddCatPetVideoHiddenInputs();
           clampMediaFramerZoomInputs(addCatForm);
         }
       },
       { capture: true }
     );
     addCatForm.addEventListener("submit", () => {
+      syncAddCatPetVideoHiddenInputs();
       window.whiskerPetSetupDraft?.clearDraft?.("add_cat");
     });
   }
@@ -2760,6 +3391,7 @@
       return;
     }
     parentLevelModal.hidden = false;
+    lockModalBodyScroll();
     document.body.classList.add("modal-open");
     if (parentLevelClose instanceof HTMLElement) {
       parentLevelClose.focus();
@@ -2772,6 +3404,7 @@
     }
     parentLevelModal.hidden = true;
     document.body.classList.remove("modal-open");
+    unlockModalBodyScroll();
   }
 
   parentLevelTriggers.forEach((trigger) => {
@@ -3137,15 +3770,28 @@
         const lessLikelyNote = item.less_likely
           ? '<p class="symptom-less-likely-note">Weaker symptom match — still worth knowing about.</p>'
           : "";
+        const matchStrength = item.match_strength
+          ? `<span class="symptom-match-badge">${escapeSymptomHtml(item.match_strength)}</span>`
+          : "";
+        const matchedSymptoms = Array.isArray(item.matched_symptoms) ? item.matched_symptoms : [];
+        const matchedSymptomsHtml = matchedSymptoms.length
+          ? `<p class="symptom-matched-symptoms"><span class="symptom-matched-label">Matched:</span> ${matchedSymptoms
+              .map((symptom) => escapeSymptomHtml(symptom))
+              .join(", ")}</p>`
+          : "";
         return `<article class="symptom-possibility-card ${concernClass}">
           <div class="symptom-possibility-head">
             <span class="symptom-possibility-rank">${index + 1}</span>
             <div class="symptom-possibility-titles">
               <h5>${escapeSymptomHtml(item.name || "Possible concern")}</h5>
-              <span class="symptom-concern-badge">${escapeSymptomHtml(item.concern_label || "Possible")}</span>
+              <div class="symptom-possibility-badges">
+                ${matchStrength}
+                <span class="symptom-concern-badge">${escapeSymptomHtml(item.concern_label || "Possible")}</span>
+              </div>
             </div>
           </div>
           ${lessLikelyNote}
+          ${matchedSymptomsHtml}
           <p>${escapeSymptomHtml(item.summary || "")}</p>
           ${renderSymptomList(tips)}
         </article>`;
@@ -3164,7 +3810,7 @@
       }
       ${
         possibilities.length
-          ? `<section class="symptom-results-section"><h4>Possible explanations (mildest to most concerning)</h4><p class="symptom-possibilities-intro">Listed from usually mild at the top to potentially urgent at the bottom — discuss any that fit with your vet.</p>${possibilityHtml}</section>`
+          ? `<section class="symptom-results-section"><h4>Possible explanations (most to least likely)</h4><p class="symptom-possibilities-intro">Ranked by how well your symptoms match — strongest fits first, weaker possibilities last. Discuss any that fit with your vet.</p>${possibilityHtml}</section>`
           : ""
       }
       ${
@@ -3263,4 +3909,17 @@
     });
     updateAccountPasswordFormValidity();
   }
+
+  const tasksPanelCarousel = document.getElementById("tasks-panel-carousel");
+  if (tasksPanelCarousel instanceof HTMLElement) {
+    setupTasksPetSwitcher(tasksPanelCarousel);
+  }
+
+  window.addEventListener("whisker:parent-xp", (event) => {
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object") {
+      return;
+    }
+    updateDashboardFromTaskToggle(detail);
+  });
 })();

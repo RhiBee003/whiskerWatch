@@ -1,6 +1,16 @@
 (function () {
-  const OUTPUT_SIZE = 640;
-  const VIEWPORT_PX = 176;
+  const DEFAULTS = {
+    viewportWidth: 176,
+    viewportHeight: 176,
+    outputWidth: 640,
+    outputHeight: 640,
+    circular: true,
+    hint: "Drag to reposition and zoom so your cat fits the circle.",
+    exportFileName: "pet-photo.jpg",
+    manual: false,
+    skipFormSubmit: false,
+  };
+
   const framers = {};
 
   function clamp(value, min, max) {
@@ -24,7 +34,8 @@
     }
   }
 
-  function bindPetPhotoFramer(inputId, previewId) {
+  function bindPetPhotoFramer(inputId, previewId, options = {}) {
+    const cfg = { ...DEFAULTS, ...options };
     const input = document.getElementById(inputId);
     const preview = document.getElementById(previewId);
     const form = input?.closest("form");
@@ -53,8 +64,8 @@
 
       const drawW = state.image.naturalWidth * state.scale;
       const drawH = state.image.naturalHeight * state.scale;
-      const maxX = Math.max(0, (drawW - VIEWPORT_PX) / 2);
-      const maxY = Math.max(0, (drawH - VIEWPORT_PX) / 2);
+      const maxX = Math.max(0, (drawW - cfg.viewportWidth) / 2);
+      const maxY = Math.max(0, (drawH - cfg.viewportHeight) / 2);
       state.offsetX = clamp(state.offsetX, -maxX, maxX);
       state.offsetY = clamp(state.offsetY, -maxY, maxY);
     }
@@ -133,10 +144,13 @@
 
     function renderEditor() {
       preview.hidden = false;
+      const stageClass = cfg.circular
+        ? "pet-photo-framer-stage"
+        : "pet-photo-framer-stage pet-photo-framer-stage--rect";
       preview.innerHTML = `
         <div class="pet-photo-framer">
-          <p class="pet-photo-framer-hint">Drag to reposition and zoom so your cat fits the circle.</p>
-          <div class="pet-photo-framer-stage" data-framer-stage aria-label="Drag to reposition pet photo">
+          <p class="pet-photo-framer-hint">${cfg.hint}</p>
+          <div class="${stageClass}" data-framer-stage aria-label="Drag to reposition photo" style="width:${cfg.viewportWidth}px;height:${cfg.viewportHeight}px;">
             <img class="pet-photo-framer-image" alt="Photo framing preview" draggable="false" />
           </div>
           <label class="pet-photo-framer-zoom-label">
@@ -179,8 +193,8 @@
       image.onload = () => {
         state.image = image;
         state.minScale = Math.max(
-          VIEWPORT_PX / image.naturalWidth,
-          VIEWPORT_PX / image.naturalHeight
+          cfg.viewportWidth / image.naturalWidth,
+          cfg.viewportHeight / image.naturalHeight
         );
         state.scale = state.minScale;
         state.offsetX = 0;
@@ -216,22 +230,23 @@
         }
 
         const canvas = document.createElement("canvas");
-        canvas.width = OUTPUT_SIZE;
-        canvas.height = OUTPUT_SIZE;
+        canvas.width = cfg.outputWidth;
+        canvas.height = cfg.outputHeight;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("Canvas unavailable"));
           return;
         }
 
-        const ratio = OUTPUT_SIZE / VIEWPORT_PX;
-        const drawW = state.image.naturalWidth * state.scale * ratio;
-        const drawH = state.image.naturalHeight * state.scale * ratio;
-        const centerX = OUTPUT_SIZE / 2 + state.offsetX * ratio;
-        const centerY = OUTPUT_SIZE / 2 + state.offsetY * ratio;
+        const ratioX = cfg.outputWidth / cfg.viewportWidth;
+        const ratioY = cfg.outputHeight / cfg.viewportHeight;
+        const drawW = state.image.naturalWidth * state.scale * ratioX;
+        const drawH = state.image.naturalHeight * state.scale * ratioY;
+        const centerX = cfg.outputWidth / 2 + state.offsetX * ratioX;
+        const centerY = cfg.outputHeight / 2 + state.offsetY * ratioY;
 
         ctx.fillStyle = "#fad6e9";
-        ctx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
+        ctx.fillRect(0, 0, cfg.outputWidth, cfg.outputHeight);
         ctx.drawImage(state.image, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
 
         canvas.toBlob(
@@ -242,7 +257,7 @@
             }
 
             resolve(
-              new File([blob], "pet-photo.jpg", {
+              new File([blob], cfg.exportFileName, {
                 type: "image/jpeg",
                 lastModified: Date.now(),
               })
@@ -254,53 +269,80 @@
       });
     }
 
-    input.addEventListener("change", () => {
-      const file = input.files && input.files[0];
-      if (!file) {
+    if (!cfg.manual) {
+      input.addEventListener("change", () => {
+        const file = input.files && input.files[0];
+        if (!file) {
+          resetFramer();
+          return;
+        }
+
+        loadEditor(file);
+        const kind = draftKindForInput(inputId);
+        if (kind) {
+          window.whiskerPetSetupDraft?.markDirty?.(kind);
+          window.whiskerPetSetupDraft?.saveDraft?.(kind).catch(() => {});
+        } else {
+          notifyDraftSave(inputId);
+        }
+      });
+    }
+
+    if (!cfg.manual && !cfg.skipFormSubmit) {
+      form.addEventListener(
+        "submit",
+        (event) => {
+          if (zoomEl instanceof HTMLInputElement && state.image) {
+            zoomEl.min = "0";
+            zoomEl.value = String(Math.max(state.minScale, state.scale));
+            zoomEl.setCustomValidity("");
+          }
+
+          if (!state.image || state.prepared) {
+            return;
+          }
+
+          event.preventDefault();
+
+          exportCroppedFile()
+            .then((file) => {
+              const transfer = new DataTransfer();
+              transfer.items.add(file);
+              input.files = transfer.files;
+              state.prepared = true;
+              form.requestSubmit();
+            })
+            .catch(() => {
+              state.prepared = true;
+              form.requestSubmit();
+            });
+        },
+        { capture: true }
+      );
+    }
+
+    async function loadFromUrl(url, framing = null) {
+      if (!url) {
         resetFramer();
         return;
       }
 
-      loadEditor(file);
-      const kind = draftKindForInput(inputId);
-      if (kind) {
-        window.whiskerPetSetupDraft?.markDirty?.(kind);
-        window.whiskerPetSetupDraft?.saveDraft?.(kind).catch(() => {});
-      } else {
-        notifyDraftSave(inputId);
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error("Could not load photo");
+        }
+        const blob = await response.blob();
+        const type = blob.type || "image/jpeg";
+        const file = new File([blob], "current-pet-photo.jpg", {
+          type,
+          lastModified: Date.now(),
+        });
+        loadEditor(file, framing);
+      } catch (_error) {
+        resetFramer();
       }
-    });
-
-    form.addEventListener(
-      "submit",
-      (event) => {
-        if (zoomEl instanceof HTMLInputElement && state.image) {
-          zoomEl.min = "0";
-          zoomEl.value = String(Math.max(state.minScale, state.scale));
-          zoomEl.setCustomValidity("");
-        }
-
-        if (!state.image || state.prepared) {
-          return;
-        }
-
-        event.preventDefault();
-
-        exportCroppedFile()
-          .then((file) => {
-            const transfer = new DataTransfer();
-            transfer.items.add(file);
-            input.files = transfer.files;
-            state.prepared = true;
-            form.requestSubmit();
-          })
-          .catch(() => {
-            state.prepared = true;
-            form.requestSubmit();
-          });
-      },
-      { capture: true }
-    );
+    }
 
     framers[inputId] = {
       getState() {
@@ -313,12 +355,21 @@
           offsetY: state.offsetY,
         };
       },
+      hasImage() {
+        return Boolean(state.image);
+      },
       restore(file, framing) {
         const transfer = new DataTransfer();
         transfer.items.add(file);
         input.files = transfer.files;
         loadEditor(file, framing);
       },
+      reset: resetFramer,
+      exportCroppedFile,
+      markPrepared(value) {
+        state.prepared = value;
+      },
+      loadFromUrl,
     };
   }
 
@@ -327,11 +378,27 @@
   bindPetPhotoFramer("account_pet_photo", "account-pet-photo-preview");
 
   window.whiskerPetPhotoFramer = {
+    bind: bindPetPhotoFramer,
     getState(inputId) {
       return framers[inputId]?.getState?.() ?? null;
     },
+    hasImage(inputId) {
+      return framers[inputId]?.hasImage?.() ?? false;
+    },
     restore(inputId, file, framing) {
       framers[inputId]?.restore?.(file, framing);
+    },
+    reset(inputId) {
+      framers[inputId]?.reset?.();
+    },
+    exportCroppedFile(inputId) {
+      return framers[inputId]?.exportCroppedFile?.();
+    },
+    markPrepared(inputId, value) {
+      framers[inputId]?.markPrepared?.(value);
+    },
+    loadFromUrl(inputId, url, framing) {
+      return framers[inputId]?.loadFromUrl?.(url, framing);
     },
   };
 })();

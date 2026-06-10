@@ -33,6 +33,7 @@ pub struct ShareCardOffer {
     pub subline: String,
     pub kind: String,
     pub value: u32,
+    pub pet_name: String,
 }
 
 const VET_APPOINTMENT_TASK_ID: &str = "vet_appointment_asap";
@@ -109,14 +110,16 @@ pub fn headline_for_kind(pet_name: &str, kind: ShareCardKind) -> (String, u32, S
         ShareCardKind::LevelUp(level) => (
             "level".to_string(),
             level,
-            format!("My cat {pet_name} hit level {level}! 🐾"),
-            format!("Level {level} cat parent on WhiskerWatch"),
+            format!("{pet_name} leveled up to {level}! 🐾✨"),
+            format!(
+                "Level {level} unlocked — earn XP from daily care tasks, track routines & paw points"
+            ),
         ),
         ShareCardKind::Streak(days) => (
             "streak".to_string(),
             days,
-            format!("{days}-day care streak for {pet_name}! 🔥🐾"),
-            format!("{days} days of cat care on WhiskerWatch"),
+            format!("{days} days of loving {pet_name}! 🔥💕"),
+            format!("{days}-day care streak — premium cat care made easy, one task at a time"),
         ),
     }
 }
@@ -130,7 +133,7 @@ pub fn create_share_offer(
     let pet = share_pet_name(profile);
     let (kind_label, value, headline, subline) = headline_for_kind(&pet, kind);
     let payload = ShareCardPayload {
-        pet_name: pet,
+        pet_name: pet.clone(),
         kind: kind_label.clone(),
         value,
         headline: headline.clone(),
@@ -146,6 +149,7 @@ pub fn create_share_offer(
         subline,
         kind: kind_label,
         value,
+        pet_name: pet,
     })
 }
 
@@ -216,21 +220,112 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
+pub fn share_win_brand_footer_html() -> &'static str {
+    r#"<footer class="share-win-brand">
+  <img class="share-win-brand-logo" src="/images/logo.png" alt="" width="52" height="52" decoding="async" aria-hidden="true" />
+  <p class="share-win-brand-name">WhiskerWatch</p>
+  <p class="share-win-brand-tagline">The all-in-one app for serious cat care — daily routines, paw points &amp; real progress.</p>
+  <p class="share-win-brand-cta">Join free at whiskerwatch.com</p>
+</footer>"#
+}
+
+pub fn render_share_win_card_html(
+    pet_name: &str,
+    kind: &str,
+    value: u32,
+    headline: &str,
+    subline: &str,
+    celebrate_button: bool,
+) -> String {
+    let pet = escape_html(pet_name);
+    let headline_html = escape_html(headline);
+    let subline_html = escape_html(subline);
+    let kind_class = if kind == "streak" {
+        "share-win-card--streak"
+    } else {
+        "share-win-card--level"
+    };
+    let kicker = if kind == "streak" {
+        "Care streak milestone"
+    } else {
+        "Parent level up"
+    };
+    let hero_value = if kind == "streak" {
+        format!("{value}")
+    } else {
+        format!("{value}")
+    };
+    let hero_label = if kind == "streak" {
+        if value == 1 {
+            "DAY"
+        } else {
+            "DAYS"
+        }
+    } else {
+        "LEVEL"
+    };
+    let hero_emoji = if kind == "streak" { "🔥" } else { "⭐" };
+    let tagline = if kind == "streak" {
+        "Daily cat care streak — keep the momentum going!"
+    } else {
+        "Cat parent goals unlocked — care tasks that actually count!"
+    };
+    let celebrate = if celebrate_button {
+        r#"<button type="button" class="share-win-celebrate-btn" data-share-celebrate>Tap for confetti 🎉</button>"#
+    } else {
+        ""
+    };
+
+    format!(
+        r#"<article class="share-win-card {kind_class}" data-share-kind="{kind}" data-share-value="{value}">
+  <div class="share-win-sparkle-field" aria-hidden="true">
+    <span class="share-win-sparkle share-win-sparkle-1">✨</span>
+    <span class="share-win-sparkle share-win-sparkle-2">💖</span>
+    <span class="share-win-sparkle share-win-sparkle-3">🐾</span>
+    <span class="share-win-sparkle share-win-sparkle-4">✨</span>
+    <span class="share-win-sparkle share-win-sparkle-5">💕</span>
+  </div>
+  <div class="share-win-confetti-layer" data-share-confetti aria-hidden="true"></div>
+  <p class="share-win-kicker">{kicker}</p>
+  <div class="share-win-hero">
+    <span class="share-win-hero-emoji" aria-hidden="true">{hero_emoji}</span>
+    <span class="share-win-hero-value">{hero_value}</span>
+    <span class="share-win-hero-label">{hero_label}</span>
+  </div>
+  <p class="share-win-headline">{headline_html}</p>
+  <p class="share-win-pet">Celebrating <strong>{pet}</strong></p>
+  <p class="share-win-tagline">{tagline}</p>
+  <p class="share-win-subline">{subline_html}</p>
+  {brand_footer}
+  {celebrate}
+</article>"#,
+        kind_class = kind_class,
+        kind = escape_html_attr(kind),
+        value = value,
+        kicker = kicker,
+        hero_emoji = hero_emoji,
+        hero_value = hero_value,
+        hero_label = hero_label,
+        headline_html = headline_html,
+        pet = pet,
+        tagline = tagline,
+        subline_html = subline_html,
+        brand_footer = share_win_brand_footer_html(),
+        celebrate = celebrate,
+    )
+}
+
 pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> String {
-    let pet = escape_html(&payload.pet_name);
     let headline = escape_html(&payload.headline);
     let subline = escape_html(&payload.subline);
-    let badge = if payload.kind == "streak" {
-        format!(
-            r#"<span class="share-card-badge share-card-badge-streak">{days}-day streak</span>"#,
-            days = payload.value
-        )
-    } else {
-        format!(
-            r#"<span class="share-card-badge share-card-badge-level">Level {level}</span>"#,
-            level = payload.value
-        )
-    };
+    let card = render_share_win_card_html(
+        &payload.pet_name,
+        &payload.kind,
+        payload.value,
+        &payload.headline,
+        &payload.subline,
+        true,
+    );
 
     format!(
         r##"<!doctype html>
@@ -246,7 +341,7 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{headline}" />
     <meta name="twitter:description" content="{subline}" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260613b" />
   </head>
   <body class="share-card-page-body">
     <header class="topbar share-card-topbar">
@@ -258,25 +353,20 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
       </nav>
     </header>
     <main class="share-card-page-main section">
-      <article class="share-card-public-card" aria-label="Share card">
-        <div class="share-card-public-glow" aria-hidden="true"></div>
-        {badge}
-        <p class="share-card-public-emoji" aria-hidden="true">🐾</p>
-        <h1>{headline}</h1>
-        <p class="share-card-public-subline">{subline}</p>
-        <p class="share-card-public-pet">Celebrating <strong>{pet}</strong> on WhiskerWatch</p>
-      </article>
+      <div class="share-card-preview-wrap share-card-preview-wrap--public">
+        {card}
+      </div>
       <div class="share-card-page-cta">
         <p>Track care tasks, earn paw points, and level up as a cat parent.</p>
         <a class="download-btn share-card-signup-btn" href="{signup_url}">Start your cat's journey</a>
       </div>
     </main>
+    <script src="/share-cards.js?v=20260613b"></script>
   </body>
 </html>"##,
         headline = headline,
         subline = subline,
-        pet = pet,
-        badge = badge,
+        card = card,
         signup_url = escape_html_attr(signup_url),
     )
 }
@@ -352,10 +442,11 @@ pub fn render_streak_card(profile: &UserProfile, app_base_url: &str, created_at:
             created_at,
         ) {
             format!(
-                r#"<button type="button" class="download-btn share-streak-btn" data-share-url="{url}" data-share-headline="{headline}" data-share-kind="streak" data-share-value="{value}">Share streak</button>"#,
+                r#"<button type="button" class="download-btn share-streak-btn" data-share-url="{url}" data-share-headline="{headline}" data-share-kind="streak" data-share-value="{value}" data-share-pet="{pet}">Share streak</button>"#,
                 url = escape_html_attr(&offer.url),
                 headline = escape_html_attr(&offer.headline),
                 value = offer.value,
+                pet = escape_html_attr(&offer.pet_name),
             )
         } else {
             String::new()
@@ -416,6 +507,6 @@ mod tests {
             headline_for_kind("Mochi", ShareCardKind::LevelUp(10));
         assert_eq!(kind, "level");
         assert_eq!(value, 10);
-        assert_eq!(headline, "My cat Mochi hit level 10! 🐾");
+        assert_eq!(headline, "Mochi leveled up to 10! 🐾✨");
     }
 }

@@ -724,9 +724,13 @@ pub async fn unlock_premium_if_new(
     let mut profile = crate::get_or_create_profile(state, email).await;
     if !profile.premium_unlocked {
         profile.premium_unlocked = true;
+        let xp_earned = crate::xp_for_purchase(50);
+        crate::award_parent_xp(&mut profile, xp_earned);
         crate::push_activity(
             &mut profile,
-            "Unlocked WhiskerWatch Plus — health records, vet logging, and multi-pet support.",
+            &format!(
+                "Unlocked WhiskerWatch Plus — health records, vet logging, and multi-pet support (+{xp_earned} XP)."
+            ),
         );
         let today = chrono::Local::now().date_naive();
         profile.calendar_events = crate::merge_calendar_events(&profile, today);
@@ -765,9 +769,14 @@ pub async fn unlock_breed_guide_if_new(
         let today = chrono::Local::now().date_naive();
         let _ = crate::ensure_breed_guide_tasks(&mut profile);
         profile.calendar_events = crate::merge_calendar_events(&profile, today);
+        let xp_earned = crate::xp_for_purchase(50);
+        crate::award_parent_xp(&mut profile, xp_earned);
         crate::push_activity(
             &mut profile,
-            &format!("Unlocked the {} premium care guide.", guide.breed_name),
+            &format!(
+                "Unlocked the {} premium care guide (+{xp_earned} XP).",
+                guide.breed_name
+            ),
         );
         if crate::pet_ids_for_breed_name(&profile, &guide.breed_name).is_empty() {
             crate::push_activity(
@@ -818,9 +827,11 @@ pub async fn credit_points_if_new(
     }
 
     profile.paw_points = profile.paw_points.saturating_add(points);
+    let xp_earned = crate::xp_for_points_package(points);
+    crate::award_parent_xp(&mut profile, xp_earned);
     crate::push_activity(
         &mut profile,
-        &format!("Purchased {points} paw points via Stripe Checkout."),
+        &format!("Purchased {points} paw points via Stripe Checkout (+{xp_earned} XP)."),
     );
 
     state

@@ -1,8 +1,114 @@
 (function () {
+  const params = new URLSearchParams(window.location.search);
   const comfortModal = document.getElementById("memorial-comfort-modal");
+  const clipsModal = document.getElementById("memorial-clips-modal");
+  const clipsDoneButton = document.getElementById("memorial-clips-done");
+
+  function showAccountTab() {
+    const accountTab = document.querySelector('.dashboard-tab[data-tab="account"]');
+    if (accountTab instanceof HTMLButtonElement) {
+      accountTab.click();
+    }
+  }
+
+  function lockBodyScroll() {
+    document.body.classList.add("modal-open");
+  }
+
+  function unlockBodyScrollIfIdle() {
+    const anyOpen =
+      (comfortModal instanceof HTMLElement && !comfortModal.hidden) ||
+      (clipsModal instanceof HTMLElement && !clipsModal.hidden) ||
+      Array.from(document.querySelectorAll(".onboarding-backdrop")).some(
+        (element) => element instanceof HTMLElement && !element.hidden
+      );
+    if (!anyOpen) {
+      document.body.classList.remove("modal-open");
+    }
+  }
+
+  function cleanMemorialClipsUrl() {
+    if (!params.has("memorial_clips")) {
+      return;
+    }
+    params.delete("memorial_clips");
+    const query = params.toString();
+    const nextUrl = window.location.pathname + (query ? `?${query}` : "");
+    window.history.replaceState({}, document.title, nextUrl);
+  }
+
+  function focusNextEmptyClipInput() {
+    if (!(clipsModal instanceof HTMLElement)) {
+      return;
+    }
+    const nextInput = clipsModal.querySelector(
+      '.memorial-video-slot-form input[type="file"]:not(:disabled)'
+    );
+    if (nextInput instanceof HTMLInputElement && !nextInput.files?.length) {
+      nextInput.focus();
+    }
+  }
+
+  function openMemorialClipsModal() {
+    if (!(clipsModal instanceof HTMLElement)) {
+      return;
+    }
+    showAccountTab();
+    clipsModal.hidden = false;
+    lockBodyScroll();
+    window.scrollTo(0, 0);
+    focusNextEmptyClipInput();
+    cleanMemorialClipsUrl();
+  }
+
+  function closeMemorialClipsModal() {
+    if (!(clipsModal instanceof HTMLElement)) {
+      return;
+    }
+    clipsModal.hidden = true;
+    unlockBodyScrollIfIdle();
+  }
+
   if (comfortModal instanceof HTMLElement) {
     comfortModal.hidden = false;
+    lockBodyScroll();
   }
+
+  if (clipsDoneButton) {
+    clipsDoneButton.addEventListener("click", closeMemorialClipsModal);
+  }
+
+  if (clipsModal instanceof HTMLElement) {
+    clipsModal.addEventListener("click", (event) => {
+      if (event.target === clipsModal) {
+        closeMemorialClipsModal();
+      }
+    });
+  }
+
+  if (params.get("memorial_clips") === "1") {
+    openMemorialClipsModal();
+  }
+
+  document.querySelectorAll(".memorial-video-input").forEach((input) => {
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    input.addEventListener("change", () => {
+      const cta = input
+        .closest(".memorial-video-upload")
+        ?.querySelector(".memorial-video-upload-cta");
+      const file = input.files?.[0];
+      if (!(cta instanceof HTMLElement) || !file) {
+        return;
+      }
+
+      const shortName =
+        file.name.length > 22 ? "your sweet memory clip" : file.name.replace(/\.[^.]+$/, "");
+      cta.textContent = `${shortName} chosen 🎬`;
+    });
+  });
 
   const stage = document.getElementById("memorial-photo-stage");
   const cycleButton = document.getElementById("memorial-photo-cycle");

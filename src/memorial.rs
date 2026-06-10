@@ -295,10 +295,11 @@ pub fn render_account_pet_photo(profile: &UserProfile) -> String {
 
     format!(
         r#"<div class="account-pet-photo account-pet-photo-memorial" id="memorial-photo-stage" data-pet-name="{pet_name}" data-memorial-videos="{videos_json}">
-  <div class="memorial-photo-halo" aria-hidden="true">👼</div>
   <button type="button" class="memorial-photo-cycle" id="memorial-photo-cycle" aria-label="Cycle through memory clips of {pet_name}">
-    <img class="memorial-photo-image account-pet-photo-image" src="{photo_src}" alt="{pet_name} memorial photo" />
-    <video class="memorial-photo-video" muted playsinline webkit-playsinline preload="metadata" hidden></video>
+    <div class="memorial-photo-frame">
+      <img class="memorial-photo-image account-pet-photo-image" src="{photo_src}" alt="{pet_name} memorial photo" />
+      <video class="memorial-photo-video" muted playsinline webkit-playsinline preload="metadata" hidden></video>
+    </div>
   </button>
   <p class="account-pet-photo-caption memorial-photo-caption">{pet_name} · angel cat · tap to cycle memories ({video_count}/10 clips)</p>
 </div>"#,
@@ -309,40 +310,81 @@ pub fn render_account_pet_photo(profile: &UserProfile) -> String {
     )
 }
 
+fn render_memorial_video_slot(
+    pet_id: &str,
+    slot: usize,
+    videos: &[String],
+    input_id_prefix: &str,
+) -> String {
+    let filled = videos
+        .get(slot)
+        .is_some_and(|url| !url.trim().is_empty());
+    let slot_class = if filled {
+        " memorial-video-slot-saved"
+    } else {
+        " memorial-video-slot-empty"
+    };
+    let slot_label = if filled {
+        format!("Memory {} ✨ saved", slot + 1)
+    } else {
+        format!("Memory {}", slot + 1)
+    };
+    let upload_cta = if filled {
+        "Tap to replace this memory"
+    } else {
+        "Tap to choose a sweet clip"
+    };
+    let save_label = if filled {
+        "Update memory 🪽"
+    } else {
+        "Keep this memory 💗"
+    };
+    let input_id = format!("{input_id_prefix}-{slot}");
+    format!(
+        r#"<div class="memorial-video-slot{slot_class}">
+  <form class="memorial-video-slot-form login-form" action="/home/pets/memorial-video" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="pet_id" value="{pet_id}" />
+    <input type="hidden" name="slot" value="{slot}" />
+    <input type="hidden" name="return_clips" value="1" />
+    <p class="memorial-video-slot-label">{slot_label}</p>
+    <div class="memorial-video-upload">
+      <input id="{input_id}" name="memorial_video" type="file" class="pet-photo-input memorial-video-input" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" />
+      <label for="{input_id}" class="pet-photo-paw-btn memorial-video-paw-btn" aria-label="{upload_cta}">
+        <span class="pet-photo-paw-icon memorial-video-paw-icon" aria-hidden="true">🎬</span>
+      </label>
+      <p class="pet-photo-upload-cta memorial-video-upload-cta">{upload_cta}</p>
+    </div>
+    <button type="submit" class="download-btn memorial-video-upload-btn">{save_label}</button>
+  </form>
+</div>"#,
+        pet_id = escape_html_attr(pet_id),
+        slot = slot,
+        slot_class = slot_class,
+        slot_label = slot_label,
+        input_id = input_id,
+        upload_cta = upload_cta,
+        save_label = save_label,
+    )
+}
+
+fn render_memorial_video_slots(
+    profile: &UserProfile,
+    pet_id: &str,
+    input_id_prefix: &str,
+) -> String {
+    let videos = memorial_videos_for_pet(profile, pet_id);
+    (0..MAX_MEMORIAL_VIDEOS)
+        .map(|slot| render_memorial_video_slot(pet_id, slot, &videos, input_id_prefix))
+        .collect::<String>()
+}
+
 pub fn render_memorial_video_uploads(profile: &UserProfile) -> String {
     if !active_pet_is_deceased(profile) {
         return String::new();
     }
 
-    let pet_id = escape_html_attr(&profile.active_pet_id);
-    let videos = memorial_videos_for_pet(profile, &profile.active_pet_id);
-    let mut slots = String::new();
-    for slot in 0..MAX_MEMORIAL_VIDEOS {
-        let filled = videos
-            .get(slot)
-            .is_some_and(|url| !url.trim().is_empty());
-        let status = if filled {
-            format!("Clip {} saved", slot + 1)
-        } else {
-            format!("Clip {} empty", slot + 1)
-        };
-        let input_id = format!("memorial-video-{slot}");
-        slots.push_str(&format!(
-            r#"<div class="memorial-video-slot">
-  <form class="memorial-video-slot-form login-form" action="/home/pets/memorial-video" method="post" enctype="multipart/form-data">
-    <input type="hidden" name="pet_id" value="{pet_id}" />
-    <input type="hidden" name="slot" value="{slot}" />
-    <label for="{input_id}" class="memorial-video-slot-label">{status}</label>
-    <input id="{input_id}" name="memorial_video" type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" />
-    <button type="submit" class="download-btn memorial-video-upload-btn">Save clip</button>
-  </form>
-</div>"#,
-            pet_id = pet_id,
-            slot = slot,
-            input_id = input_id,
-            status = status,
-        ));
-    }
+    let pet_id = profile.active_pet_id.as_str();
+    let slots = render_memorial_video_slots(profile, pet_id, "memorial-video");
 
     format!(
         r#"<article class="dashboard-card memorial-videos-card">
@@ -352,6 +394,38 @@ pub fn render_memorial_video_uploads(profile: &UserProfile) -> String {
 </article>"#,
         pet_name = escape_html(&profile.pet_name),
         slots = slots,
+    )
+}
+
+pub fn render_memorial_clips_modal(profile: &UserProfile) -> String {
+    if !active_pet_is_deceased(profile) {
+        return String::new();
+    }
+
+    let pet_name = escape_html(&profile.pet_name);
+    let pet_id = profile.active_pet_id.as_str();
+    let slots = render_memorial_video_slots(profile, pet_id, "memorial-clips-video");
+    let filled_count = memorial_videos_for_pet(profile, pet_id)
+        .iter()
+        .filter(|url| !url.trim().is_empty())
+        .count();
+
+    format!(
+        r#"<div class="onboarding-backdrop memorial-clips-backdrop" id="memorial-clips-modal" role="dialog" aria-modal="true" aria-labelledby="memorial-clips-title" hidden>
+  <div class="onboarding-modal memorial-clips-modal">
+    <p class="memorial-comfort-emoji" aria-hidden="true">🪽</p>
+    <h2 id="memorial-clips-title">Choose memory clips for {pet_name}</h2>
+    <p class="onboarding-intro">Add up to 10 short videos of {pet_name}. Tap their memorial photo on Account anytime to cycle through these clips.</p>
+    <p class="field-hint memorial-clips-progress" id="memorial-clips-progress">{filled_count} of 10 clips saved</p>
+    <div class="memorial-video-grid memorial-clips-grid">{slots}</div>
+    <div class="onboarding-actions">
+      <button type="button" class="download-btn login-submit" id="memorial-clips-done">Done for now</button>
+    </div>
+  </div>
+</div>"#,
+        pet_name = pet_name,
+        slots = slots,
+        filled_count = filled_count,
     )
 }
 
@@ -392,7 +466,7 @@ pub fn render_memorial_comfort_modal(profile: &UserProfile) -> String {
     <p class="memorial-comfort-emoji" aria-hidden="true">🪽</p>
     <h2 id="memorial-comfort-title">You loved {pet_name} so well</h2>
     <p>Grief is love with nowhere to go — and what you shared was real. It is okay to feel wobbly, quiet, or all over the place.</p>
-    <p>WhiskerWatch will keep {pet_name} close as your angel cat. Take your time. You are not alone, and it will be okay.</p>
+    <p>WhiskerWatch will keep {pet_name} close as your angel cat. Next, you can choose up to 10 memory clips of {pet_name} to keep close.</p>
     <form action="/home/pets/memorial-comfort" method="post">
       <input type="hidden" name="pet_id" value="{pet_id}" />
       <button type="submit" class="download-btn login-submit">Thank you — I am ready</button>
@@ -421,9 +495,10 @@ pub fn render_angel_pet_avatar(profile: &UserProfile) -> String {
     format!(
         r#"<div class="pet-cinder-stage pet-cinder-stage-angel" id="cinder-pet-stage" data-pet-name="{pet_name}">
   <p class="cinder-pet-label cinder-pet-label-angel">{pet_name} 👼</p>
-  <div class="cinder-pet-image-wrap cinder-pet-image-wrap-angel">
-    <div class="angel-halo" aria-hidden="true"></div>
-    <img class="cinder-pet-image cinder-pet-image-angel" src="{photo_src}" alt="{pet_name} angel cat" />
+  <div class="angel-pet-figure">
+    <div class="cinder-pet-image-wrap cinder-pet-image-wrap-angel">
+      <img class="cinder-pet-image cinder-pet-image-angel" src="{photo_src}" alt="{pet_name} angel cat" />
+    </div>
   </div>
 </div>"#,
         pet_name = pet_name,

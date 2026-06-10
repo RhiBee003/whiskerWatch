@@ -150,7 +150,7 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
     let breed = escape_html(&guide.breed_name);
     let tagline = escape_html(&guide.tagline);
     let category = escape_html(&guide.category);
-    let body = breed_guides::render_preview_sections(&guide.sections);
+    let body = breed_guides::render_preview_sections(&guide.sections, &guide.slug);
     let cta = public_paywall_cta(&guide.breed_name);
     let related = related_breeds_html(guide);
     let json_ld = json_ld_article(guide, base_url, &canonical);
@@ -191,7 +191,9 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
         <h1>{breed} cat care guide</h1>
         <p class="breed-guide-tagline">{tagline}</p>
       </header>
-      <div class="breed-guide-content">{body}</div>
+      <div class="breed-guide-interactive" data-guide-slug="{slug}" data-guide-owned="false">
+        <div class="breed-guide-content">{body}</div>
+      </div>
       {cta}
       {related}
       <p class="breed-guide-back-wrap">
@@ -199,6 +201,7 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
       </p>
     </main>
     <script src="/paw-cursor.js"></script>
+    <script src="/breed-guide.js?v=20260614d" defer></script>
   </body>
 </html>"##,
         title = title,
@@ -206,6 +209,7 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
         canonical = escape_html_attr(&canonical),
         json_ld = json_ld,
         nav = public_nav_html(),
+        slug = escape_html_attr(&guide.slug),
         breed = breed,
         category = category,
         tagline = tagline,

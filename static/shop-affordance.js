@@ -172,14 +172,28 @@
     }
   }
 
-  function showPurchaseToast(status) {
+  function applyParentLevelFromPurchase(data) {
+    if (typeof data.parent_level !== "number") {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("whisker:parent-xp", {
+        detail: data,
+      })
+    );
+  }
+
+  function showPurchaseToast(status, xpEarned) {
     const message = PURCHASE_TOASTS[status];
     if (!message) {
       return;
     }
 
+    const xpSuffix =
+      typeof xpEarned === "number" && xpEarned > 0 ? ` +${xpEarned} XP` : "";
     if (typeof window.whiskerShowToast === "function") {
-      window.whiskerShowToast(message);
+      window.whiskerShowToast(`${message}${xpSuffix}`);
     }
   }
 
@@ -317,7 +331,8 @@
 
       if (data.ok) {
         markShopCardPurchased(card, data);
-        showPurchaseToast(data.status);
+        applyParentLevelFromPurchase(data);
+        showPurchaseToast(data.status, data.xp_earned);
         return;
       }
 

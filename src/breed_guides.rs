@@ -4,8 +4,13 @@ pub const PRICE_CENTS: u32 = 299;
 pub const PRICE_LABEL: &str = "$2.99";
 
 pub struct GuideSection {
+    pub id: &'static str,
     pub title: &'static str,
     pub body: String,
+    pub tips: Vec<String>,
+    pub checklist: Vec<String>,
+    pub watch_out: Option<String>,
+    pub task_key: Option<&'static str>,
 }
 
 pub struct BreedGuide {
@@ -302,31 +307,371 @@ fn build_guide(category: &str, breed: &BreedEntry) -> BreedGuide {
         category: category.to_string(),
         tagline: breed.description.to_string(),
         sections: vec![
-            GuideSection {
-                title: "Daily care rhythm",
-                body: daily_care_body(category, breed),
-            },
-            GuideSection {
-                title: "Grooming & coat",
-                body: grooming_body(category, breed),
-            },
-            GuideSection {
-                title: "Nutrition",
-                body: nutrition_body(category, breed),
-            },
-            GuideSection {
-                title: "Health watch-outs",
-                body: health_body(&slug, category, breed),
-            },
-            GuideSection {
-                title: "Enrichment & behavior",
-                body: enrichment_body(category, breed),
-            },
-            GuideSection {
-                title: "Vet schedule",
-                body: vet_body(category, breed),
-            },
+            build_section(
+                "daily-care",
+                "Daily care rhythm",
+                daily_care_body(category, breed),
+                category,
+                &slug,
+                breed,
+            ),
+            build_section(
+                "grooming",
+                "Grooming & coat",
+                grooming_body(category, breed),
+                category,
+                &slug,
+                breed,
+            ),
+            build_section(
+                "nutrition",
+                "Nutrition",
+                nutrition_body(category, breed),
+                category,
+                &slug,
+                breed,
+            ),
+            build_section(
+                "health",
+                "Health watch-outs",
+                health_body(&slug, category, breed),
+                category,
+                &slug,
+                breed,
+            ),
+            build_section(
+                "enrichment",
+                "Enrichment & behavior",
+                enrichment_body(category, breed),
+                category,
+                &slug,
+                breed,
+            ),
+            build_section(
+                "vet",
+                "Vet schedule",
+                vet_body(category, breed),
+                category,
+                &slug,
+                breed,
+            ),
         ],
+    }
+}
+
+fn build_section(
+    id: &'static str,
+    title: &'static str,
+    body: String,
+    category: &str,
+    slug: &str,
+    breed: &BreedEntry,
+) -> GuideSection {
+    let (tips, checklist, watch_out, task_key) = section_extras(id, category, slug, breed);
+    GuideSection {
+        id,
+        title,
+        body,
+        tips,
+        checklist,
+        watch_out,
+        task_key,
+    }
+}
+
+fn section_extras(
+    section_id: &str,
+    category: &str,
+    slug: &str,
+    breed: &BreedEntry,
+) -> (Vec<String>, Vec<String>, Option<String>, Option<&'static str>) {
+    let name = breed.name;
+    match section_id {
+        "daily-care" => {
+            let rhythm = if category.contains("Long-Haired") {
+                format!(
+                    "Split coat care across morning and evening so {name} never goes a full day without a quick comb-through.",
+                    name = name
+                )
+            } else if category.contains("Colorpoint") {
+                format!(
+                    "{name} is often social and vocal — build predictable mealtimes and a dedicated evening play window.",
+                    name = name
+                )
+            } else if category.contains("Unique") {
+                format!(
+                    "Specialty breeds like {name} do best with steady routines around temperature, skin checks, and quiet downtime.",
+                    name = name
+                )
+            } else {
+                format!(
+                    "Keep wake-up, meals, play, and bedtime within the same hour each day — {name} notices small schedule shifts.",
+                    name = name
+                )
+            };
+            (
+                vec![
+                    rhythm,
+                    format!(
+                        "Refresh water in at least two spots every morning; note whether {name} drank normally by bedtime.",
+                        name = name
+                    ),
+                    "Scan litter habits once daily — clump size, frequency, and accidents outside the box are early warning signs."
+                        .to_string(),
+                    "A 5–10 minute play session before meals helps digestion and reduces night-time zoomies.".to_string(),
+                ],
+                vec![
+                    "Fresh water placed in clean bowls".to_string(),
+                    format!("Appetite and energy level noted for {name}", name = name),
+                    "Litter box checked for changes".to_string(),
+                    "Short pre-meal play session completed".to_string(),
+                ],
+                Some(format!(
+                    "Call your vet if {name} skips two meals, hides more than usual, or has litter-box changes lasting 24+ hours.",
+                    name = name
+                )),
+                None,
+            )
+        }
+        "grooming" => {
+            let coat_tip = if category.contains("Long-Haired") {
+                format!(
+                    "Work in layers from neck to tail on {name} — mats often hide under the topcoat behind ears and in the britches.",
+                    name = name
+                )
+            } else if slug == "sphynx" {
+                format!(
+                    "Wipe {name}'s skin folds daily and bathe every 1–2 weeks to prevent oily buildup on hairless skin.",
+                    name = name
+                )
+            } else if slug == "persian" || slug == "himalayan" {
+                format!(
+                    "Clean {name}'s face folds and eye area daily — flat faces collect moisture that can stain fur and irritate skin.",
+                    name = name
+                )
+            } else {
+                format!(
+                    "Even short coats benefit from weekly brushing for {name} — it spreads natural oils and surfaces early skin issues.",
+                    name = name
+                )
+            };
+            (
+                vec![
+                    coat_tip,
+                    "Use a wide-tooth comb before a slicker brush on longer coats; never pull through painful tangles.".to_string(),
+                    "Check nails every two weeks and ears monthly — early wax buildup is easier to treat than infection."
+                        .to_string(),
+                    "Seasonal sheds may need twice-daily brushing for a week or two; increase hairball support if vomiting rises."
+                        .to_string(),
+                ],
+                vec![
+                    format!("Coat brushed or combed for {name}", name = name),
+                    "Ears inspected for odor or redness".to_string(),
+                    "Nails checked — trim if clicking on floors".to_string(),
+                    "Mats, scabs, or bald patches noted".to_string(),
+                ],
+                Some(
+                    "Stop grooming and contact your vet if you find open sores, sudden heavy shedding, or painful mats you cannot safely remove."
+                        .to_string(),
+                ),
+                Some("groom"),
+            )
+        }
+        "nutrition" => {
+            let portion = if breed.description.contains("energetic")
+                || breed.description.contains("active")
+                || breed.description.contains("athletic")
+            {
+                format!(
+                    "{name} may need slightly larger portions or an extra small meal — track weight weekly on athletic builds.",
+                    name = name
+                )
+            } else if breed.description.contains("calm") || breed.description.contains("gentle") {
+                format!(
+                    "Gentle breeds like {name} gain weight quietly — measure scoops instead of eyeballing portions.",
+                    name = name
+                )
+            } else {
+                format!(
+                    "Use the feeding guide on {name}'s food as a starting point, then adjust with your vet based on body condition.",
+                    name = name
+                )
+            };
+            (
+                vec![
+                    portion,
+                    "Feed measured meals rather than free-feeding; cats often overeat when bowls never empty.".to_string(),
+                    format!(
+                        "Place water away from food — many cats, including {name}, drink more when bowls are separate.",
+                        name = name
+                    ),
+                    if category.contains("Long-Haired") {
+                        "Ask your vet about omega-3 support for coat quality — especially during heavy sheds.".to_string()
+                    } else {
+                        "Limit treats to under 10% of daily calories; use them for training and pill-giving only.".to_string()
+                    },
+                ],
+                vec![
+                    format!("Measured meals served for {name}", name = name),
+                    "Water refreshed and intake noted".to_string(),
+                    "Body condition scored (ribs easy to feel, visible waist)".to_string(),
+                    "No table scraps or new foods introduced today".to_string(),
+                ],
+                Some(format!(
+                    "Sudden hunger swings, weight loss, or refusing favorite foods in {name} deserve a vet call within 24 hours.",
+                    name = name
+                )),
+                None,
+            )
+        }
+        "health" => {
+            let breed_flag = match slug {
+                "persian" | "himalayan" => {
+                    "Watch breathing effort, eye discharge, and heat tolerance — flat-faced cats overheat and stress easily."
+                }
+                "maine-coon" => {
+                    "Discuss HCM screening and hip health at wellness visits; large cats hide lameness well."
+                }
+                "bengal" | "savannah" | "chausie" => {
+                    "High-drive breeds may over-groom or avoid the litter box when under-stimulated — note stress triggers."
+                }
+                "scottish-fold" => {
+                    "Track jumping habits and stiffness; folded ears need gentle cleaning but avoid breeding folded pairs."
+                }
+                "sphynx" => {
+                    "Monitor skin rashes, sun exposure, and room temperature — hairless cats feel cold and burn quickly."
+                }
+                "siamese" | "balinese" | "oriental" => {
+                    "Social breeds can develop anxiety when alone too long — watch for clinginess or compulsive grooming."
+                }
+                "ragdoll" => {
+                    "Ragdolls tolerate handling but may not show pain — schedule regular weight and mobility checks."
+                }
+                _ => {
+                    if category.contains("Long-Haired") {
+                        "Check under the coat for hidden mats, skin flakes, and hairball-related vomiting."
+                    } else {
+                        "Dental disease, urinary issues, and subtle weight change are the most common silent problems."
+                    }
+                }
+            };
+            (
+                vec![
+                    format!("Breed note for {name}: {breed_flag}", name = name, breed_flag = breed_flag),
+                    "Log vomiting, coughing, limping, or litter changes in WhiskerWatch — patterns help your vet diagnose faster."
+                        .to_string(),
+                    "Cats over seven benefit from annual bloodwork even when they seem fine — kidney and thyroid issues start quietly."
+                        .to_string(),
+                    format!(
+                        "Know {name}'s normal resting respiratory rate (usually 20–30 breaths/min asleep) to spot breathing trouble early.",
+                        name = name
+                    ),
+                ],
+                vec![
+                    format!("Behavior baseline recorded for {name}", name = name),
+                    "Gums briefly checked for pale or yellow color".to_string(),
+                    "Mobility and litter habits reviewed".to_string(),
+                    "Any new symptoms written in health notes".to_string(),
+                ],
+                Some(format!(
+                    "Emergency signs for {name}: open-mouth breathing, repeated vomiting, straining in the litter box, or collapse — go now.",
+                    name = name
+                )),
+                Some("health_check"),
+            )
+        }
+        "enrichment" => {
+            let play = if breed.description.contains("social")
+                || breed.description.contains("vocal")
+                || breed.description.contains("playful")
+            {
+                format!(
+                    "Schedule two interactive wand-toy sessions daily for {name} — social breeds need engagement, not just solo toys.",
+                    name = name
+                )
+            } else if breed.description.contains("calm") || breed.description.contains("gentle") {
+                format!(
+                    "Offer calm enrichment for {name}: window perches, scent exploration, and gentle brushing as bonding time.",
+                    name = name
+                )
+            } else {
+                format!(
+                    "Rotate climbing routes and puzzle feeders weekly so {name} always has something new to investigate.",
+                    name = name
+                )
+            };
+            let outdoor = if slug == "bengal" || slug == "savannah" || slug == "chausie" {
+                "If {name} goes outside, use a secure catio — never unsupervised free roaming on high-drive breeds."
+                    .replace("{name}", name)
+            } else {
+                format!(
+                    "Indoor enrichment is safest for {name}; swap toys every few days to prevent habituation.",
+                    name = name
+                )
+            };
+            (
+                vec![
+                    play,
+                    outdoor,
+                    "Tall, sturdy scratching posts save furniture and stretch shoulder muscles — place near sleeping areas.".to_string(),
+                    format!(
+                        "End play sessions with a small meal or treat so {name} mimics a natural hunt-eat-groom-sleep cycle.",
+                        name = name
+                    ),
+                ],
+                vec![
+                    format!("10+ minutes interactive play with {name}", name = name),
+                    "Puzzle feeder or foraging toy used".to_string(),
+                    "Scratching post/climbing route available".to_string(),
+                    "New toy or scent item introduced this week".to_string(),
+                ],
+                Some(format!(
+                    "Sudden aggression, constant vocalizing, or litter-box avoidance in {name} often means stress, pain, or boredom — involve your vet.",
+                    name = name
+                )),
+                Some("enrichment"),
+            )
+        }
+        "vet" => {
+            let cadence = if category.contains("Unique")
+                || name == "Persian"
+                || name == "Maine Coon"
+                || name == "Scottish Fold"
+            {
+                format!(
+                    "Book wellness exams for {name} every 6–12 months; specialty and flat-faced breeds benefit from earlier follow-ups.",
+                    name = name
+                )
+            } else {
+                format!(
+                    "Annual exams are the baseline for {name}; switch to twice-yearly senior visits after age seven.",
+                    name = name
+                )
+            };
+            (
+                vec![
+                    cadence,
+                    format!(
+                        "Bring diet notes, vaccine records, and WhiskerWatch symptom logs to every {name} appointment.",
+                        name = name
+                    ),
+                    "Ask about dental cleanings, parasite prevention, and baseline bloodwork timing for your cat's age.".to_string(),
+                    format!(
+                        "Set calendar reminders for boosters and {name}'s next wellness exam — WhiskerWatch adds breed-timed nudges when you unlock this guide.",
+                        name = name
+                    ),
+                ],
+                vec![
+                    "Vaccine and parasite dates reviewed".to_string(),
+                    format!("Next wellness exam date confirmed for {name}", name = name),
+                    "Recent symptoms or behavior changes listed for the vet".to_string(),
+                    "Carrier and comfort items ready for transport".to_string(),
+                ],
+                None,
+                None,
+            )
+        }
+        _ => (Vec::new(), Vec::new(), None, None),
     }
 }
 
@@ -503,41 +848,315 @@ fn escape_html_attr(text: &str) -> String {
     escape_html(text)
 }
 
-pub fn render_sections_html(sections: &[GuideSection]) -> String {
+fn render_list_items(items: &[String], class_name: &str) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let rows = items
+        .iter()
+        .map(|item| {
+            format!(
+                r#"<li class="{class_name}">{text}</li>"#,
+                class_name = class_name,
+                text = escape_html(item),
+            )
+        })
+        .collect::<String>();
+    format!(r#"<ul class="breed-guide-{class_name}s">{rows}</ul>"#, class_name = class_name, rows = rows)
+}
+
+fn render_checklist_html(section: &GuideSection, interactive: bool) -> String {
+    if section.checklist.is_empty() {
+        return String::new();
+    }
+
+    let items = if interactive {
+        section
+            .checklist
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let item_id = format!("{}-{}", section.id, index);
+                format!(
+                    r#"<li class="breed-guide-checklist-item">
+  <label class="breed-guide-checklist-label">
+    <input type="checkbox" class="breed-guide-checklist-input" data-checklist-item="{item_id}" />
+    <span class="breed-guide-checklist-text">{text}</span>
+  </label>
+</li>"#,
+                    item_id = escape_html_attr(&item_id),
+                    text = escape_html(item),
+                )
+            })
+            .collect::<String>()
+    } else {
+        section
+            .checklist
+            .iter()
+            .map(|item| {
+                format!(
+                    r#"<li class="breed-guide-checklist-item breed-guide-checklist-locked">{text}</li>"#,
+                    text = escape_html(item),
+                )
+            })
+            .collect::<String>()
+    };
+
+    format!(
+        r#"<div class="breed-guide-checklist" data-checklist-section="{section_id}">
+  <h3 class="breed-guide-subheading">Today's checklist</h3>
+  <ul class="breed-guide-checklist-list">{items}</ul>
+  <p class="breed-guide-checklist-hint">Check items off as you go — progress saves on this device.</p>
+</div>"#,
+        section_id = escape_html_attr(section.id),
+        items = items,
+    )
+}
+
+fn render_section_panel(
+    slug: &str,
+    section: &GuideSection,
+    interactive: bool,
+    expanded: bool,
+) -> String {
+    let tips = if section.tips.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<div class="breed-guide-tips-block">
+  <h3 class="breed-guide-subheading">Key tips</h3>
+  {tips}
+</div>"#,
+            tips = render_list_items(&section.tips, "tip"),
+        )
+    };
+
+    let watch_out = section.watch_out.as_ref().map_or(String::new(), |note| {
+        format!(
+            r#"<aside class="breed-guide-watch-out" role="note">
+  <span class="breed-guide-watch-out-label">Watch for</span>
+  <p>{note}</p>
+</aside>"#,
+            note = escape_html(note),
+        )
+    });
+
+    let checklist = if interactive {
+        render_checklist_html(section, true)
+    } else {
+        String::new()
+    };
+
+    let task_link = if interactive {
+        section.task_key.map(|task_key| {
+            let task_id = breed_guide_task_id(slug, task_key);
+            format!(
+                r#"<p class="breed-guide-task-link-wrap">
+  <a href="/home?tab=tasks" class="breed-guide-task-link" data-task-id="{task_id}">Open matching task in Tasks tab →</a>
+</p>"#,
+                task_id = escape_html_attr(&task_id),
+            )
+        }).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    format!(
+        r#"<div id="guide-panel-{section_id}" class="breed-guide-section-panel"{hidden}>
+  <p class="breed-guide-section-intro">{body}</p>
+  {watch_out}
+  {tips}
+  {checklist}
+  {task_link}
+</div>"#,
+        section_id = escape_html_attr(section.id),
+        hidden = if expanded { "" } else { r#" hidden"# },
+        body = escape_html(&section.body),
+        watch_out = watch_out,
+        tips = tips,
+        checklist = checklist,
+        task_link = task_link,
+    )
+}
+
+fn render_section_card(
+    slug: &str,
+    section: &GuideSection,
+    index: usize,
+    interactive: bool,
+    locked: bool,
+    expanded: bool,
+) -> String {
+    let locked_class = if locked {
+        " breed-guide-section-locked"
+    } else {
+        ""
+    };
+    let expanded_attr = if expanded { "true" } else { "false" };
+    let tip_count = section.tips.len();
+    let checklist_count = section.checklist.len();
+
+    let locked_teaser = if locked {
+        let teaser_tips = section
+            .tips
+            .iter()
+            .take(2)
+            .map(|tip| {
+                format!(
+                    r#"<li class="breed-guide-tip breed-guide-tip-locked">{text}</li>"#,
+                    text = escape_html(tip),
+                )
+            })
+            .collect::<String>();
+        format!(
+            r#"<div class="breed-guide-locked-teaser">
+  <p class="breed-guide-blur">Unlock to read {tip_count} expert tips and a {checklist_count}-step daily checklist for this section.</p>
+  <ul class="breed-guide-tips breed-guide-tips-locked">{teaser_tips}</ul>
+</div>"#,
+            tip_count = tip_count,
+            checklist_count = checklist_count,
+            teaser_tips = teaser_tips,
+        )
+    } else {
+        String::new()
+    };
+
+    let panel = if locked {
+        locked_teaser
+    } else {
+        render_section_panel(slug, section, interactive, expanded)
+    };
+
+    if interactive && !locked {
+        format!(
+            r#"<section class="breed-guide-section{locked_class}" id="guide-{section_id}" data-guide-section="{index}">
+  <button type="button" class="breed-guide-section-toggle" aria-expanded="{expanded_attr}" aria-controls="guide-panel-{section_id}">
+    <span class="breed-guide-section-index" aria-hidden="true">{section_number}</span>
+    <span class="breed-guide-section-heading">
+      <span class="breed-guide-section-title">{title}</span>
+      <span class="breed-guide-section-meta">{meta}</span>
+    </span>
+    <span class="breed-guide-section-chevron" aria-hidden="true"></span>
+  </button>
+  {panel}
+</section>"#,
+            locked_class = locked_class,
+            section_id = escape_html_attr(section.id),
+            index = index,
+            expanded_attr = expanded_attr,
+            section_number = index + 1,
+            title = escape_html(section.title),
+            meta = format!("{tip_count} tips · {checklist_count} checks"),
+            panel = panel,
+        )
+    } else {
+        format!(
+            r#"<section class="breed-guide-section{locked_class}" id="guide-{section_id}">
+  <h2 class="breed-guide-section-title-static">{title}</h2>
+  {panel}
+</section>"#,
+            locked_class = locked_class,
+            section_id = escape_html_attr(section.id),
+            title = escape_html(section.title),
+            panel = panel,
+        )
+    }
+}
+
+fn render_toc_html(sections: &[GuideSection], interactive: bool) -> String {
+    if !interactive {
+        return String::new();
+    }
+
+    let links = sections
+        .iter()
+        .enumerate()
+        .map(|(index, section)| {
+            format!(
+                r#"<button type="button" class="breed-guide-toc-link" data-guide-jump="guide-{section_id}" data-guide-section-index="{index}">{title}</button>"#,
+                section_id = escape_html_attr(section.id),
+                index = index,
+                title = escape_html(section.title),
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        r#"<nav class="breed-guide-toc" aria-label="Guide sections">
+  <p class="breed-guide-toc-label">Jump to section</p>
+  <div class="breed-guide-toc-links">{links}</div>
+</nav>"#,
+        links = links,
+    )
+}
+
+fn render_progress_html() -> &'static str {
+    r#"<div class="breed-guide-progress" data-guide-progress>
+  <div class="breed-guide-progress-head">
+    <span class="breed-guide-progress-label">Your guide progress</span>
+    <span class="breed-guide-progress-value" data-guide-progress-text>0%</span>
+  </div>
+  <div class="breed-guide-progress-track" aria-hidden="true">
+    <div class="breed-guide-progress-fill" data-guide-progress-fill style="width: 0%"></div>
+  </div>
+</div>"#
+}
+
+fn render_task_bridge_html(guide: &BreedGuide) -> String {
+    let tasks = task_templates_for_guide(guide);
+    if tasks.is_empty() {
+        return String::new();
+    }
+
+    let rows = tasks
+        .iter()
+        .map(|task| {
+            let task_id = breed_guide_task_id(&guide.slug, task.key);
+            format!(
+                r#"<li class="breed-guide-task-bridge-item">
+  <a href="/home?tab=tasks" class="breed-guide-task-bridge-link" data-task-id="{task_id}">{title}</a>
+  <span class="breed-guide-task-bridge-reward">+{reward} pts</span>
+</li>"#,
+                task_id = escape_html_attr(&task_id),
+                title = escape_html(&task.title),
+                reward = task.reward,
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        r#"<aside class="breed-guide-task-bridge" aria-labelledby="breed-guide-task-bridge-title">
+  <div class="breed-guide-task-bridge-head">
+    <h2 id="breed-guide-task-bridge-title">Daily breed care tasks</h2>
+    <p class="field-hint">These appear in your Tasks tab under <strong>Breed care</strong> — complete them for paw points.</p>
+  </div>
+  <ul class="breed-guide-task-bridge-list">{rows}</ul>
+  <a href="/home?tab=tasks" class="download-btn breed-guide-task-bridge-btn">Go to Tasks tab</a>
+</aside>"#,
+        rows = rows,
+    )
+}
+
+pub fn render_sections_html(sections: &[GuideSection], slug: &str) -> String {
     sections
         .iter()
-        .map(|section| {
-            format!(
-                r#"<section class="breed-guide-section"><h2>{}</h2><p>{}</p></section>"#,
-                escape_html(section.title),
-                escape_html(&section.body),
-            )
+        .enumerate()
+        .map(|(index, section)| {
+            render_section_card(slug, section, index, true, false, index == 0)
         })
         .collect()
 }
 
-pub fn render_preview_sections(sections: &[GuideSection]) -> String {
-    let preview = sections.first();
-    let locked: String = sections
+pub fn render_preview_sections(sections: &[GuideSection], slug: &str) -> String {
+    sections
         .iter()
-        .skip(1)
-        .map(|section| {
-            format!(
-                r#"<section class="breed-guide-section breed-guide-section-locked"><h2>{}</h2><p class="breed-guide-blur">Premium content — unlock the full guide to read grooming, nutrition, health watch-outs, enrichment, and vet schedules tailored to your breed.</p></section>"#,
-                escape_html(section.title),
-            )
+        .enumerate()
+        .map(|(index, section)| {
+            let locked = index > 0;
+            let interactive = index == 0;
+            render_section_card(slug, section, index, interactive, locked, index == 0)
         })
-        .collect();
-
-    let first = preview.map_or(String::new(), |section| {
-        format!(
-            r#"<section class="breed-guide-section"><h2>{}</h2><p>{}</p></section>"#,
-            escape_html(section.title),
-            escape_html(&section.body),
-        )
-    });
-
-    format!("{first}{locked}")
+        .collect()
 }
 
 pub fn render_health_tab_card(
@@ -564,7 +1183,7 @@ pub fn render_health_tab_card(
     <span class="breed-guide-badge breed-guide-badge-unlocked" aria-hidden="true">Unlocked</span>
     <h2>{breed} care guide</h2>
   </div>
-  <p class="field-hint">Your premium guide for {pet} — grooming, nutrition, health watch-outs, and vet tips.</p>
+  <p class="field-hint">Interactive guide for {pet} — expandable sections, daily checklists, and linked breed care tasks.</p>
   <p class="breed-guide-actions">
     <a href="/home/breed-guide/{slug}" class="download-btn breed-guide-open-btn">Read full guide</a>
   </p>
@@ -724,10 +1343,22 @@ pub fn render_guide_page_html(
     let slug = escape_html_attr(&guide.slug);
     let category = escape_html(&guide.category);
 
-    let body = if owned {
-        render_sections_html(&guide.sections)
+    let interactive = owned;
+    let toc = render_toc_html(&guide.sections, interactive);
+    let progress = if interactive {
+        render_progress_html().to_string()
     } else {
-        render_preview_sections(&guide.sections)
+        String::new()
+    };
+    let task_bridge = if owned {
+        render_task_bridge_html(guide)
+    } else {
+        String::new()
+    };
+    let sections_html = if owned {
+        render_sections_html(&guide.sections, &guide.slug)
+    } else {
+        render_preview_sections(&guide.sections, &guide.slug)
     };
 
     let unlock_cta = if owned {
@@ -758,13 +1389,23 @@ pub fn render_guide_page_html(
   <p class="breed-guide-tagline">{tagline}</p>
   <p class="breed-guide-for">Personalized for {pet}</p>
 </header>
-<div class="breed-guide-content">{body}</div>
+<div class="breed-guide-interactive" data-guide-slug="{slug}" data-guide-owned="{owned_flag}">
+  {task_bridge}
+  {progress}
+  {toc}
+  <div class="breed-guide-content">{sections_html}</div>
+</div>
 {unlock_cta}"#,
         category = category,
         breed = breed,
         tagline = tagline,
         pet = pet,
-        body = body,
+        slug = slug,
+        owned_flag = if owned { "true" } else { "false" },
+        task_bridge = task_bridge,
+        progress = progress,
+        toc = toc,
+        sections_html = sections_html,
         unlock_cta = unlock_cta,
     )
 }
@@ -779,6 +1420,18 @@ mod tests {
         assert_eq!(guide.slug, "persian");
         assert_eq!(guide.sections.len(), 6);
         assert!(guide.sections[0].body.contains("Persian"));
+        assert!(!guide.sections[0].tips.is_empty());
+        assert!(!guide.sections[0].checklist.is_empty());
+    }
+
+    #[test]
+    fn interactive_guide_renders_checklists_and_task_bridge() {
+        let guide = guide_for_breed_name("Persian").expect("persian");
+        let html = render_guide_page_html("Mochi", &guide, true, true);
+        assert!(html.contains("breed-guide-checklist"));
+        assert!(html.contains("breed-guide-task-bridge"));
+        assert!(html.contains("breed-guide-toc"));
+        assert!(html.contains("data-guide-owned=\"true\""));
     }
 
     #[test]

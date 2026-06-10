@@ -5,7 +5,10 @@ use crate::{
 };
 use chrono::{Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
-use crate::storage::{StoredFriendRequest, StoredFriendSummary, StoredPetShare};
+use crate::storage::{
+    StorageError, StoredFriendMessage, StoredFriendRequest, StoredFriendSummary, StoredPetShare,
+    StoredUserSearchHit,
+};
 
 pub const FRIEND_STATUS_PENDING: &str = "pending";
 pub const FRIEND_STATUS_ACCEPTED: &str = "accepted";
@@ -61,6 +64,22 @@ pub struct FriendRequestForm {
     pub friend_email: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendSearchResult {
+    pub email: String,
+    pub username: String,
+    pub photo_url: String,
+    pub pet_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendSearchResponse {
+    pub ok: bool,
+    pub results: Vec<FriendSearchResult>,
+}
+
+const FRIEND_SEARCH_LIMIT: usize = 12;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FriendLookupError {
     Empty,
@@ -109,8 +128,16 @@ pub fn friends_pending_count(state: &AppState, email: &str) -> usize {
     incoming + shares
 }
 
+pub fn friends_tab_badge_count(state: &AppState, email: &str) -> usize {
+    let unread = state
+        .storage
+        .count_unread_friend_messages(email)
+        .unwrap_or(0);
+    friends_pending_count(state, email) + unread
+}
+
 pub fn render_friends_tab_label(state: &AppState, email: &str) -> String {
-    let pending = friends_pending_count(state, email);
+    let pending = friends_tab_badge_count(state, email);
     if pending > 0 {
         format!(
             r#"Friends <span class="friends-tab-badge" aria-label="{pending} pending">{pending}</span>"#
@@ -118,6 +145,222 @@ pub fn render_friends_tab_label(state: &AppState, email: &str) -> String {
     } else {
         "Friends".to_string()
     }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendMessageItem {
+    pub id: String,
+    pub from_email: String,
+    pub body: String,
+    pub created_at: u64,
+    pub is_mine: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendMessagePartner {
+    pub email: String,
+    pub username: String,
+    pub photo_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendMessagesResponse {
+    pub ok: bool,
+    pub friend: Option<FriendMessagePartner>,
+    pub messages: Vec<FriendMessageItem>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendMessageSendResponse {
+    pub ok: bool,
+    pub message: Option<FriendMessageItem>,
+    pub status: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct FriendMessageSendForm {
+    pub friend_email: String,
+    pub body: String,
+}
+
+#[derive(Deserialize)]
+pub struct FriendMessageReadForm {
+    pub friend_email: String,
+}
+
+const FRIEND_MESSAGE_LIMIT: usize = 80;
+const MESSAGE_PREVIEW_CHARS: usize = 72;
+
+fn stored_friend_message_item(message: &StoredFriendMessage, viewer_email: &str) -> FriendMessageItem {
+    FriendMessageItem {
+        id: message.id.clone(),
+        from_email: message.from_email.clone(),
+        body: message.body.clone(),
+        created_at: message.created_at,
+        is_mine: message.from_email.eq_ignore_ascii_case(viewer_email),
+    }
+}
+
+pub fn friend_messages_for_conversation(
+    state: &AppState,
+    viewer_email: &str,
+    friend_email: &str,
+) -> Result<FriendMessagesResponse, StorageError> {
+    let viewer_email = normalize_email(viewer_email);
+    let friend_email = normalize_email(friend_email);
+    if !state.storage.are_friends(&viewer_email, &friend_email)? {
+        return Err(StorageError::InvalidInput("not friends".into()));
+    }
+
+    let messages = state
+        .storage
+        .list_friend_conversation(&viewer_email, &friend_email, FRIEND_MESSAGE_LIMIT)?
+        .iter()
+        .map(|message| stored_friend_message_item(message, &viewer_email))
+        .collect();
+
+    Ok(FriendMessagesResponse {
+        ok: true,
+        friend: Some(FriendMessagePartner {
+            email: friend_email.clone(),
+            username: user_label(state, &friend_email),
+            photo_url: user_profile_photo_src(state, &friend_email),
+        }),
+        messages,
+    })
+}
+
+pub fn send_friend_message(
+    state: &AppState,
+    viewer_email: &str,
+    friend_email: &str,
+    body: &str,
+    created_at: u64,
+) -> Result<FriendMessageSendResponse, StorageError> {
+    let viewer_email = normalize_email(viewer_email);
+    let message = state
+        .storage
+        .send_friend_message(&viewer_email, friend_email, body, created_at)?;
+    Ok(FriendMessageSendResponse {
+        ok: true,
+        message: Some(stored_friend_message_item(&message, &viewer_email)),
+        status: None,
+    })
+}
+
+pub fn mark_friend_messages_read(
+    state: &AppState,
+    viewer_email: &str,
+    friend_email: &str,
+    read_at: u64,
+) -> Result<(), StorageError> {
+    state
+        .storage
+        .mark_friend_conversation_read(viewer_email, friend_email, read_at)
+}
+
+fn message_preview(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "Say hi!".to_string();
+    }
+    if trimmed.chars().count() <= MESSAGE_PREVIEW_CHARS {
+        return trimmed.to_string();
+    }
+    let mut preview = String::new();
+    for ch in trimmed.chars().take(MESSAGE_PREVIEW_CHARS) {
+        preview.push(ch);
+    }
+    preview.push('…');
+    preview
+}
+
+pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> String {
+    let friends = state
+        .storage
+        .list_friends(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .map(stored_friend_summary)
+        .collect::<Vec<_>>();
+
+    if friends.is_empty() {
+        return r#"<article class="dashboard-card friend-messages-card" id="friend-messages-card">
+  <h3 class="friends-subhead">Messages</h3>
+  <p class="field-hint">Add friends first, then you can text them here about cat care, playdates, or anything whisker-related.</p>
+</article>"#
+            .to_string();
+    }
+
+    let thread_buttons = friends
+        .iter()
+        .map(|friend| {
+            let label = user_label(state, &friend.friend_email);
+            let photo = user_profile_photo_src(state, &friend.friend_email);
+            let unread = state
+                .storage
+                .count_unread_from_friend(viewer_email, &friend.friend_email)
+                .unwrap_or(0);
+            let preview = state
+                .storage
+                .last_friend_message_with(viewer_email, &friend.friend_email)
+                .ok()
+                .flatten()
+                .map(|message| message_preview(&message.body))
+                .unwrap_or_else(|| "Say hi!".to_string());
+            let unread_badge = if unread > 0 {
+                format!(
+                    r#"<span class="friend-message-unread-badge" aria-label="{unread} unread">{unread}</span>"#,
+                    unread = unread
+                )
+            } else {
+                String::new()
+            };
+
+            format!(
+                r#"<li><button type="button" class="friend-message-thread-btn" data-friend-email="{email}" data-friend-label="{label}">
+  <img class="friend-message-thread-photo" src="{photo}" alt="" width="44" height="44" loading="lazy" />
+  <span class="friend-message-thread-meta">
+    <strong class="friend-message-thread-name">{label}</strong>
+    <span class="friend-message-thread-preview">{preview}</span>
+  </span>
+  {unread_badge}
+</button></li>"#,
+                email = escape_html_attr(&friend.friend_email),
+                label = escape_html_attr(&label),
+                photo = escape_html_attr(&photo),
+                preview = escape_html(&preview),
+                unread_badge = unread_badge,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!(
+        r#"<article class="dashboard-card friend-messages-card" id="friend-messages-card">
+  <h3 class="friends-subhead">Messages</h3>
+  <p class="field-hint">Text your WhiskerWatch friends — great for care tips, playdates, or a quick cat check-in.</p>
+  <div class="friend-messages-shell">
+    <aside class="friend-messages-sidebar" aria-label="Friend conversations">
+      <ul class="friend-message-thread-list">{thread_buttons}</ul>
+    </aside>
+    <section class="friend-messages-panel" id="friend-messages-panel" hidden>
+      <header class="friend-messages-header">
+        <img class="friend-messages-header-photo" id="friend-messages-header-photo" src="/cinderanimate.png" alt="" width="40" height="40" />
+        <strong class="friend-messages-header-name" id="friend-messages-header-name"></strong>
+      </header>
+      <div class="friend-messages-thread" id="friend-messages-thread" aria-live="polite"></div>
+      <form class="friend-messages-compose" id="friend-messages-compose">
+        <label class="visually-hidden" for="friend_message_body">Message</label>
+        <textarea id="friend_message_body" name="body" rows="2" maxlength="2000" placeholder="Type a message…" required></textarea>
+        <button type="submit" class="download-btn">Send</button>
+      </form>
+    </section>
+    <p class="friend-messages-placeholder" id="friend-messages-placeholder">Pick a friend to start a conversation.</p>
+  </div>
+</article>"#,
+        thread_buttons = thread_buttons,
+    )
 }
 
 #[derive(Deserialize)]
@@ -147,6 +390,180 @@ pub fn normalize_email(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendRelation {
+    SelfUser,
+    Friends,
+    PendingOutgoing,
+    PendingIncoming,
+    NotFriends,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FriendQuickRequestResponse {
+    pub ok: bool,
+    pub status: String,
+}
+
+pub fn friend_relation(state: &AppState, viewer_email: &str, target_email: &str) -> FriendRelation {
+    let viewer_email = normalize_email(viewer_email);
+    let target_email = normalize_email(target_email);
+    if viewer_email.is_empty() || target_email.is_empty() {
+        return FriendRelation::NotFriends;
+    }
+    if viewer_email == target_email {
+        return FriendRelation::SelfUser;
+    }
+    if state
+        .storage
+        .are_friends(&viewer_email, &target_email)
+        .unwrap_or(false)
+    {
+        return FriendRelation::Friends;
+    }
+    if state
+        .storage
+        .list_outgoing_friend_requests(&viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .any(|request| request.to_email.eq_ignore_ascii_case(&target_email))
+    {
+        return FriendRelation::PendingOutgoing;
+    }
+    if state
+        .storage
+        .list_incoming_friend_requests(&viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .any(|request| request.from_email.eq_ignore_ascii_case(&target_email))
+    {
+        return FriendRelation::PendingIncoming;
+    }
+    FriendRelation::NotFriends
+}
+
+pub fn can_see_personal_pet_details(
+    state: &AppState,
+    viewer_email: &str,
+    owner_email: &str,
+) -> bool {
+    matches!(
+        friend_relation(state, viewer_email, owner_email),
+        FriendRelation::SelfUser | FriendRelation::Friends
+    )
+}
+
+pub fn render_friend_add_control(
+    state: &AppState,
+    viewer_email: &str,
+    target_email: &str,
+) -> String {
+    let target_email = normalize_email(target_email);
+    if target_email.is_empty() {
+        return String::new();
+    }
+
+    let label = user_label(state, &target_email);
+    match friend_relation(state, viewer_email, &target_email) {
+        FriendRelation::SelfUser => String::new(),
+        FriendRelation::Friends => format!(
+            r#"<a href="/home?tab=friends&amp;chat={email}" class="friend-add-status friend-add-status-friends">Friends · Message</a>"#,
+            email = escape_html_attr(&target_email),
+        ),
+        FriendRelation::PendingOutgoing => {
+            r#"<span class="friend-add-status friend-add-status-pending">💌 Invite sent</span>"#.to_string()
+        }
+        FriendRelation::PendingIncoming => {
+            r#"<a href="/home?tab=friends" class="friend-add-status friend-add-status-incoming">Respond on Friends tab</a>"#
+                .to_string()
+        }
+        FriendRelation::NotFriends => format!(
+            r#"<button type="button" class="friend-add-btn" data-friend-request-email="{email}" aria-label="Add {label} as friend">Add friend</button>"#,
+            email = escape_html_attr(&target_email),
+            label = escape_html_attr(&label),
+        ),
+    }
+}
+
+pub fn quick_friend_request(
+    state: &AppState,
+    viewer_email: &str,
+    target_email: &str,
+    created_at: u64,
+) -> FriendQuickRequestResponse {
+    let viewer_email = normalize_email(viewer_email);
+    let target_email = normalize_email(target_email);
+
+    if target_email.is_empty() {
+        return FriendQuickRequestResponse {
+            ok: false,
+            status: "invalid".to_string(),
+        };
+    }
+    if viewer_email == target_email {
+        return FriendQuickRequestResponse {
+            ok: false,
+            status: "self".to_string(),
+        };
+    }
+
+    match friend_relation(state, &viewer_email, &target_email) {
+        FriendRelation::Friends => FriendQuickRequestResponse {
+            ok: true,
+            status: "friends".to_string(),
+        },
+        FriendRelation::PendingOutgoing => FriendQuickRequestResponse {
+            ok: true,
+            status: "pending".to_string(),
+        },
+        FriendRelation::PendingIncoming => FriendQuickRequestResponse {
+            ok: true,
+            status: "incoming".to_string(),
+        },
+        FriendRelation::SelfUser => FriendQuickRequestResponse {
+            ok: false,
+            status: "self".to_string(),
+        },
+        FriendRelation::NotFriends => {
+            if !state.storage.user_exists(&target_email).unwrap_or(false) {
+                return FriendQuickRequestResponse {
+                    ok: false,
+                    status: "not_found".to_string(),
+                };
+            }
+            match state
+                .storage
+                .create_friend_request(&viewer_email, &target_email, created_at)
+            {
+                Ok(()) => FriendQuickRequestResponse {
+                    ok: true,
+                    status: "sent".to_string(),
+                },
+                Err(StorageError::InvalidInput(message))
+                    if message.contains("already friends") =>
+                {
+                    FriendQuickRequestResponse {
+                        ok: true,
+                        status: "friends".to_string(),
+                    }
+                }
+                Err(StorageError::InvalidInput(message))
+                    if message.contains("request already pending") =>
+                {
+                    FriendQuickRequestResponse {
+                        ok: true,
+                        status: "pending".to_string(),
+                    }
+                }
+                Err(_) => FriendQuickRequestResponse {
+                    ok: false,
+                    status: "error".to_string(),
+                },
+            }
+        }
+    }
+}
+
 pub fn user_label(state: &AppState, email: &str) -> String {
     user_for_email(state, email)
         .map(|user| {
@@ -158,6 +575,91 @@ pub fn user_label(state: &AppState, email: &str) -> String {
             }
         })
         .unwrap_or_else(|| email.to_string())
+}
+
+pub fn user_profile_photo_src(state: &AppState, email: &str) -> String {
+    load_profile_by_email(state, email)
+        .and_then(|profile| {
+            profile
+                .pet_photo_url
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| "/cinderanimate.png".to_string())
+}
+
+fn pending_friend_hint(state: &AppState, email: &str) -> String {
+    let pet_name = load_profile_by_email(state, email)
+        .as_ref()
+        .map(|profile| profile.pet_name.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    match pet_name {
+        Some(name) => format!("Can't wait to meet {name}! 🐾"),
+        None => "Waiting for them to say hi back".to_string(),
+    }
+}
+
+pub fn search_friend_candidates(
+    state: &AppState,
+    viewer_email: &str,
+    query: &str,
+) -> Vec<FriendSearchResult> {
+    let viewer_email = normalize_email(viewer_email);
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let excluded = friend_search_excluded_emails(state, &viewer_email);
+    let hits = state
+        .storage
+        .search_users_by_username(query, FRIEND_SEARCH_LIMIT)
+        .unwrap_or_default();
+
+    hits.into_iter()
+        .filter(|hit| !excluded.contains(&normalize_email(&hit.email)))
+        .map(|hit| friend_search_result_from_hit(state, hit))
+        .collect()
+}
+
+fn friend_search_excluded_emails(
+    state: &AppState,
+    viewer_email: &str,
+) -> std::collections::HashSet<String> {
+    let mut excluded = std::collections::HashSet::new();
+    excluded.insert(viewer_email.to_string());
+
+    for friend in state.storage.list_friends(viewer_email).unwrap_or_default() {
+        excluded.insert(normalize_email(&friend.friend_email));
+    }
+    for request in state
+        .storage
+        .list_incoming_friend_requests(viewer_email)
+        .unwrap_or_default()
+    {
+        excluded.insert(normalize_email(&request.from_email));
+    }
+    for request in state
+        .storage
+        .list_outgoing_friend_requests(viewer_email)
+        .unwrap_or_default()
+    {
+        excluded.insert(normalize_email(&request.to_email));
+    }
+
+    excluded
+}
+
+fn friend_search_result_from_hit(state: &AppState, hit: StoredUserSearchHit) -> FriendSearchResult {
+    let email = normalize_email(&hit.email);
+
+    FriendSearchResult {
+        email,
+        username: hit.username.trim().to_string(),
+        photo_url: user_profile_photo_src(state, &hit.email),
+        pet_name: None,
+    }
 }
 
 pub fn active_pet_owner_email(profile: &UserProfile) -> &str {
@@ -402,6 +904,17 @@ pub fn apply_snapshot_to_profile_view(mut view: UserProfile, snapshot: &crate::P
     view
 }
 
+pub fn account_tab_pet_view(state: &AppState, profile: &UserProfile) -> UserProfile {
+    let mut scoped = profile.clone();
+    if is_viewing_shared_pet(&scoped) || !owner_has_pet(&scoped, &scoped.active_pet_id) {
+        if let Some((pet_id, _)) = pet_summaries_for_profile(&scoped).first() {
+            scoped.active_pet_id = pet_id.clone();
+            scoped.active_pet_owner_email = None;
+        }
+    }
+    active_pet_view_profile(state, &scoped)
+}
+
 pub fn active_pet_view_profile(state: &AppState, viewer: &UserProfile) -> UserProfile {
     let Some(target) = resolve_active_pet_care_target(state, viewer) else {
         return viewer.clone();
@@ -596,7 +1109,7 @@ pub fn render_pet_switcher(state: &AppState, profile: &UserProfile) -> String {
         .collect::<String>();
 
     format!(
-        r#"<nav class="pet-switcher" aria-label="Switch cat">
+        r#"<nav class="pet-switcher" aria-label="Switch cat" data-return-tab="pet">
   <button type="button" class="pet-switcher-nav" data-pet-target="{prev_id}" data-pet-owner="{prev_owner}" aria-label="Previous cat">‹</button>
   <div class="pet-switcher-tabs">{tabs}</div>
   <button type="button" class="pet-switcher-nav" data-pet-target="{next_id}" data-pet-owner="{next_owner}" aria-label="Next cat">›</button>
@@ -606,6 +1119,62 @@ pub fn render_pet_switcher(state: &AppState, profile: &UserProfile) -> String {
         prev_owner = escape_html_attr(&prev.owner_email),
         next_id = escape_html_attr(&next.pet_id),
         next_owner = escape_html_attr(&next.owner_email),
+        tabs = tabs,
+        position = active_index + 1,
+        total = pets.len(),
+    )
+}
+
+pub fn render_account_pet_switcher(state: &AppState, profile: &UserProfile) -> String {
+    let pets = pet_summaries_for_profile(profile);
+    if pets.len() <= 1 {
+        return String::new();
+    }
+
+    let account_view = account_tab_pet_view(state, profile);
+    let active_id = account_view.active_pet_id.as_str();
+    let active_index = pets
+        .iter()
+        .position(|(id, _)| id == active_id)
+        .unwrap_or(0);
+    let prev_idx = if active_index == 0 {
+        pets.len() - 1
+    } else {
+        active_index - 1
+    };
+    let next_idx = (active_index + 1) % pets.len();
+    let (prev_id, _) = &pets[prev_idx];
+    let (next_id, _) = &pets[next_idx];
+
+    let tabs = pets
+        .iter()
+        .map(|(pet_id, pet_name)| {
+            let active = pet_id == active_id;
+            let active_class = if active {
+                " pet-switcher-tab-active"
+            } else {
+                ""
+            };
+            let angel = memorial::pet_switcher_angel_suffix(profile, pet_id, &profile.email);
+            format!(
+                r#"<a href="/home?tab=account&amp;pet={pet_id}" class="pet-switcher-tab{active_class}" aria-current="{current}">{label}</a>"#,
+                pet_id = escape_html_attr(pet_id),
+                active_class = active_class,
+                current = if active { "page" } else { "false" },
+                label = format!("{}{}", escape_html(pet_name), angel),
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        r#"<nav class="pet-switcher account-pet-switcher" aria-label="Switch cat on account" data-return-tab="account">
+  <button type="button" class="pet-switcher-nav" data-pet-target="{prev_id}" aria-label="Previous cat">‹</button>
+  <div class="pet-switcher-tabs">{tabs}</div>
+  <button type="button" class="pet-switcher-nav" data-pet-target="{next_id}" aria-label="Next cat">›</button>
+  <p class="field-hint pet-switcher-count">{position} of {total} cats</p>
+</nav>"#,
+        prev_id = escape_html_attr(prev_id),
+        next_id = escape_html_attr(next_id),
         tabs = tabs,
         position = active_index + 1,
         total = pets.len(),
@@ -671,8 +1240,9 @@ pub fn render_account_friends_section(
     owned_pets: &[(String, String)],
 ) -> String {
     format!(
-        "{}{}",
+        "{}{}{}",
         render_friends_card(state, viewer_email),
+        render_friend_messages_card(state, viewer_email),
         render_pet_sharing_card(state, viewer_email, owned_pets),
     )
 }
@@ -699,16 +1269,6 @@ fn render_friends_card(state: &AppState, viewer_email: &str) -> String {
         .into_iter()
         .map(stored_friend_request)
         .collect::<Vec<_>>();
-    let outgoing_friend_html: String = outgoing
-        .iter()
-        .map(|req| {
-            format!(
-                r#"<li class="friend-request-item friend-request-outgoing"><span>Waiting on <strong>{to}</strong></span><span class="field-hint">Request sent</span></li>"#,
-                to = escape_html(&user_label(state, &req.to_email)),
-            )
-        })
-        .collect();
-
     let incoming_friend_html: String = incoming
         .iter()
         .map(|req| {
@@ -730,22 +1290,54 @@ fn render_friends_card(state: &AppState, viewer_email: &str) -> String {
         })
         .collect();
 
-    let friends_list_html = if friends.is_empty() {
-        r#"<p class="field-hint">No friends yet — open Add friends above to connect by email or username.</p>"#.to_string()
+    let pending_friend_items: String = outgoing
+        .iter()
+        .map(|req| {
+            let label = user_label(state, &req.to_email);
+            let photo = user_profile_photo_src(state, &req.to_email);
+            let hint = pending_friend_hint(state, &req.to_email);
+            format!(
+                r#"<li class="friend-list-item friend-list-item-pending">
+  <img class="friend-pending-photo" src="{photo}" alt="" width="48" height="48" loading="lazy" />
+  <div class="friend-pending-meta">
+    <strong class="friend-pending-name">{label}</strong>
+    <span class="friend-pending-hint">{hint}</span>
+  </div>
+  <span class="friend-pending-badge" aria-label="Friend invite sent">💌 Invite sent</span>
+</li>"#,
+                label = escape_html(&label),
+                photo = escape_html_attr(&photo),
+                hint = escape_html(&hint),
+            )
+        })
+        .collect();
+
+    let accepted_friend_items: String = friends
+        .iter()
+        .map(|friend| {
+            let label = user_label(state, &friend.friend_email);
+            format!(
+                r#"<li class="friend-list-item">
+  <strong>{label}</strong>
+  <button type="button" class="friend-list-message-btn onboarding-skip-btn" data-open-friend-chat="{email}">Message</button>
+</li>"#,
+                label = escape_html(&label),
+                email = escape_html_attr(&friend.friend_email),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let friends_list_html = if friends.is_empty() && outgoing.is_empty() {
+        r#"<p class="field-hint">No friends yet — open Add friends above and search by username.</p>"#.to_string()
     } else {
+        let pending_intro = if outgoing.is_empty() {
+            String::new()
+        } else {
+            r#"<p class="friend-list-pending-intro">On their way 💌</p>"#.to_string()
+        };
         format!(
-            "<ul class=\"friend-list\">{}</ul>",
-            friends
-                .iter()
-                .map(|friend| {
-                    format!(
-                        r#"<li class="friend-list-item"><strong>{}</strong> <span class="field-hint">{}</span></li>"#,
-                        escape_html(&user_label(state, &friend.friend_email)),
-                        escape_html(&friend.friend_email),
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("")
+            "{pending_intro}<ul class=\"friend-list\">{pending_friend_items}{accepted_friend_items}</ul>",
         )
     };
 
@@ -756,16 +1348,27 @@ fn render_friends_card(state: &AppState, viewer_email: &str) -> String {
       <span class="friends-add-summary-text">Add friends</span>
     </summary>
     <div class="friends-add-body">
-      <p class="field-hint">Connect with another WhiskerWatch parent first — then you can share specific cats, tasks, and schedules from the card below.</p>
-      <form class="login-form add-friend-form" action="/home/friends/request" method="post">
-        <label for="friend_email">Friend's email or username</label>
-        <input id="friend_email" name="friend_email" type="text" required autocomplete="off" placeholder="friend@example.com or whiskerparent42" />
-        <button type="submit" class="download-btn login-submit">Send friend request 💌</button>
+      <p class="field-hint">Search by username, pick the right cat parent, then send a friend request. After you're connected, you can share specific cats, tasks, and schedules from the card below.</p>
+      <form class="login-form add-friend-form" action="/home/friends/request" method="post" data-friend-search-form>
+        <div class="friend-search-field">
+          <label for="friend_search_query">Search by username</label>
+          <input id="friend_search_query" type="search" autocomplete="off" placeholder="Start typing a username…" aria-controls="friend_search_results" aria-expanded="false" aria-autocomplete="list" />
+          <div id="friend_search_results" class="friend-search-results" role="listbox" aria-label="Matching users" hidden></div>
+        </div>
+        <div id="friend_search_selected" class="friend-search-selected" hidden>
+          <img class="friend-search-selected-photo" alt="" width="48" height="48" />
+          <div class="friend-search-selected-meta">
+            <strong class="friend-search-selected-name"></strong>
+            <span class="field-hint friend-search-selected-pet"></span>
+          </div>
+          <button type="button" class="friend-search-clear onboarding-skip-btn">Change</button>
+        </div>
+        <input id="friend_email" name="friend_email" type="hidden" value="" required />
+        <button type="submit" class="download-btn login-submit" id="friend_request_submit" disabled>Send friend request 💌</button>
       </form>
     </div>
   </details>
   {incoming_friends}
-  {outgoing_friends}
   <h3 class="friends-subhead">Your friends</h3>
   {friends_list}
 </article>"#,
@@ -774,13 +1377,6 @@ fn render_friends_card(state: &AppState, viewer_email: &str) -> String {
         } else {
             format!(
                 "<h3 class=\"friends-subhead\">Friend requests for you</h3><ul class=\"friend-request-list\">{incoming_friend_html}</ul>"
-            )
-        },
-        outgoing_friends = if outgoing_friend_html.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<h3 class=\"friends-subhead\">Requests you sent</h3><ul class=\"friend-request-list\">{outgoing_friend_html}</ul>"
             )
         },
         friends_list = friends_list_html,

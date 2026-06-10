@@ -2,6 +2,8 @@ use crate::breeds;
 use crate::list_pet_summaries;
 use crate::pet_snapshot;
 use crate::profile_has_pet;
+use crate::sharing;
+use crate::social_posts;
 use crate::user_for_email;
 use crate::AppState;
 use crate::UserProfile;
@@ -12,6 +14,7 @@ const PET_VIDEO_CLIP_MAX_SECONDS: f32 = 6.0;
 
 #[derive(Clone)]
 pub struct PublicCatCard {
+    pub owner_email: String,
     pub author_username: String,
     pub pet_name: String,
     pub pet_breed: String,
@@ -24,6 +27,7 @@ pub struct PublicCatCard {
     pub pet_video_clip_duration: f32,
     pub equipped_outfit: String,
     pub is_viewer: bool,
+    pub deceased: bool,
     #[allow(dead_code)]
     pub breed_slug: String,
 }
@@ -109,6 +113,7 @@ pub fn collect_public_cat_cards(
             }
 
             cards.push(PublicCatCard {
+                owner_email: email.clone(),
                 author_username: author_username.clone(),
                 pet_name: snapshot.pet_name.clone(),
                 pet_breed: snapshot.pet_breed.clone(),
@@ -121,6 +126,7 @@ pub fn collect_public_cat_cards(
                 pet_video_clip_duration: clip_duration(snapshot.pet_video_clip_duration),
                 equipped_outfit: profile.equipped_outfit.clone(),
                 is_viewer,
+                deceased: snapshot.deceased,
                 breed_slug,
             });
         }
@@ -152,17 +158,42 @@ fn escape_html_attr(value: &str) -> String {
     escape_html(value)
 }
 
-pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
+pub fn render_community_legend() -> String {
+    r#"<div class="community-legend" role="note" aria-label="Community card key">
+  <p class="community-legend-title">Key</p>
+  <ul class="community-legend-list">
+    <li>
+      <span class="community-legend-symbol community-legend-memorial" aria-hidden="true">★</span>
+      <span>Angel cat — passed away and remembered with love</span>
+    </li>
+    <li>
+      <span class="community-legend-symbol community-legend-you">You</span>
+      <span>Your cat in the community feed</span>
+    </li>
+  </ul>
+</div>"#
+        .to_string()
+}
+
+pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicCatCard) -> String {
+    let show_personal =
+        sharing::can_see_personal_pet_details(state, viewer_email, &card.owner_email);
     let pet_name = escape_html(&card.pet_name);
+    let parent_display = escape_html(&card.author_username);
+    let media_label = if show_personal {
+        pet_name.clone()
+    } else {
+        format!("{parent_display}'s cat")
+    };
     let photo = if let Some(url) = card
         .pet_photo_url
         .as_deref()
         .filter(|value| !value.is_empty())
     {
         format!(
-            r#"<img class="community-cat-photo" src="{url}" alt="{pet_name}" loading="lazy" />"#,
+            r#"<img class="community-cat-photo" src="{url}" alt="{alt}" loading="lazy" />"#,
             url = escape_html_attr(url),
-            pet_name = pet_name,
+            alt = media_label,
         )
     } else {
         r#"<div class="community-cat-photo community-cat-photo-placeholder" aria-hidden="true">🐱</div>"#
@@ -189,11 +220,11 @@ pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
         preload="metadata"
         data-clip-start="{clip_start}"
         data-clip-duration="{clip_duration}"
-        aria-label="Video of {pet_name} playing"
+        aria-label="Video of {media_label} playing"
       ></video>
     </div>"#,
             url = escape_html_attr(url),
-            pet_name = pet_name,
+            media_label = media_label,
             clip_start = card.pet_video_clip_start,
             clip_duration = card.pet_video_clip_duration,
         )
@@ -201,9 +232,13 @@ pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
         String::new()
     };
     let media_toggle = if has_video {
+        let toggle_label = if show_personal {
+            format!("Watch {pet_name} play! 🎬")
+        } else {
+            "Watch play! 🎬".to_string()
+        };
         format!(
-            r#"<button type="button" class="community-cat-media-toggle" aria-pressed="false">Watch {pet_name} play! 🎬</button>"#,
-            pet_name = pet_name,
+            r#"<button type="button" class="community-cat-media-toggle" aria-pressed="false">{toggle_label}</button>"#,
         )
     } else {
         String::new()
@@ -215,16 +250,59 @@ pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
         ""
     };
 
-    let color_line = if card.pet_color.trim().is_empty() {
-        String::new()
+    let memorial_badge = if card.deceased {
+        r#"<span class="community-cat-memorial-badge" title="Angel cat">★</span>"#
     } else {
+        ""
+    };
+
+    let memorial_line = if card.deceased {
+        r#"<p class="community-cat-memorial-status"><span aria-hidden="true">★</span> Angel cat</p>"#
+            .to_string()
+    } else {
+        String::new()
+    };
+
+    let card_class = if card.deceased {
+        "community-cat-card community-cat-card-memorial"
+    } else {
+        "community-cat-card"
+    };
+
+    let card_title = if show_personal {
+        pet_name.clone()
+    } else {
+        parent_display.clone()
+    };
+
+    let breed_line = if show_personal {
+        format!(
+            r#"<p class="community-cat-breed">{breed}</p>"#,
+            breed = escape_html(&card.pet_breed),
+        )
+    } else {
+        String::new()
+    };
+
+    let color_line = if show_personal && !card.pet_color.trim().is_empty() {
         format!(
             r#"<p class="community-cat-color">{color}</p>"#,
             color = escape_html(&card.pet_color),
         )
+    } else {
+        String::new()
     };
 
-    let streak_line = if card.care_streak_days >= 3 {
+    let level_line = if show_personal {
+        format!(
+            r#"<p class="community-cat-level">Parent level {level}</p>"#,
+            level = card.parent_level,
+        )
+    } else {
+        String::new()
+    };
+
+    let streak_line = if show_personal && !card.deceased && card.care_streak_days >= 3 {
         format!(
             r#"<p class="community-cat-streak">💗 {days}-day care streak</p>"#,
             days = card.care_streak_days,
@@ -233,43 +311,78 @@ pub fn render_cat_feed_card(card: &PublicCatCard) -> String {
         String::new()
     };
 
-    let outfit_line = if card.equipped_outfit.trim().is_empty() {
-        String::new()
-    } else {
+    let outfit_line = if show_personal && !card.equipped_outfit.trim().is_empty() {
         format!(
             r#"<p class="community-cat-outfit">Wearing {outfit}</p>"#,
             outfit = escape_html(&card.equipped_outfit),
         )
+    } else {
+        String::new()
+    };
+
+    let parent_line = if show_personal {
+        format!(r#"<p class="community-cat-parent">by {parent_display}</p>"#)
+    } else {
+        String::new()
+    };
+
+    let profile_url = escape_html_attr(&social_posts::parent_profile_url(&card.author_username));
+    let profile_label = if card.is_viewer {
+        "View your profile and posts"
+    } else {
+        "View profile and posts"
+    };
+    let friend_action = if card.is_viewer {
+        String::new()
+    } else {
+        sharing::render_friend_add_control(state, viewer_email, &card.owner_email)
+    };
+    let friend_action_line = if friend_action.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<div class="community-cat-friend-action">{friend_action}</div>"#)
     };
 
     format!(
-        r#"<article class="community-cat-card">
-  <div class="community-cat-media" data-pet-name="{name}">
-    <div class="community-cat-photo-wrap">
-      {photo}
-      {video}
+        r#"<article class="{card_class}">
+  {memorial_badge}
+  <a href="{profile_url}" class="community-cat-card-link" aria-label="{profile_label} for {parent_display}">
+    <div class="community-cat-media" data-pet-name="{name}">
+      <div class="community-cat-photo-wrap">
+        {photo}
+        {video}
+      </div>
     </div>
-    {media_toggle}
-  </div>
-  <h3 class="community-cat-name">{name}{you_badge}</h3>
-  <p class="community-cat-breed">{breed}</p>
-  {color_line}
-  <p class="community-cat-level">Parent level {level}</p>
-  {streak_line}
-  {outfit_line}
-  <p class="community-cat-parent">by {parent}</p>
+    <h3 class="community-cat-name">{name}{you_badge}</h3>
+    {breed_line}
+    {color_line}
+    {memorial_line}
+    {level_line}
+    {streak_line}
+    {outfit_line}
+    {parent_line}
+  </a>
+  {media_toggle}
+  {friend_action_line}
 </article>"#,
+        card_class = card_class,
+        profile_url = profile_url,
+        profile_label = profile_label,
+        parent_display = parent_display,
         photo = photo,
         video = video,
         media_toggle = media_toggle,
-        name = pet_name,
+        memorial_badge = memorial_badge,
+        name = card_title,
         you_badge = you_badge,
-        breed = escape_html(&card.pet_breed),
+        memorial_line = memorial_line,
+        breed_line = breed_line,
         color_line = color_line,
-        level = card.parent_level,
+        level_line = level_line,
         streak_line = streak_line,
         outfit_line = outfit_line,
-        parent = escape_html(&card.author_username),
+        parent_line = parent_line,
+        friend_action_line = friend_action_line,
     )
 }
 
@@ -337,7 +450,10 @@ pub fn render_cat_feed_section(
     } else {
         format!(
             r#"<div class="community-cat-grid">{cards}</div>"#,
-            cards = cards.iter().map(render_cat_feed_card).collect::<String>(),
+            cards = cards
+                .iter()
+                .map(|card| render_cat_feed_card(state, viewer_email, card))
+                .collect::<String>(),
         )
     };
 

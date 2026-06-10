@@ -71,6 +71,8 @@ pub struct Possibility {
     pub concern_level: ConcernLevel,
     pub concern_label: String,
     pub less_likely: bool,
+    pub match_strength: String,
+    pub matched_symptoms: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -292,6 +294,49 @@ const SIGNAL_RULES: &[SignalRule] = &[
         urgency: Urgency::Monitor,
     },
     SignalRule {
+        patterns: &[
+            "aggress",
+            "aggressive",
+            "hissing",
+            "growl",
+            "attacking",
+            "lashing out",
+            "bite",
+            "biting",
+        ],
+        label: "Aggression or irritability",
+        urgency: Urgency::VetSoon,
+    },
+    SignalRule {
+        patterns: &[
+            "vocaliz",
+            "constant vocal",
+            "excessive meow",
+            "yowl",
+            "yowling",
+            "howl",
+            "howling",
+            "wailing",
+            "crying all night",
+        ],
+        label: "Constant vocalizing",
+        urgency: Urgency::Monitor,
+    },
+    SignalRule {
+        patterns: &[
+            "litter box avoidance",
+            "avoiding litter",
+            "avoiding the litter",
+            "litter avoidance",
+            "not using litter",
+            "stopped using litter",
+            "won't use litter",
+            "wont use litter",
+        ],
+        label: "Litter-box avoidance",
+        urgency: Urgency::VetSoon,
+    },
+    SignalRule {
         patterns: &["blood in urine", "blood in stool", "bloody vomit", "blood"],
         label: "Blood in vomit, stool, or urine",
         urgency: Urgency::VetToday,
@@ -511,8 +556,14 @@ const CONDITION_RULES: &[ConditionRule] = &[
         patterns: &[
             "outside litter",
             "peeing outside",
+            "litter box avoidance",
+            "avoiding litter",
+            "not using litter",
             "hiding",
             "stress",
+            "aggress",
+            "vocaliz",
+            "yowl",
             "move",
             "new pet",
             "visitor",
@@ -1036,6 +1087,9 @@ const QUICK_SYMPTOM_OPTIONS: &[(&str, &str)] = &[
     ("weight loss", "Weight loss"),
     ("hiding", "Hiding more"),
     ("breathing fast", "Breathing fast"),
+    ("aggression", "Aggression"),
+    ("constant vocalizing", "Constant vocalizing"),
+    ("litter box avoidance", "Litter-box avoidance"),
 ];
 
 pub const DISCLAIMER: &str = "WhiskerWatch is not a veterinarian and cannot diagnose or treat your cat. This guide offers general educational information only — always contact your vet for medical advice.";
@@ -1059,6 +1113,180 @@ fn text_contains(haystack: &str, needle: &str) -> bool {
             .split_whitespace()
             .any(|word| word == needle || word.starts_with(needle))
             || haystack.contains(needle)
+    }
+}
+
+fn pattern_weight(pattern: &str) -> usize {
+    match pattern {
+        "vomit" | "letharg" | "pee" | "urinat" | "litter" | "drink" | "appetite" | "diarrhea"
+        | "cough" | "breath" | "eye" | "itch" | "lick" | "scratch" | "ate" | "swallowed"
+        | "drool" | "fever" | "stress" | "hiding" | "aggress" | "vocaliz" | "abdom" | "pain"
+        | "senior" | "older" | "move" | "visitor" => 1,
+        _ => 2,
+    }
+}
+
+fn humanize_matched_pattern(pattern: &str) -> String {
+    match pattern {
+        "vomit" => "vomiting".to_string(),
+        "letharg" => "lethargy".to_string(),
+        "urinat" => "urination changes".to_string(),
+        "aggress" => "aggression".to_string(),
+        "vocaliz" => "vocalizing".to_string(),
+        "sneez" => "sneezing".to_string(),
+        "defecat" => "defecation changes".to_string(),
+        "constipat" => "constipation".to_string(),
+        "infect" => "infection signs".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn is_senior_cat(age: &str) -> bool {
+    let lower = age.trim().to_lowercase();
+    if lower.contains("senior") || lower.contains("elder") || lower.contains("geriatric") {
+        return true;
+    }
+    lower
+        .split_whitespace()
+        .filter_map(|part| part.parse::<u32>().ok())
+        .any(|years| years >= 7)
+}
+
+struct SymptomCluster {
+    patterns: &'static [&'static str],
+    min_match: usize,
+    condition: &'static str,
+    bonus: usize,
+}
+
+const SYMPTOM_CLUSTERS: &[SymptomCluster] = &[
+    SymptomCluster {
+        patterns: &["vomit", "diarrhea"],
+        min_match: 2,
+        condition: "Gastroenteritis or dietary upset",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["vomit", "hairball", "groom"],
+        min_match: 2,
+        condition: "Hairball or mild stomach upset",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["straining", "litter", "urinat"],
+        min_match: 2,
+        condition: "Urinary blockage or FLUTD",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["blood in urine", "urinat", "pee"],
+        min_match: 2,
+        condition: "Urinary tract infection (UTI)",
+        bonus: 2,
+    },
+    SymptomCluster {
+        patterns: &["sneez", "nasal", "eye discharge"],
+        min_match: 2,
+        condition: "Upper respiratory infection",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["lily", "vomit", "letharg"],
+        min_match: 2,
+        condition: "Poisoning or toxin exposure",
+        bonus: 4,
+    },
+    SymptomCluster {
+        patterns: &["aggress", "hiding", "litter box avoidance", "avoiding litter"],
+        min_match: 2,
+        condition: "Stress-related litter box changes",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["drinking", "urinat", "weight loss"],
+        min_match: 2,
+        condition: "Kidney disease or diabetes",
+        bonus: 3,
+    },
+    SymptomCluster {
+        patterns: &["not eating", "letharg", "vomit"],
+        min_match: 2,
+        condition: "Pancreatitis",
+        bonus: 2,
+    },
+    SymptomCluster {
+        patterns: &["fever", "wound", "letharg"],
+        min_match: 2,
+        condition: "Bacterial or systemic infection",
+        bonus: 3,
+    },
+];
+
+fn cluster_bonus(condition_name: &str, text: &str) -> usize {
+    SYMPTOM_CLUSTERS
+        .iter()
+        .filter(|cluster| cluster.condition == condition_name)
+        .map(|cluster| {
+            let matched = cluster
+                .patterns
+                .iter()
+                .filter(|pattern| text_contains(text, pattern))
+                .count();
+            if matched >= cluster.min_match {
+                cluster.bonus
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
+fn context_bonus(condition_name: &str, context: &PetContext) -> usize {
+    let mut bonus = 0usize;
+    if is_senior_cat(&context.age) {
+        bonus += usize::from(matches!(
+            condition_name,
+            "Kidney disease or diabetes"
+                | "Hyperthyroidism"
+                | "Arthritis or joint pain"
+                | "Cancer or chronic internal disease"
+                | "Heart disease or congestive failure"
+        ));
+    }
+    if context.lifestyle.eq_ignore_ascii_case("outdoor") {
+        bonus += usize::from(matches!(
+            condition_name,
+            "Bacterial or systemic infection"
+                | "Intestinal parasites or worms"
+                | "Upper respiratory infection"
+        ));
+    }
+    if !context.conditions.trim().is_empty()
+        && !context.conditions.eq_ignore_ascii_case("none noted")
+    {
+        let lower = context.conditions.to_lowercase();
+        if lower.contains("diabet") && condition_name == "Kidney disease or diabetes" {
+            bonus += 2;
+        }
+        if lower.contains("kidney") && condition_name == "Kidney disease or diabetes" {
+            bonus += 2;
+        }
+        if lower.contains("asthma") && condition_name == "Asthma or airway irritation" {
+            bonus += 2;
+        }
+    }
+    bonus
+}
+
+fn match_strength_label(weighted_score: usize, min_hits: usize, less_likely: bool) -> &'static str {
+    if less_likely {
+        "Possible"
+    } else if weighted_score >= min_hits.saturating_mul(3) {
+        "Strong match"
+    } else if weighted_score >= min_hits.saturating_mul(2) {
+        "Good fit"
+    } else {
+        "Likely"
     }
 }
 
@@ -1104,6 +1332,8 @@ fn max_urgency(current: Urgency, candidate: Urgency) -> Urgency {
 fn possibility_from_rule(
     rule: &ConditionRule,
     less_likely: bool,
+    weighted_score: usize,
+    matched_patterns: &[String],
     text: &str,
     context: &PetContext,
     breed: Option<&breed_health::ResolvedBreed>,
@@ -1114,13 +1344,24 @@ fn possibility_from_rule(
         context.name.as_str()
     };
 
+    let matched_symptoms: Vec<String> = matched_patterns
+        .iter()
+        .map(|pattern| humanize_matched_pattern(pattern))
+        .collect();
+
     let mut summary = if less_likely {
         format!(
             "A weaker symptom match, but still possible: {}",
             rule.summary
         )
-    } else {
+    } else if matched_symptoms.is_empty() {
         rule.summary.to_string()
+    } else {
+        format!(
+            "Based on {}: {}",
+            matched_symptoms.join(", "),
+            rule.summary
+        )
     };
 
     if let Some(breed) = breed {
@@ -1134,7 +1375,94 @@ fn possibility_from_rule(
         concern_label: rule.concern_level.label().to_string(),
         concern_level: rule.concern_level,
         less_likely,
+        match_strength: match_strength_label(weighted_score, rule.min_hits, less_likely).to_string(),
+        matched_symptoms,
     }
+}
+
+#[derive(Clone)]
+struct ScoredCondition<'a> {
+    rule: &'a ConditionRule,
+    weighted_score: usize,
+    less_likely: bool,
+    matched_patterns: Vec<String>,
+}
+
+const MAX_PROMOTED_WEAK_MATCHES: usize = 3;
+const MAX_EXTRA_WEAK_MATCHES: usize = 2;
+const MAX_POSSIBILITY_RESULTS: usize = 6;
+
+fn sort_scored_conditions(matches: &mut [ScoredCondition<'_>]) {
+    matches.sort_by(|a, b| {
+        a.less_likely
+            .cmp(&b.less_likely)
+            .then_with(|| b.weighted_score.cmp(&a.weighted_score))
+            .then_with(|| {
+                a.rule
+                    .concern_level
+                    .rank()
+                    .cmp(&b.rule.concern_level.rank())
+            })
+    });
+}
+
+fn truncate_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<ScoredCondition<'_>> {
+    if matches.len() <= MAX_POSSIBILITY_RESULTS {
+        sort_scored_conditions(&mut matches);
+        return matches;
+    }
+
+    matches.sort_by(|a, b| {
+        b.weighted_score
+            .cmp(&a.weighted_score)
+            .then_with(|| b.rule.concern_level.rank().cmp(&a.rule.concern_level.rank()))
+    });
+    matches.truncate(MAX_POSSIBILITY_RESULTS);
+    sort_scored_conditions(&mut matches);
+    matches
+}
+
+fn finalize_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<ScoredCondition<'_>> {
+    if matches.is_empty() {
+        return matches;
+    }
+
+    sort_scored_conditions(&mut matches);
+
+    let has_confirmed = matches.iter().any(|item| !item.less_likely);
+    if has_confirmed {
+        matches.retain(|item| !item.less_likely);
+        return truncate_scored_conditions(matches);
+    }
+
+    let max_score = matches
+        .iter()
+        .map(|item| item.weighted_score)
+        .max()
+        .unwrap_or(0);
+    let mut promoted = 0usize;
+    for item in &mut matches {
+        if item.weighted_score == max_score && promoted < MAX_PROMOTED_WEAK_MATCHES {
+            item.less_likely = false;
+            promoted += 1;
+        }
+    }
+
+    let mut finalized = matches
+        .iter()
+        .filter(|item| !item.less_likely)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut extras = matches
+        .iter()
+        .filter(|item| item.less_likely)
+        .cloned()
+        .collect::<Vec<_>>();
+    sort_scored_conditions(&mut extras);
+    extras.truncate(MAX_EXTRA_WEAK_MATCHES);
+    finalized.extend(extras);
+    truncate_scored_conditions(finalized)
 }
 
 fn score_conditions(
@@ -1142,40 +1470,87 @@ fn score_conditions(
     context: &PetContext,
     breed: Option<&breed_health::ResolvedBreed>,
 ) -> Vec<Possibility> {
-    let mut scored = CONDITION_RULES
+    let scored = CONDITION_RULES
         .iter()
         .filter_map(|rule| {
-            let pattern_hits = rule
+            let matched_patterns: Vec<String> = rule
                 .patterns
                 .iter()
                 .filter(|pattern| text_contains(text, pattern))
-                .count();
-            if pattern_hits == 0 {
+                .map(|pattern| (*pattern).to_string())
+                .collect();
+            if matched_patterns.is_empty() {
                 return None;
             }
 
+            let pattern_hits = matched_patterns.len();
+            let weighted_patterns: usize = matched_patterns
+                .iter()
+                .map(|pattern| pattern_weight(pattern))
+                .sum();
             let breed_hits = breed
                 .map(|profile| breed_health::breed_bonus_hits(rule.name, profile, text))
                 .unwrap_or(0);
-            let hits = pattern_hits + breed_hits;
-            let less_likely = pattern_hits < rule.min_hits && breed_hits == 0;
+            let weighted_score = weighted_patterns
+                + breed_hits.saturating_mul(2)
+                + cluster_bonus(rule.name, text)
+                + context_bonus(rule.name, context);
+            let has_specific = matched_patterns
+                .iter()
+                .any(|pattern| pattern_weight(pattern) >= 2);
+            let confirmed = breed_hits > 0
+                || weighted_score >= rule.min_hits.saturating_mul(2)
+                || (pattern_hits >= rule.min_hits && has_specific);
+            let less_likely = !confirmed;
 
-            Some((
-                rule.concern_level.rank(),
+            Some(ScoredCondition {
+                rule,
+                weighted_score,
                 less_likely,
-                hits,
-                possibility_from_rule(rule, less_likely, text, context, breed),
-            ))
+                matched_patterns,
+            })
         })
         .collect::<Vec<_>>();
 
-    scored.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| b.2.cmp(&a.2))
-    });
+    finalize_scored_conditions(scored)
+        .into_iter()
+        .map(|item| {
+            possibility_from_rule(
+                item.rule,
+                item.less_likely,
+                item.weighted_score,
+                &item.matched_patterns,
+                text,
+                context,
+                breed,
+            )
+        })
+        .collect()
+}
 
-    scored.into_iter().map(|(_, _, _, item)| item).collect()
+fn refine_urgency_from_possibilities(
+    urgency: Urgency,
+    possibilities: &[Possibility],
+    text: &str,
+) -> Urgency {
+    let mut refined = urgency;
+    for possibility in possibilities {
+        if possibility.less_likely {
+            continue;
+        }
+        refined = match possibility.concern_level {
+            ConcernLevel::Severe => max_urgency(refined, Urgency::VetToday),
+            ConcernLevel::Serious => max_urgency(refined, Urgency::VetSoon),
+            _ => refined,
+        };
+        if possibility.name.contains("Poisoning")
+            && text_contains(text, "lily")
+            && refined != Urgency::Emergency
+        {
+            refined = max_urgency(refined, Urgency::VetToday);
+        }
+    }
+    refined
 }
 
 fn urgency_message(urgency: Urgency, pet_name: &str) -> String {
@@ -1305,9 +1680,10 @@ pub fn analyze_symptoms(symptoms: &str, quick_picks: &[String], context: &PetCon
         };
     }
 
-    let (urgency, signals) = collect_signals(&normalized);
+    let (signal_urgency, signals) = collect_signals(&normalized);
     let breed = breed_health::resolve_breed(&context.breed);
     let mut possibilities = score_conditions(&normalized, context, breed.as_ref());
+    let urgency = refine_urgency_from_possibilities(signal_urgency, &possibilities, &normalized);
     if possibilities.is_empty() && !signals.is_empty() {
         let mut summary = "Infection, inflammation, pain, toxin exposure, organ disease, and stress can all overlap early on. Several common illnesses look similar at first, so a vet exam, history, and basic tests are the safest way to narrow the cause.".to_string();
         if let Some(ref breed) = breed {
@@ -1323,6 +1699,8 @@ pub fn analyze_symptoms(symptoms: &str, quick_picks: &[String], context: &PetCon
             concern_label: ConcernLevel::Moderate.label().to_string(),
             concern_level: ConcernLevel::Moderate,
             less_likely: false,
+            match_strength: "Likely".to_string(),
+            matched_symptoms: signals.clone(),
         });
     }
 
@@ -1425,40 +1803,85 @@ mod tests {
     }
 
     #[test]
-    fn possibilities_sort_from_mild_to_severe() {
+    fn possibilities_sort_most_to_least_likely() {
         let analysis = analyze_symptoms(
             "vomiting diarrhea straining in litter box blood in urine lethargy drinking more",
             &[],
             &test_context(),
         );
         assert!(analysis.possibilities.len() > 1);
-        let ranks: Vec<u8> = analysis
-            .possibilities
-            .iter()
-            .map(|item| item.concern_level.rank())
-            .collect();
         assert!(
-            ranks.windows(2).all(|pair| pair[0] <= pair[1]),
-            "expected mild-to-severe ordering, got {ranks:?}"
+            analysis.possibilities.iter().all(|item| !item.less_likely),
+            "strong symptom overlap should surface primary matches only"
         );
         assert!(analysis.possibilities.iter().any(|item| {
             item.name.contains("Urinary blockage") || item.name.contains("Poisoning")
         }));
+        let less_likely_flags: Vec<bool> = analysis
+            .possibilities
+            .iter()
+            .map(|item| item.less_likely)
+            .collect();
         assert!(
-            analysis.possibilities.last().is_some_and(|item| {
-                item.concern_level == ConcernLevel::Severe
-            })
+            less_likely_flags
+                .iter()
+                .position(|&flag| flag)
+                .is_none_or(|first_weak| {
+                    less_likely_flags[..first_weak]
+                        .iter()
+                        .all(|flag| !*flag)
+                }),
+            "expected weaker matches after stronger ones, got {less_likely_flags:?}"
         );
     }
 
     #[test]
-    fn single_symptom_includes_less_likely_matches() {
+    fn hairball_ranks_first_for_typical_hairball_symptoms() {
+        let analysis = analyze_symptoms(
+            "vomited a hairball after grooming",
+            &[],
+            &test_context(),
+        );
+        let first = analysis
+            .possibilities
+            .first()
+            .expect("expected at least one possibility");
+        assert!(first.name.contains("Hairball"));
+        assert!(!first.less_likely);
+    }
+
+    #[test]
+    fn single_symptom_promotes_best_matches_and_limits_weak_ones() {
         let analysis = analyze_symptoms("vomiting", &[], &test_context());
         assert!(!analysis.possibilities.is_empty());
+        assert!(
+            analysis.possibilities.iter().any(|item| !item.less_likely),
+            "expected at least one primary match for vomiting"
+        );
+        assert!(
+            !analysis.possibilities.iter().all(|item| item.less_likely),
+            "not every possibility should be a weak match"
+        );
+        assert!(
+            analysis.possibilities.len() <= MAX_POSSIBILITY_RESULTS,
+            "expected capped possibility count"
+        );
+    }
+
+    #[test]
+    fn strong_matches_hide_weaker_possibilities() {
+        let analysis = analyze_symptoms("vomiting and grooming hairball", &[], &test_context());
         assert!(analysis
             .possibilities
             .iter()
-            .any(|item| item.less_likely));
+            .any(|item| item.name.contains("Hairball") && !item.less_likely));
+        assert!(
+            !analysis
+                .possibilities
+                .iter()
+                .any(|item| item.name.contains("Poisoning")),
+            "tangential weak matches should drop when a stronger fit exists"
+        );
     }
 
     #[test]
@@ -1494,6 +1917,64 @@ mod tests {
     fn disclaimer_is_always_present() {
         let analysis = analyze_symptoms("sneezing", &[], &test_context());
         assert!(analysis.disclaimer.contains("not a veterinarian"));
+    }
+
+    #[test]
+    fn vomiting_and_diarrhea_prioritize_gastroenteritis() {
+        let analysis = analyze_symptoms("vomiting and diarrhea after new treats", &[], &test_context());
+        let top = analysis.possibilities.first().expect("expected results");
+        assert!(
+            top.name.contains("Gastroenteritis"),
+            "expected gastroenteritis first, got {}",
+            top.name
+        );
+        assert!(!top.matched_symptoms.is_empty());
+        assert!(top.match_strength.contains("Strong") || top.match_strength.contains("Good"));
+    }
+
+    #[test]
+    fn senior_drinking_and_weight_loss_boosts_kidney_match() {
+        let context = PetContext {
+            age: "10 years".to_string(),
+            ..test_context()
+        };
+        let analysis = analyze_symptoms(
+            "drinking more peeing more weight loss lethargy",
+            &[],
+            &context,
+        );
+        assert!(analysis.possibilities.iter().any(|item| {
+            item.name.contains("Kidney") && !item.less_likely
+        }));
+    }
+
+    #[test]
+    fn behavior_quick_symptoms_surface_stress_signals() {
+        let analysis = analyze_symptoms(
+            "",
+            &[
+                "aggression".to_string(),
+                "constant vocalizing".to_string(),
+                "litter box avoidance".to_string(),
+            ],
+            &test_context(),
+        );
+        assert!(analysis
+            .signals
+            .iter()
+            .any(|signal| signal.contains("Aggression")));
+        assert!(analysis
+            .signals
+            .iter()
+            .any(|signal| signal.contains("vocalizing")));
+        assert!(analysis
+            .signals
+            .iter()
+            .any(|signal| signal.contains("Litter-box")));
+        assert!(analysis
+            .possibilities
+            .iter()
+            .any(|item| item.name.contains("Stress-related litter")));
     }
 
     #[test]

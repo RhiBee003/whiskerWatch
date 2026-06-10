@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#fac8dd" />
     <title>WhiskerWatch — My Home</title>
-    <link rel="stylesheet" href="/styles.css?v=20260609m" />
+    <link rel="stylesheet" href="/styles.css?v=20260614k" />
   </head>
   <body class="dashboard-body" {{NEEDS_PET_SETUP_DATA}}>
     <header class="dashboard-topbar">
@@ -45,6 +45,7 @@
         <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false" aria-label="Paw Points"><span class="dashboard-tab-label-long" aria-hidden="true">Paw Points</span><span class="dashboard-tab-label-short" aria-hidden="true">Points</span></button>
         <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false">Account</button>
         <button type="button" class="dashboard-tab" data-tab="friends" role="tab" aria-selected="false" aria-label="Friends">{{FRIENDS_TAB_LABEL}}</button>
+        <button type="button" class="dashboard-tab" data-tab="profile" role="tab" aria-selected="false" aria-label="Your profile"><span class="dashboard-tab-label-long" aria-hidden="true">Your Profile</span><span class="dashboard-tab-label-short" aria-hidden="true">Profile</span></button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Community</button>
@@ -103,6 +104,7 @@
           <div class="account-grid">
             <article class="dashboard-card account-profile-card">
               <h2>Profile</h2>
+              {{ACCOUNT_PET_SWITCHER}}
               {{ACCOUNT_PET_PHOTO}}
               <dl class="account-dl">
                 {{ACCOUNT_PET_NAME_FIELD}}
@@ -111,13 +113,14 @@
                 <dt>Last name</dt>
                 <dd>{{USER_LAST_NAME}}</dd>
                 <dt>Username</dt>
-                <dd>{{USER_USERNAME}}</dd>
+                <dd>{{USER_PROFILE_LINK}}</dd>
                 <dt>Email</dt>
                 <dd>{{USER_EMAIL}}</dd>
                 <dt>Member since</dt>
                 <dd>{{MEMBER_SINCE}}</dd>
               </dl>
             </article>
+            {{ACCOUNT_DELETE_PET_SECTION}}
             {{ACCOUNT_MEMORIAL_SECTION}}
             {{ACCOUNT_PASSWORD_SECTION}}
             {{ACCOUNT_PREMIUM_SECTION}}
@@ -146,11 +149,10 @@
           <h1>Care Tasks</h1>
           {{TASKS_SHARED_BANNER}}
           {{TASKS_PET_SETUP_PROMPT}}
-          <p class="panel-intro">Complete tasks to earn paw points. Feeding tasks adjust automatically for your cat's age. Tap any time to change it.</p>
-          <ul class="task-list" id="tasks-panel-list">
-            {{TASK_LIST}}
-          </ul>
-          {{TASK_ADD_SECTION}}
+          <p class="panel-intro">Tasks are grouped by category for each cat — feeding, hydration, litter, play, and more. Tap any time to reschedule.</p>
+          <div id="tasks-panel-content">
+            {{TASKS_PANEL}}
+          </div>
         </section>
 
         <section id="panel-health" class="dashboard-panel" role="tabpanel" hidden>
@@ -162,6 +164,10 @@
           {{FORUM_TAB_CONTENT}}
         </section>
 
+        <section id="panel-profile" class="dashboard-panel" role="tabpanel" hidden>
+          {{PARENT_PROFILE_CONTENT}}
+        </section>
+
         <section id="panel-feedback" class="dashboard-panel" role="tabpanel" hidden>
           {{FEEDBACK_TAB_CONTENT}}
         </section>
@@ -171,7 +177,7 @@
           {{CALENDAR_SHARED_BANNER}}
           {{CALENDAR_PET_SETUP_PROMPT}}
           {{CALENDAR_VET_ALERT}}
-          <p class="panel-intro">Browse months to see tasks and events, or add your own.</p>
+          <p class="panel-intro">Tap a day to preview what's planned. Complete today's care right from the calendar.</p>
           <div class="calendar-layout">
             <div class="calendar-month-panel">
               <div class="calendar-nav">
@@ -185,13 +191,11 @@
             </div>
             <article class="dashboard-card calendar-events">
               <h2 id="calendar-events-heading">Select a date</h2>
-              <p class="calendar-day-hint" id="calendar-day-hint">Click any day to see scheduled tasks and events.</p>
-              <h3 class="calendar-detail-subhead" id="calendar-tasks-heading" hidden>Tasks</h3>
-              <ul class="task-list calendar-day-tasks" id="calendar-day-tasks" hidden></ul>
-              <h3 class="calendar-detail-subhead" id="calendar-events-subheading" hidden>Events</h3>
-              <ul class="event-list" id="event-list">
-                {{EVENT_LIST}}
-              </ul>
+              <p class="calendar-day-hint" id="calendar-day-hint">Tap a day on the calendar.</p>
+              <p class="calendar-day-progress" id="calendar-day-progress" hidden></p>
+              <div class="calendar-day-detail" id="calendar-day-detail" hidden>
+                <ul class="calendar-schedule" id="calendar-schedule" role="list"></ul>
+              </div>
               <div class="calendar-add-event" id="calendar-add-event" hidden>
                 <a href="#" class="download-btn calendar-add-event-btn" id="calendar-add-event-btn">Add event</a>
               </div>
@@ -231,18 +235,27 @@
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
-    <script src="/shop-affordance.js?v=20260609m"></script>
-    <script src="/alerts.js?v=20260609m"></script>
-    <script src="/pet-setup-draft.js?v=20260609m"></script>
-    <script src="/pet-color-picker.js?v=20260609m"></script>
-    <script src="/pet-photo-framer.js?v=20260609n"></script>
-    <script src="/pet-video-framer.js?v=20260609n"></script>
-    <script src="/dashboard.js?v=20260609n"></script>
+    <script src="/shop-affordance.js?v=20260610d"></script>
+    <script src="/alerts.js?v=20260610d"></script>
+    <script src="/confirm-dialog.js?v=20260614i"></script>
+    <script src="/pet-setup-draft.js?v=20260614h"></script>
+    <script src="/pet-color-picker.js?v=20260610d"></script>
+    <script src="/cute-date-picker.js?v=20260614h"></script>
+    <script src="/pet-photo-framer.js?v=20260610h"></script>
+    <script src="/pet-video-framer.js?v=20260613d"></script>
+    <script src="/share-cards.js?v=20260613b"></script>
+    <script src="/dashboard.js?v=20260614j"></script>
+    <script src="/friend-search.js?v=20260614g"></script>
+    <script src="/friend-messages.js?v=20260610a"></script>
+    <script src="/friend-add.js?v=20260611e"></script>
+    <script src="/social-posts.js?v=20260614k"></script>
+    <script src="/social-post-media.js?v=20260614l"></script>
     <script src="/push-notifications.js"></script>
     <script src="/password-toggle.js"></script>
     <script src="/feedback-forum.js"></script>
-    <script src="/cinder-pet.js"></script>
-    <script src="/memorial.js"></script>
+    <script src="/cinder-pet.js?v=20260614f"></script>
+    <script src="/memorial.js?v=20260610i"></script>
     {{MEMORIAL_COMFORT_MODAL}}
+    {{MEMORIAL_CLIPS_MODAL}}
   </body>
 </html>
