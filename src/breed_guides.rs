@@ -74,13 +74,49 @@ pub fn is_breed_guide_task_id(task_id: &str) -> bool {
     task_id.starts_with("breed_guide_")
 }
 
+const BREED_GUIDE_TASK_KEYS: &[&str] = &[
+    "health_check",
+    "coat_check",
+    "warmth_check",
+    "eye_clean",
+    "skin_wipe",
+    "ear_check",
+    "enrichment",
+    "climb",
+    "groom",
+];
+
+pub fn breed_guide_task_key(task_id: &str) -> Option<&'static str> {
+    let rest = task_id.strip_prefix("breed_guide_")?;
+    BREED_GUIDE_TASK_KEYS
+        .iter()
+        .find(|key| rest.ends_with(&format!("_{key}")))
+        .copied()
+}
+
 pub fn slug_from_breed_guide_task_id(task_id: &str) -> Option<String> {
     let rest = task_id.strip_prefix("breed_guide_")?;
-    let split_at = rest.rfind('_')?;
-    if split_at == 0 {
+    let key = breed_guide_task_key(task_id)?;
+    let slug = rest.strip_suffix(&format!("_{key}"))?;
+    if slug.is_empty() {
         return None;
     }
-    Some(rest[..split_at].to_string())
+    Some(slug.to_string())
+}
+
+pub const HEALTH_WATCH_OUTS_TASK_KEY: &str = "health_check";
+pub const HEALTH_WATCH_OUTS_SECTION_ID: &str = "health";
+
+pub fn is_health_watch_outs_task(task_id: &str) -> bool {
+    breed_guide_task_key(task_id) == Some(HEALTH_WATCH_OUTS_TASK_KEY)
+}
+
+pub fn health_watch_outs_guide_url(slug: &str) -> String {
+    format!(
+        "/home/breed-guide/{slug}#guide-{section}",
+        slug = slug.trim(),
+        section = HEALTH_WATCH_OUTS_SECTION_ID,
+    )
 }
 
 pub fn task_templates_for_guide(guide: &BreedGuide) -> Vec<BreedGuideTaskTemplate> {
@@ -1449,6 +1485,14 @@ mod tests {
     }
 
     #[test]
+    fn british_shorthair_tasks_include_health_watch_outs() {
+        let guide = guide_for_breed_name("British Shorthair").expect("british shorthair");
+        let tasks = task_templates_for_guide(&guide);
+        assert!(tasks.iter().any(|task| task.key == HEALTH_WATCH_OUTS_TASK_KEY));
+        assert!(tasks.iter().any(|task| task.title.contains("health watch-outs")));
+    }
+
+    #[test]
     fn persian_guide_tasks_include_eye_care() {
         let guide = guide_for_breed_name("Persian").expect("persian");
         let tasks = task_templates_for_guide(&guide);
@@ -1457,6 +1501,14 @@ mod tests {
         assert_eq!(
             slug_from_breed_guide_task_id("breed_guide_persian_groom").as_deref(),
             Some("persian")
+        );
+        assert_eq!(
+            breed_guide_task_key("breed_guide_british-shorthair_health_check"),
+            Some("health_check")
+        );
+        assert_eq!(
+            slug_from_breed_guide_task_id("breed_guide_british-shorthair_health_check").as_deref(),
+            Some("british-shorthair")
         );
     }
 

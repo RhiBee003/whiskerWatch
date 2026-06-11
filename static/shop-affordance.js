@@ -15,28 +15,13 @@
       label: (price) => `Buy for ${price} pts`,
       returnTo: true,
     },
-    boost: {
-      action: "/home/tap-boosts/buy",
-      field: "boost_id",
-      btnClass: "download-btn tap-boost-btn",
-      label: (price) => `Buy for ${price} pts`,
-      returnTo: true,
-    },
-    bonus: {
-      action: "/home/petting-bonuses/buy",
-      field: "bonus_id",
-      btnClass: "download-btn petting-bonus-btn",
-      label: (price) => `Buy for ${price} pts`,
-      returnTo: true,
-    },
   };
 
   const PURCHASE_TOASTS = {
-    decor_bought: "Yay! Decor purchased and placed in your cat's home! 🏡",
+    decor_bought: "Yay! Decor purchased and placed in the family cat home! 🏡",
+    decor_equipped: "Decor placed in the family cat home! 🏡",
     outfit_bought: "Yay! Outfit purchased and equipped for your cat! 👗",
-    boost_bought: "Yay! Tap boost purchased and activated! Pet your cat for bigger rewards! 🐾",
-    petting_bonus_bought:
-      "Yay! Petting bonus purchased! Activate it when you're ready for a points rush! ⚡",
+    outfit_equipped: "Outfit equipped for your cat! 👗",
   };
 
   const pawPointsChannel =
@@ -54,9 +39,7 @@
   function getShopActionsElement(card) {
     return (
       card.querySelector(".decor-actions") ||
-      card.querySelector(".outfit-actions") ||
-      card.querySelector(".tap-boost-actions") ||
-      card.querySelector(".petting-bonus-actions")
+      card.querySelector(".outfit-actions")
     );
   }
 
@@ -91,6 +74,10 @@
 
     document.querySelectorAll('[data-shop-purchasable="true"]').forEach((card) => {
       if (!(card instanceof HTMLElement)) {
+        return;
+      }
+
+      if (card.classList.contains("owned") || card.classList.contains("equipped")) {
         return;
       }
 
@@ -172,28 +159,14 @@
     }
   }
 
-  function applyParentLevelFromPurchase(data) {
-    if (typeof data.parent_level !== "number") {
-      return;
-    }
-
-    window.dispatchEvent(
-      new CustomEvent("whisker:parent-xp", {
-        detail: data,
-      })
-    );
-  }
-
-  function showPurchaseToast(status, xpEarned) {
+  function showPurchaseToast(status) {
     const message = PURCHASE_TOASTS[status];
     if (!message) {
       return;
     }
 
-    const xpSuffix =
-      typeof xpEarned === "number" && xpEarned > 0 ? ` +${xpEarned} XP` : "";
     if (typeof window.whiskerShowToast === "function") {
-      window.whiskerShowToast(`${message}${xpSuffix}`);
+      window.whiskerShowToast(message);
     }
   }
 
@@ -235,18 +208,6 @@
       actions.innerHTML = '<span class="outfit-badge">Currently equipped</span>';
       return;
     }
-
-    if (data.item_kind === "boost" && data.equipped) {
-      actions.innerHTML = '<span class="tap-boost-badge">Active boost</span>';
-      return;
-    }
-
-    if (data.item_kind === "bonus") {
-      const returnField = card.dataset.shopReturnTo
-        ? `<input type="hidden" name="return_to" value="${escapeAttr(card.dataset.shopReturnTo)}" />`
-        : "";
-      actions.innerHTML = `<form action="/home/petting-bonuses/activate" method="post"><input type="hidden" name="bonus_id" value="${escapeAttr(data.item_id)}" />${returnField}<button type="submit" class="download-btn petting-bonus-btn">Activate (1 ready)</button></form>`;
-    }
   }
 
   let syncInFlight = null;
@@ -287,9 +248,65 @@
     return syncInFlight;
   }
 
+  function reloadCatHomeSoon() {
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 450);
+  }
+
+  async function submitCatHomeEquipForm(form) {
+    const button = form.querySelector("button[type='submit']");
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = true;
+    }
+
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+        redirect: "manual",
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const data = await response.json().catch(() => null);
+      if (!data?.ok) {
+        form.submit();
+        return;
+      }
+
+      if (typeof data.paw_points === "number") {
+        applyPawPointsBalance(data.paw_points);
+      }
+
+      showPurchaseToast(data.status);
+      reloadCatHomeSoon();
+    } catch (_error) {
+      form.submit();
+    } finally {
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = false;
+      }
+    }
+  }
+
   async function handleShopPurchaseSubmit(event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+
+    if (
+      form.action.includes("/home/decor/equip") ||
+      form.action.includes("/home/outfits/equip")
+    ) {
+      event.preventDefault();
+      await submitCatHomeEquipForm(form);
       return;
     }
 
@@ -331,8 +348,10 @@
 
       if (data.ok) {
         markShopCardPurchased(card, data);
-        applyParentLevelFromPurchase(data);
-        showPurchaseToast(data.status, data.xp_earned);
+        showPurchaseToast(data.status);
+        if (data.item_kind === "decor" || data.item_kind === "outfit") {
+          reloadCatHomeSoon();
+        }
         return;
       }
 

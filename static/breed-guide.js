@@ -159,7 +159,27 @@
     });
   }
 
+  function openGuideFromHash() {
+    const hash = window.location.hash.replace(/^#/, "").trim();
+    if (!hash) {
+      return;
+    }
+
+    const target = document.getElementById(hash);
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    setSectionExpanded(target, true, owned);
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    updateProgress();
+  }
+
   initSections();
   initToc();
+  openGuideFromHash();
+  window.addEventListener("hashchange", openGuideFromHash);
   updateProgress();
 })();

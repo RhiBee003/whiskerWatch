@@ -506,16 +506,44 @@ pub fn render_angel_pet_avatar(profile: &UserProfile) -> String {
     )
 }
 
-pub fn render_angel_cat_home_scene(profile: &UserProfile) -> String {
-    let pet_name = if profile.pet_name.trim().is_empty() {
-        "Your cat".to_string()
-    } else {
-        profile.pet_name.clone()
-    };
-    let pet_avatar = render_angel_pet_avatar(profile);
+fn render_angel_pet_avatar_for_pet(profile: &UserProfile, pet_id: &str) -> String {
+    let snapshot = pet_snapshot(profile, pet_id);
+    let pet_name_raw = snapshot
+        .as_ref()
+        .map(|pet| pet.pet_name.as_str())
+        .unwrap_or("Your cat");
+    let pet_name = escape_html(pet_name_raw);
+    let photo_src = snapshot
+        .as_ref()
+        .and_then(|pet| pet.pet_photo_url.as_deref())
+        .filter(|value| !value.is_empty())
+        .map(escape_html_attr)
+        .unwrap_or_else(|| "/cinderanimate.png".to_string());
 
     format!(
-        r#"<div class="cat-home-scene cat-home-scene-angel" data-room="angel">
+        r#"<div class="pet-cinder-stage pet-cinder-stage-angel" data-cinder-stage="pet" data-pet-name="{pet_name}" data-pet-id="{pet_id}">
+  <p class="cinder-pet-label cinder-pet-label-angel">{pet_name} 👼</p>
+  <div class="angel-pet-figure">
+    <div class="cinder-pet-image-wrap cinder-pet-image-wrap-angel">
+      <img class="cinder-pet-image cinder-pet-image-angel" src="{photo_src}" alt="{pet_name} angel cat" />
+    </div>
+  </div>
+</div>"#,
+        pet_name = pet_name,
+        pet_id = escape_html_attr(pet_id),
+        photo_src = photo_src,
+    )
+}
+
+pub fn render_angel_cat_home_scene_for_pet(profile: &UserProfile, pet_id: &str) -> String {
+    let pet_name = pet_snapshot(profile, pet_id)
+        .map(|snapshot| snapshot.pet_name)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "Your cat".to_string());
+    let pet_avatar = render_angel_pet_avatar_for_pet(profile, pet_id);
+
+    format!(
+        r#"<div class="cat-home-scene cat-home-scene-angel" data-room="angel" data-play-as-pet-id="{pet_id}">
   <div class="cat-home-room-bg cat-home-room-bg-angel" aria-hidden="true"></div>
   <div class="cat-home-pet-stage">
     <div class="cat-home-pet-stack">
@@ -525,9 +553,14 @@ pub fn render_angel_cat_home_scene(profile: &UserProfile) -> String {
   </div>
   <p class="cat-home-mood cat-home-mood-angel">{pet_name} is your angel cat now, still curled up in their home among the stars.</p>
 </div>"#,
+        pet_id = escape_html_attr(pet_id),
         pet_avatar = pet_avatar,
         pet_name = escape_html(&pet_name),
     )
+}
+
+pub fn render_angel_cat_home_scene(profile: &UserProfile) -> String {
+    render_angel_cat_home_scene_for_pet(profile, &profile.active_pet_id)
 }
 
 pub fn pet_switcher_angel_suffix(profile: &UserProfile, pet_id: &str, owner_email: &str) -> String {

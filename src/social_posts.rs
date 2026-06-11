@@ -258,14 +258,17 @@ pub fn render_social_post_form(instance: &str) -> String {
       <fieldset class="social-post-media-fieldset">
         <legend>Photo or video</legend>
         <div class="pet-photo-upload social-post-media-upload">
-          <input id="{media_id}" name="media" type="file" class="pet-photo-input social-post-media-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" required />
+          <input id="{media_id}" name="media" type="file" class="pet-photo-input social-post-media-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/webm,video/quicktime,.heic,.heif" required />
           <label for="{media_id}" class="pet-photo-paw-btn" aria-label="Choose a photo or video to share">
             <span class="pet-photo-paw-icon" aria-hidden="true">📸</span>
           </label>
           <p class="pet-photo-upload-cta social-post-media-cta" id="{media_cta_id}">Tap to pick a photo or video 🐾</p>
         </div>
-        <div id="{preview_id}" class="social-post-media-preview pet-photo-preview" hidden aria-live="polite"></div>
-        <p class="field-hint">You can preview, crop, and trim before posting. Videos must be {max_seconds} seconds or shorter.</p>
+        <div class="social-post-media-preview-shell" data-social-preview-shell hidden>
+          <p class="social-post-media-preview-label">Preview before posting ✨</p>
+          <div id="{preview_id}" class="social-post-media-preview pet-photo-preview" aria-live="polite"></div>
+        </div>
+        <p class="field-hint">Pick a photo or video — you will see a preview here to crop or trim before posting. Videos must be {max_seconds} seconds or shorter.</p>
       </fieldset>
       <input type="hidden" name="video_duration" id="{duration_id}" value="" />
       <button type="submit" class="download-btn login-submit" id="{submit_id}">Post</button>
@@ -413,10 +416,6 @@ pub fn render_parent_profile_page(
         .map(|profile| profile.pet_breed.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let parent_level = subject_profile
-        .as_ref()
-        .map(|profile| profile.parent_level)
-        .unwrap_or(1);
     let is_self = subject_email.eq_ignore_ascii_case(viewer_email);
     let show_personal =
         sharing::can_see_personal_pet_details(state, viewer_email, &subject_email);
@@ -457,15 +456,6 @@ pub fn render_parent_profile_page(
                 )
             })
             .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    let level_line = if show_personal {
-        format!(
-            r#"<p class="parent-profile-level">Parent level {level}</p>"#,
-            level = parent_level,
-        )
     } else {
         String::new()
     };
@@ -519,7 +509,6 @@ pub fn render_parent_profile_page(
       <h1 class="parent-profile-name">{username}</h1>
       {pet_line}
       {breed_line}
-      {level_line}
       <div class="parent-profile-actions">{friend_action}{message_link}</div>
     </div>
   </header>
@@ -535,7 +524,6 @@ pub fn render_parent_profile_page(
         username = escape_html(&display_username),
         pet_line = pet_line,
         breed_line = breed_line,
-        level_line = level_line,
         friend_action = friend_action,
         message_link = message_link,
         compose = compose,

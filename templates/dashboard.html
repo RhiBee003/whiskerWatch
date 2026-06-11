@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#fac8dd" />
     <title>WhiskerWatch — My Home</title>
-    <link rel="stylesheet" href="/styles.css?v=20260614k" />
+    <link rel="stylesheet" href="/styles.css?v=20260617b" />
   </head>
   <body class="dashboard-body" {{NEEDS_PET_SETUP_DATA}}>
     <header class="dashboard-topbar">
@@ -33,10 +33,6 @@
           <span class="stat-label stat-label-paw-points" aria-hidden="true">{{PAW_POINTS_ICON}}</span>
           <span class="stat-value">{{PAW_POINTS}}</span>
         </button>
-        <button type="button" class="stat-chip stat-chip-button parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
-          <span class="stat-label">Parent Level</span>
-          <span class="stat-value">Level {{PARENT_LEVEL}}</span>
-        </button>
         {{CARE_STREAK_CHIP}}
       </div>
 
@@ -54,41 +50,23 @@
 
       <main class="dashboard-panels">
         <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
-          {{PET_VET_ALERT}}
-            <div class="pet-showcase">
-            {{PET_AVATAR}}
-            <div class="pet-details">
-              {{PET_SWITCHER}}
-              {{SHARED_PET_BANNER}}
-              <h1>{{PET_NAME}}</h1>
-              <p class="pet-meta">{{PET_META}}</p>
-              <p class="pet-outfit">Wearing: <strong>{{EQUIPPED_OUTFIT}}</strong></p>
-              <p class="pet-blurb">{{PET_BLURB}}</p>
-              {{PET_CHECK_CTA}}
-              {{PET_VIDEO_UPLOAD_CTA}}
-              {{PET_SETUP_CTA}}
-              {{PET_HEALTH_INFO}}
+          {{PET_SWITCHER}}
+          <div id="pet-card-flip-viewport" class="cat-card-flip-viewport">
+            <div class="cat-card-flip-face pet-card-flip-panels">
+              {{PET_SHOWCASE_PANELS}}
             </div>
           </div>
           {{MULTI_PET_SECTION}}
         </section>
 
         <section id="panel-points" class="dashboard-panel" role="tabpanel" hidden>
-          <h1>Paw Points &amp; Parent Level</h1>
+          <h1>Paw Points</h1>
           <div class="points-grid">
             <article class="dashboard-card">
               <h2>Your Balance</h2>
               <p class="points-big">{{PAW_POINTS_BALANCE}}</p>
               <p>Earn more by completing care tasks for your real cat.</p>
             </article>
-            <button type="button" class="dashboard-card parent-level-card parent-level-trigger" aria-haspopup="dialog" aria-controls="parent-level-modal">
-              <h2>Parent Level {{PARENT_LEVEL}}</h2>
-              <div class="level-bar" aria-hidden="true">
-                <span class="level-fill" style="width: {{LEVEL_PROGRESS}}%"></span>
-              </div>
-              <p class="parent-level-progress-summary">{{LEVEL_PROGRESS_TEXT}}</p>
-              <span class="parent-level-hint">Tap for XP &amp; paw points breakdown</span>
-            </button>
             {{STREAK_CARD_SECTION}}
           </div>
           <article class="dashboard-card">
@@ -177,7 +155,7 @@
           {{CALENDAR_SHARED_BANNER}}
           {{CALENDAR_PET_SETUP_PROMPT}}
           {{CALENDAR_VET_ALERT}}
-          <p class="panel-intro">Tap a day to preview what's planned. Complete today's care right from the calendar.</p>
+          <p class="panel-intro">Tap a day to preview what's planned — including each cat's birthday. Complete today's care right from the calendar.</p>
           <div class="calendar-layout">
             <div class="calendar-month-panel">
               <div class="calendar-nav">
@@ -210,7 +188,6 @@
     {{PET_VIDEO_MODAL}}
     {{ACCOUNT_PET_PHOTO_MODAL}}
     {{VET_FOLLOWUP_MODAL}}
-    {{PARENT_LEVEL_BREAKDOWN_MODAL}}
     {{SHARE_CARD_MODAL}}
 
     <div class="onboarding-backdrop task-time-backdrop" id="task-time-modal" role="dialog" aria-modal="true" aria-labelledby="task-time-title" hidden>
@@ -235,25 +212,25 @@
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
-    <script src="/shop-affordance.js?v=20260610d"></script>
+    <script src="/shop-affordance.js?v=20260617b"></script>
     <script src="/alerts.js?v=20260610d"></script>
     <script src="/confirm-dialog.js?v=20260614i"></script>
     <script src="/pet-setup-draft.js?v=20260614h"></script>
     <script src="/pet-color-picker.js?v=20260610d"></script>
     <script src="/cute-date-picker.js?v=20260614h"></script>
-    <script src="/pet-photo-framer.js?v=20260610h"></script>
+    <script src="/pet-photo-framer.js?v=20260614o"></script>
     <script src="/pet-video-framer.js?v=20260613d"></script>
     <script src="/share-cards.js?v=20260613b"></script>
-    <script src="/dashboard.js?v=20260614j"></script>
+    <script src="/dashboard.js?v=20260617b"></script>
     <script src="/friend-search.js?v=20260614g"></script>
     <script src="/friend-messages.js?v=20260610a"></script>
     <script src="/friend-add.js?v=20260611e"></script>
     <script src="/social-posts.js?v=20260614k"></script>
-    <script src="/social-post-media.js?v=20260614l"></script>
+    <script src="/social-post-media.js?v=20260614o"></script>
     <script src="/push-notifications.js"></script>
     <script src="/password-toggle.js"></script>
     <script src="/feedback-forum.js"></script>
-    <script src="/cinder-pet.js?v=20260614f"></script>
+    <script src="/cinder-pet.js?v=20260614q"></script>
     <script src="/memorial.js?v=20260610i"></script>
     {{MEMORIAL_COMFORT_MODAL}}
     {{MEMORIAL_CLIPS_MODAL}}

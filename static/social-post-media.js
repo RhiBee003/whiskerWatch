@@ -1,7 +1,5 @@
 (function () {
   const MAX_VIDEO_SECONDS = 10;
-  const VIEWPORT_W = 280;
-  const VIEWPORT_H = 350;
   const OUTPUT_VIDEO_WIDTH = 720;
   const defaultMediaCta = "Tap to pick a photo or video 🐾";
 
@@ -16,9 +14,34 @@
     }
   });
 
-  function drawVideoFrame(ctx, videoEl, framing, canvasW, canvasH) {
-    const viewportW = VIEWPORT_W;
-    const viewportH = VIEWPORT_H;
+  function socialViewportSize() {
+    const shellWidth = Math.min(340, Math.max(260, window.innerWidth - 40));
+    const width = Math.round(shellWidth);
+    const height = Math.round(width * 1.25);
+    return { width, height };
+  }
+
+  function isImageFile(file) {
+    if (!(file instanceof File)) {
+      return false;
+    }
+    if (file.type.startsWith("image/")) {
+      return true;
+    }
+    return /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name);
+  }
+
+  function isVideoFile(file) {
+    if (!(file instanceof File)) {
+      return false;
+    }
+    if (file.type.startsWith("video/")) {
+      return true;
+    }
+    return /\.(mp4|webm|mov|m4v)$/i.test(file.name);
+  }
+
+  function drawVideoFrame(ctx, videoEl, framing, canvasW, canvasH, viewportW, viewportH) {
     const ratioX = canvasW / viewportW;
     const ratioY = canvasH / viewportH;
     const scale = framing.scale;
@@ -32,12 +55,14 @@
     ctx.drawImage(videoEl, centerX - drawW / 2, centerY - drawH / 2, drawW, drawH);
   }
 
-  function exportSocialVideo(file, framing, clipStart, clipDuration) {
+  function exportSocialVideo(file, framing, clipStart, clipDuration, viewportW, viewportH) {
     return new Promise((resolve, reject) => {
       const videoEl = document.createElement("video");
       const url = URL.createObjectURL(file);
       videoEl.muted = true;
       videoEl.playsInline = true;
+      videoEl.setAttribute("playsinline", "");
+      videoEl.setAttribute("webkit-playsinline", "");
       videoEl.preload = "auto";
       videoEl.src = url;
 
@@ -49,7 +74,7 @@
       videoEl.addEventListener("loadedmetadata", () => {
         const canvas = document.createElement("canvas");
         const canvasW = OUTPUT_VIDEO_WIDTH;
-        const canvasH = Math.round((OUTPUT_VIDEO_WIDTH * VIEWPORT_H) / VIEWPORT_W);
+        const canvasH = Math.round((OUTPUT_VIDEO_WIDTH * viewportH) / viewportW);
         canvas.width = canvasW;
         canvas.height = canvasH;
         const ctx = canvas.getContext("2d");
@@ -116,7 +141,7 @@
           if (stopped) {
             return;
           }
-          drawVideoFrame(ctx, videoEl, framing, canvasW, canvasH);
+          drawVideoFrame(ctx, videoEl, framing, canvasW, canvasH, viewportW, viewportH);
           if (videoEl.currentTime >= clipStart + clipDuration - 0.05) {
             stopRecording();
             return;
@@ -162,6 +187,7 @@
     const durationInput = form.querySelector('input[name="video_duration"]');
     const submitButton = form.querySelector('button[type="submit"]');
     const previewRoot = form.querySelector(".social-post-media-preview");
+    const previewShell = form.querySelector("[data-social-preview-shell]");
 
     if (!(mediaInput instanceof HTMLInputElement) || !(previewRoot instanceof HTMLElement)) {
       return;
@@ -170,17 +196,55 @@
     const mediaInputId = mediaInput.id;
     const previewId = previewRoot.id;
 
-    window.whiskerPetPhotoFramer?.bind?.(mediaInputId, previewId, {
-      viewportWidth: VIEWPORT_W,
-      viewportHeight: VIEWPORT_H,
-      outputWidth: 1080,
-      outputHeight: 1350,
-      circular: false,
-      hint: "Drag and zoom to crop your photo before posting.",
-      exportFileName: "social-post.jpg",
-      manual: true,
-      skipFormSubmit: true,
-    });
+    function revealPreview() {
+      form.closest("details")?.setAttribute("open", "");
+      if (previewShell instanceof HTMLElement) {
+        previewShell.hidden = false;
+        previewShell.classList.add("is-active");
+      }
+      previewRoot.hidden = false;
+      previewRoot.classList.add("is-active");
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          (previewShell || previewRoot).scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          });
+        });
+      });
+    }
+
+    function hidePreviewShell() {
+      if (previewShell instanceof HTMLElement) {
+        previewShell.hidden = true;
+        previewShell.classList.remove("is-active");
+      }
+      previewRoot.hidden = true;
+      previewRoot.classList.remove("is-active");
+    }
+
+    function currentViewport() {
+      return socialViewportSize();
+    }
+
+    function bindPhotoFramer() {
+      const { width, height } = currentViewport();
+      window.whiskerPetPhotoFramer?.bind?.(mediaInputId, previewId, {
+        viewportWidth: width,
+        viewportHeight: height,
+        outputWidth: 1080,
+        outputHeight: 1350,
+        circular: false,
+        hint: "Drag and zoom to crop your photo before posting.",
+        exportFileName: "social-post.jpg",
+        manual: true,
+        skipFormSubmit: true,
+        onReady: revealPreview,
+      });
+    }
+
+    bindPhotoFramer();
 
     let videoState = null;
     let photoPrepared = false;
@@ -198,9 +262,9 @@
       resetVideoEditor();
       window.whiskerPetPhotoFramer?.reset?.(mediaInputId);
       photoPrepared = false;
+      previewRoot.innerHTML = "";
       if (!window.whiskerPetPhotoFramer?.hasImage?.(mediaInputId)) {
-        previewRoot.hidden = true;
-        previewRoot.innerHTML = "";
+        hidePreviewShell();
       }
     }
 
@@ -212,7 +276,7 @@
         mediaCta.textContent = defaultMediaCta;
         return;
       }
-      const kind = file.type.startsWith("video/") ? "🎬" : "📸";
+      const kind = isVideoFile(file) ? "🎬" : "📸";
       mediaCta.textContent = `${kind} ${file.name}`;
     }
 
@@ -220,13 +284,14 @@
       resetVideoEditor();
       window.whiskerPetPhotoFramer?.reset?.(mediaInputId);
 
+      const { width, height } = currentViewport();
       const previewUrl = URL.createObjectURL(file);
-      previewRoot.hidden = false;
+      revealPreview();
       previewRoot.innerHTML = `
         <div class="social-post-video-editor pet-video-trim-editor">
           <p class="pet-video-trim-hint">Preview your clip, drag to reposition, zoom to crop, then post.</p>
-          <div class="social-post-video-frame pet-video-trim-frame pet-video-framer-stage" data-video-framer-stage>
-            <video class="social-post-video-preview pet-video-trim-preview pet-video-framer-video" muted playsinline preload="metadata"></video>
+          <div class="social-post-video-frame pet-video-trim-frame pet-video-framer-stage" data-video-framer-stage style="width:${width}px;height:${height}px;">
+            <video class="social-post-video-preview pet-video-trim-preview pet-video-framer-video" muted playsinline webkit-playsinline preload="metadata"></video>
           </div>
           <label class="pet-video-framer-zoom-label">Zoom
             <input type="range" class="pet-video-framer-zoom social-post-video-zoom" min="0" max="3" step="0.01" value="1" />
@@ -263,6 +328,8 @@
         clipStart: 0,
         clipDuration: MAX_VIDEO_SECONDS,
         framingController: null,
+        viewportW: width,
+        viewportH: height,
       };
 
       videoEl.src = previewUrl;
@@ -285,11 +352,20 @@
         videoState.clipDuration = Math.min(MAX_VIDEO_SECONDS, duration);
         videoState.clipStart = 0;
 
-        videoState.framingController = window.whiskerPetVideoFramer?.attachEditor?.({
-          videoEl,
-          stageEl,
-          zoomEl,
-          onUpdate: () => {},
+        const attachFraming = () => {
+          if (!videoState) {
+            return;
+          }
+          videoState.framingController = window.whiskerPetVideoFramer?.attachEditor?.({
+            videoEl,
+            stageEl,
+            zoomEl,
+            onUpdate: () => {},
+          });
+        };
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(attachFraming);
         });
 
         if (duration > MAX_VIDEO_SECONDS && trimControls instanceof HTMLElement) {
@@ -313,6 +389,7 @@
 
         syncTrimLabel();
         videoEl.play().catch(() => {});
+        revealPreview();
       });
 
       videoEl.addEventListener("timeupdate", () => {
@@ -347,14 +424,15 @@
       }
 
       setMediaCta(file);
+      bindPhotoFramer();
 
-      if (file.type.startsWith("image/")) {
+      if (isImageFile(file)) {
         resetVideoEditor();
         window.whiskerPetPhotoFramer?.restore?.(mediaInputId, file);
         return;
       }
 
-      if (file.type.startsWith("video/")) {
+      if (isVideoFile(file)) {
         setupVideoEditor(file);
         return;
       }
@@ -381,7 +459,7 @@
       }
 
       try {
-        if (file.type.startsWith("image/")) {
+        if (isImageFile(file)) {
           if (!window.whiskerPetPhotoFramer?.hasImage?.(mediaInputId)) {
             window.alert("Please wait for your photo preview to load.");
             return;
@@ -398,7 +476,7 @@
           return;
         }
 
-        if (!file.type.startsWith("video/") || !videoState) {
+        if (!isVideoFile(file) || !videoState) {
           window.alert("Please wait for your video preview to load.");
           return;
         }
@@ -425,7 +503,9 @@
           file,
           framing,
           videoState.clipStart,
-          videoState.clipDuration
+          videoState.clipDuration,
+          videoState.viewportW,
+          videoState.viewportH
         );
 
         const transfer = new DataTransfer();

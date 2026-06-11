@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>WhiskerWatch — {{PET_NAME}}'s Home</title>
-    <link rel="stylesheet" href="/styles.css?v=20260610x" />
+    <title>WhiskerWatch — {{CAT_HOME_TITLE}}</title>
+    <link rel="stylesheet" href="/styles.css?v=20260617a" />
   </head>
   <body class="dashboard-body cat-home-body">
     <header class="dashboard-topbar">
@@ -26,42 +26,44 @@
     <main class="cat-home-shell section">
       {{STATUS_BLOCK}}
 
-      <div class="cat-home-header">
-        <div>
-          <h1>{{PET_NAME}}'s Home</h1>
-          <p class="panel-intro">Visit your cat's virtual play area and decorate it with paw points.</p>
-        </div>
-        <div class="cat-home-header-actions">
-          <p class="cat-home-balance"><span class="stat-label stat-label-paw-points" aria-hidden="true">{{PAW_POINTS_ICON}}</span> <strong>{{PAW_POINTS}}</strong></p>
-          <a href="/home?tab=pet" class="cat-home-back-link">🐾 Back to My Pet</a>
-        </div>
-      </div>
+      <div class="cat-home-shared" id="cat-home-shared">
+        {{CAT_HOME_PLAY_SWITCHER}}
 
-      <div class="cat-home-layout">
-        <section class="dashboard-card cat-home-stage-card" aria-label="{{PET_NAME}}'s play area">
-          {{CAT_HOME_SCENE}}
-          {{CAT_HOME_OUTFIT_SHOP}}
-          {{CAT_HOME_TAP_BOOST_SHOP}}
-          {{CAT_HOME_PETTING_BONUS_SHOP}}
-        </section>
-
-        <article class="dashboard-card cat-home-shop">
-          <h2>Home decor shop</h2>
-          <p class="field-hint">Buy rugs, beds, toys, plants, and room themes. Each slot holds one item at a time.</p>
-          <div class="decor-grid">
-            {{DECOR_CARDS}}
+        <div class="cat-home-header">
+          <div>
+            <h1>{{CAT_HOME_TITLE}}</h1>
+            <p class="panel-intro">{{CAT_HOME_INTRO}}</p>
           </div>
-        </article>
+          <div class="cat-home-header-actions">
+            <p class="cat-home-balance"><span class="stat-label stat-label-paw-points" aria-hidden="true">{{PAW_POINTS_ICON}}</span> <strong>{{PAW_POINTS}}</strong></p>
+            <a href="/home?tab=pet" class="cat-home-back-link">🐾 Back to My Pet</a>
+          </div>
+        </div>
+
+        {{CAT_HOME_LAYOUT}}
       </div>
     </main>
 
     {{NEED_PAW_POINTS_MODAL}}
 
+    <div id="playdate-menu" class="playdate-menu" hidden>
+      <div class="playdate-menu-panel" role="dialog" aria-labelledby="playdate-menu-title">
+        <button type="button" class="playdate-menu-close" aria-label="Close playdate menu">×</button>
+        <h3 id="playdate-menu-title">Playdate</h3>
+        <p id="playdate-menu-lead" class="field-hint"></p>
+        <div id="playdate-menu-actions" class="playdate-menu-actions"></div>
+        <div id="playdate-menu-picker" class="playdate-menu-picker" hidden></div>
+      </div>
+    </div>
+    <p id="playdate-toast" class="playdate-toast" role="status" hidden></p>
+
     <script src="/paw-cursor.js"></script>
     <script src="/alerts.js"></script>
-    <script src="/shop-affordance.js"></script>
+    <script src="/shop-affordance.js?v=20260617b"></script>
     <script src="/pet-video-framer.js?v=20260613c"></script>
-    <script src="/cinder-pet.js?v=20260610h"></script>
-    <script src="/cat-home.js"></script>
+    <script src="/cinder-pet.js?v=20260616a"></script>
+    <script src="/cat-home.js?v=20260616c"></script>
+    <script src="/cat-home-ambient.js?v=20260617a"></script>
+    <script src="/playdate.js?v=20260616c"></script>
   </body>
 </html>

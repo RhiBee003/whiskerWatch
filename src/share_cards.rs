@@ -155,19 +155,10 @@ pub fn create_share_offer(
 
 pub fn share_offer_for_task_completion(
     profile: &UserProfile,
-    level_up: Option<u32>,
     streak_milestone: Option<u32>,
     app_base_url: &str,
     created_at: u64,
 ) -> Option<ShareCardOffer> {
-    if let Some(level) = level_up {
-        return create_share_offer(
-            profile,
-            ShareCardKind::LevelUp(level),
-            app_base_url,
-            created_at,
-        );
-    }
     if let Some(days) = streak_milestone {
         return create_share_offer(
             profile,
@@ -357,7 +348,7 @@ pub fn render_share_page_html(payload: &ShareCardPayload, signup_url: &str) -> S
         {card}
       </div>
       <div class="share-card-page-cta">
-        <p>Track care tasks, earn paw points, and level up as a cat parent.</p>
+        <p>Track care tasks, earn paw points, and celebrate care streaks.</p>
         <a class="download-btn share-card-signup-btn" href="{signup_url}">Start your cat's journey</a>
       </div>
     </main>

@@ -441,12 +441,6 @@
       pointsBig.innerHTML = formatPawPointsBalance(pawPoints);
     }
 
-    const modalBalance = document.querySelector(
-      "#parent-level-modal .parent-level-section:nth-of-type(2) .parent-level-dl dd a.parent-level-shop-link"
-    );
-    if (modalBalance) {
-      modalBalance.innerHTML = formatPawPointsBalance(pawPoints);
-    }
   }
 
   const tasksPetSelectionStorageKey = "whiskerTasksPetSelection";
@@ -505,7 +499,103 @@
     }
   }
 
-  function showTasksPetPanel(carousel, petId, petOwner) {
+  const CAT_CARD_FLIP_MS = 440;
+  let catCardFlipInProgress = false;
+  const catCardFlipReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function flipTransitionTarget(viewport) {
+    if (!(viewport instanceof HTMLElement)) {
+      return null;
+    }
+    return viewport.querySelector(".cat-card-flip-face") || viewport;
+  }
+
+  function waitFlipTransition(element, fallbackMs) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (event) => {
+        if (
+          event.type === "transitionend" &&
+          event.propertyName &&
+          event.propertyName !== "transform"
+        ) {
+          return;
+        }
+        if (settled) {
+          return;
+        }
+        settled = true;
+        window.clearTimeout(timer);
+        element.removeEventListener("transitionend", finish);
+        element.removeEventListener("animationend", finish);
+        resolve();
+      };
+      const timer = window.setTimeout(finish, fallbackMs);
+      element.addEventListener("transitionend", finish);
+      element.addEventListener("animationend", finish);
+    });
+  }
+
+  function clearCatCardFlipState(viewport) {
+    if (!(viewport instanceof HTMLElement)) {
+      return;
+    }
+    viewport.classList.remove(
+      "is-flipping",
+      "flip-dir-prev",
+      "flip-dir-next",
+      "is-flip-in"
+    );
+  }
+
+  async function runCatCardFlip(viewport, swapContent, direction) {
+    if (!(viewport instanceof HTMLElement)) {
+      await swapContent();
+      return;
+    }
+    if (catCardFlipReducedMotion) {
+      await swapContent();
+      return;
+    }
+    if (catCardFlipInProgress) {
+      return;
+    }
+    catCardFlipInProgress = true;
+    const face = flipTransitionTarget(viewport);
+    const dirClass = direction === "prev" ? "flip-dir-prev" : "flip-dir-next";
+    try {
+      viewport.classList.add("is-flipping", dirClass);
+      if (face instanceof HTMLElement) {
+        await waitFlipTransition(face, CAT_CARD_FLIP_MS * 0.45);
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_MS * 0.45));
+      }
+
+      const swapResult = swapContent();
+      if (swapResult && typeof swapResult.then === "function") {
+        await swapResult;
+      }
+
+      viewport.classList.add("is-flip-in");
+      if (face instanceof HTMLElement) {
+        await waitFlipTransition(face, CAT_CARD_FLIP_MS * 0.55);
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_MS * 0.55));
+      }
+    } finally {
+      clearCatCardFlipState(viewport);
+      catCardFlipInProgress = false;
+    }
+  }
+
+  function tasksPetFlipDirection(fromIndex, toIndex) {
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+      return "next";
+    }
+    return toIndex > fromIndex ? "next" : "prev";
+  }
+
+  async function showTasksPetPanel(carousel, petId, petOwner, options = {}) {
     if (!(carousel instanceof HTMLElement)) {
       return;
     }
@@ -514,55 +604,77 @@
     const panels = carousel.querySelectorAll(".tasks-pet-panel");
     const dots = carousel.querySelectorAll(".tasks-pet-dot");
     const label = carousel.querySelector(".tasks-pet-dot-label");
+    const targets = readTasksPetTargets(carousel);
+    const nextIndex = activeTasksPetIndex(targets, petId, owner);
+    const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
+    const currentIndex =
+      activePanel instanceof HTMLElement
+        ? activeTasksPetIndex(
+            targets,
+            activePanel.dataset.petId || "",
+            activePanel.dataset.petOwner || ""
+          )
+        : -1;
+    const direction =
+      options.direction ||
+      (options.skipFlip ? null : tasksPetFlipDirection(currentIndex, nextIndex));
     let activeLabel = "";
 
-    panels.forEach((panel) => {
-      if (!(panel instanceof HTMLElement)) {
-        return;
-      }
-      const match =
-        panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
-      panel.hidden = !match;
-      panel.classList.toggle("is-active", match);
-      if (match) {
-        activeLabel = panel.dataset.petLabel || "";
-      }
-    });
+    const applyPanelSwap = () => {
+      panels.forEach((panel) => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        const match =
+          panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
+        panel.hidden = !match;
+        panel.classList.toggle("is-active", match);
+        if (match) {
+          activeLabel = panel.dataset.petLabel || "";
+        }
+      });
 
-    dots.forEach((dot) => {
-      if (!(dot instanceof HTMLButtonElement)) {
-        return;
-      }
-      const match =
-        dot.dataset.petId === petId && (dot.dataset.petOwner || "") === owner;
-      dot.classList.toggle("is-active", match);
-      dot.setAttribute("aria-current", match ? "true" : "false");
-      if (match) {
-        activeLabel = dot.dataset.petLabel || activeLabel;
-      }
-    });
+      dots.forEach((dot) => {
+        if (!(dot instanceof HTMLButtonElement)) {
+          return;
+        }
+        const match =
+          dot.dataset.petId === petId && (dot.dataset.petOwner || "") === owner;
+        dot.classList.toggle("is-active", match);
+        dot.setAttribute("aria-current", match ? "true" : "false");
+        if (match) {
+          activeLabel = dot.dataset.petLabel || activeLabel;
+        }
+      });
 
-    if (label instanceof HTMLElement && activeLabel) {
-      label.textContent = activeLabel;
+      if (label instanceof HTMLElement && activeLabel) {
+        label.textContent = activeLabel;
+      }
+
+      updateTasksPetArrows(carousel, nextIndex, targets.length);
+      writeTasksPetSelection(petId, owner);
+    };
+
+    const viewport = carousel.querySelector(".cat-card-flip-viewport");
+    if (direction && viewport && !options.skipFlip) {
+      await runCatCardFlip(viewport, applyPanelSwap, direction);
+      return;
     }
 
-    const targets = readTasksPetTargets(carousel);
-    updateTasksPetArrows(
-      carousel,
-      activeTasksPetIndex(targets, petId, owner),
-      targets.length
-    );
-
-    writeTasksPetSelection(petId, owner);
+    applyPanelSwap();
   }
 
-  function showTasksPetPanelAtIndex(carousel, index) {
+  function showTasksPetPanelAtIndex(carousel, index, fromIndex) {
     const targets = readTasksPetTargets(carousel);
     const target = targets[index];
     if (!target) {
       return;
     }
-    showTasksPetPanel(carousel, target.petId, target.petOwner);
+    const direction =
+      typeof fromIndex === "number"
+        ? tasksPetFlipDirection(fromIndex, index)
+        : "next";
+    showTasksPetPanel(carousel, target.petId, target.petOwner, { direction });
   }
 
   function setupTasksPetSwitcher(carousel) {
@@ -576,10 +688,26 @@
         return;
       }
       dot.addEventListener("click", () => {
+        const targets = readTasksPetTargets(carousel);
+        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
+        const currentIndex =
+          activePanel instanceof HTMLElement
+            ? activeTasksPetIndex(
+                targets,
+                activePanel.dataset.petId || "",
+                activePanel.dataset.petOwner || ""
+              )
+            : -1;
+        const nextIndex = activeTasksPetIndex(
+          targets,
+          dot.dataset.petId || "",
+          dot.dataset.petOwner || ""
+        );
         showTasksPetPanel(
           carousel,
           dot.dataset.petId || "",
-          dot.dataset.petOwner || ""
+          dot.dataset.petOwner || "",
+          { direction: tasksPetFlipDirection(currentIndex, nextIndex) }
         );
       });
     });
@@ -599,7 +727,7 @@
               )
             : 0;
         if (currentIndex > 0) {
-          showTasksPetPanelAtIndex(carousel, currentIndex - 1);
+          showTasksPetPanelAtIndex(carousel, currentIndex - 1, currentIndex);
         }
       });
     }
@@ -616,7 +744,7 @@
               )
             : 0;
         if (currentIndex >= 0 && currentIndex < targets.length - 1) {
-          showTasksPetPanelAtIndex(carousel, currentIndex + 1);
+          showTasksPetPanelAtIndex(carousel, currentIndex + 1, currentIndex);
         }
       });
     }
@@ -630,7 +758,7 @@
           (panel.dataset.petOwner || "") === saved.petOwner
       );
       if (hasPanel) {
-        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner, { skipFlip: true });
         return;
       }
     }
@@ -640,7 +768,8 @@
       showTasksPetPanel(
         carousel,
         activePanel.dataset.petId || "",
-        activePanel.dataset.petOwner || ""
+        activePanel.dataset.petOwner || "",
+        { skipFlip: true }
       );
     }
   }
@@ -667,7 +796,7 @@
           (panel.dataset.petOwner || "") === saved.petOwner
       );
       if (hasPanel) {
-        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner, { skipFlip: true });
       }
     }
   }
@@ -689,69 +818,6 @@
 
     if (typeof data.paw_points === "number") {
       updatePawPointsDisplays(data.paw_points);
-    }
-
-    const parentLevelStat = document.querySelector(".parent-level-trigger .stat-value");
-    if (parentLevelStat && typeof data.parent_level === "number") {
-      parentLevelStat.textContent = `Level ${data.parent_level}`;
-    }
-
-    const levelHeading = document.querySelector(".parent-level-card h2");
-    if (levelHeading && typeof data.parent_level === "number") {
-      levelHeading.textContent = `Parent Level ${data.parent_level}`;
-    }
-
-    const levelFill = document.querySelector(".parent-level-card .level-fill");
-    if (levelFill && typeof data.level_progress === "number") {
-      levelFill.style.width = `${data.level_progress}%`;
-    }
-
-    const levelText = document.querySelector(".parent-level-card p");
-    if (levelText && data.level_progress_text) {
-      levelText.textContent = data.level_progress_text;
-    }
-
-    const modalLevelTitle = document.querySelector("#parent-level-title");
-    if (modalLevelTitle && typeof data.parent_level === "number") {
-      modalLevelTitle.textContent = `Parent Level ${data.parent_level} Breakdown`;
-    }
-
-    const modalCurrentLevel = document.querySelector(
-      "#parent-level-modal .parent-level-section:nth-of-type(1) .parent-level-dl dd"
-    );
-    if (modalCurrentLevel && typeof data.parent_level === "number") {
-      modalCurrentLevel.textContent = `Level ${data.parent_level}`;
-    }
-
-    const modalXp = document.querySelector(
-      "#parent-level-modal .parent-level-section:nth-of-type(1) .parent-level-dl dd:nth-of-type(2)"
-    );
-    if (modalXp && typeof data.parent_xp === "number") {
-      modalXp.textContent = `${data.parent_xp} / 100`;
-    }
-
-    const modalXpFromTasks = document.querySelector(
-      "#parent-level-modal .parent-level-section:nth-of-type(1) .parent-level-dl dd:nth-of-type(5)"
-    );
-    if (modalXpFromTasks && typeof data.xp_from_tasks === "number") {
-      modalXpFromTasks.textContent = `+${data.xp_from_tasks} XP`;
-    }
-
-    const modalPawFromTasks = document.querySelector(
-      "#parent-level-modal .parent-level-section:nth-of-type(2) .parent-level-dl dd:nth-of-type(2)"
-    );
-    if (modalPawFromTasks && typeof data.paw_from_tasks === "number") {
-      modalPawFromTasks.textContent = `+${data.paw_from_tasks}`;
-    }
-
-    const modalLevelFill = document.querySelector("#parent-level-modal .level-fill");
-    if (modalLevelFill && typeof data.level_progress === "number") {
-      modalLevelFill.style.width = `${data.level_progress}%`;
-    }
-
-    const modalLevelText = document.querySelector("#parent-level-modal .parent-level-progress-text");
-    if (modalLevelText && data.level_progress_text) {
-      modalLevelText.textContent = data.level_progress_text;
     }
 
     if (data.calendar_data) {
@@ -1159,18 +1225,34 @@
   }
 
   function sortTasksByTime(tasks) {
-    return [...tasks].sort(
-      (left, right) =>
-        sortByTime(left, right) || String(left.id).localeCompare(String(right.id))
-    );
+    return [...tasks].sort((left, right) => {
+      const completedDelta = Number(Boolean(left.completed)) - Number(Boolean(right.completed));
+      if (completedDelta !== 0) {
+        return completedDelta;
+      }
+      return sortByTime(left, right) || String(left.id).localeCompare(String(right.id));
+    });
   }
 
   function formatScheduleTime(timeMinutes) {
     return formatTimeLabelFromMinutes(timeMinutes ?? 600);
   }
 
+  function isBirthdayEvent(event) {
+    return (
+      event &&
+      (event.kind === "birthday" ||
+        String(event.title || "")
+          .toLowerCase()
+          .includes("birthday"))
+    );
+  }
+
   function shortenCareEventTitle(title) {
     const value = String(title);
+    if (value.toLowerCase().includes("birthday")) {
+      return value;
+    }
     if (/^feed\b/i.test(value) || value.includes("feeding")) {
       return "Feeding";
     }
@@ -1248,6 +1330,13 @@
     </li>`;
   }
 
+  function renderCalendarBirthdayRow(event) {
+    return `<li class="calendar-schedule-item calendar-schedule-item--birthday">
+      <span class="calendar-schedule-time calendar-schedule-birthday-icon" aria-hidden="true">🎂</span>
+      <span class="calendar-schedule-label">${escapeHtml(event.title)}</span>
+    </li>`;
+  }
+
   function renderDaySchedule(day, month, year, tasks, events) {
     if (!scheduleList || !dayDetail) {
       return;
@@ -1256,13 +1345,20 @@
     const isToday = isTodayDate(day, month, year);
     const userEvents = events.filter((event) => event.user_created);
     const generatedEvents = events.filter((event) => !event.user_created);
+    const birthdayEvents = generatedEvents.filter(isBirthdayEvent);
+    const careGeneratedEvents = generatedEvents.filter((event) => !isBirthdayEvent(event));
     const sortedTasks = sortTasksByTime(tasks);
     const useTaskChecklist = isToday && sortedTasks.length > 0;
     const carePreviewEvents = useTaskChecklist
       ? []
-      : [...generatedEvents].sort(sortByTime);
+      : [...careGeneratedEvents].sort(sortByTime);
 
     let html = "";
+
+    if (birthdayEvents.length > 0) {
+      html += `<li class="calendar-schedule-section">Birthdays</li>`;
+      html += birthdayEvents.map((event) => renderCalendarBirthdayRow(event)).join("");
+    }
 
     if (useTaskChecklist) {
       html += `<li class="calendar-schedule-section">Today's care</li>`;
@@ -1351,10 +1447,12 @@
     const todayMonth = now.getMonth() + 1;
     const todayYear = now.getFullYear();
     const todayDay = now.getDate();
-    const eventDays = new Set(
-      calendarPayload.events
-        .filter((event) => event.month === month && event.year === year)
-        .map((event) => event.day)
+    const monthEvents = calendarPayload.events.filter(
+      (event) => event.month === month && event.year === year
+    );
+    const eventDays = new Set(monthEvents.map((event) => event.day));
+    const birthdayDays = new Set(
+      monthEvents.filter(isBirthdayEvent).map((event) => event.day)
     );
     const taskDays = new Set(
       calendarPayload.tasks
@@ -1373,6 +1471,9 @@
       }
       if (eventDays.has(day)) {
         classes.push("has-event");
+      }
+      if (birthdayDays.has(day)) {
+        classes.push("has-birthday");
       }
       if (taskDays.has(day)) {
         classes.push("has-task");
@@ -2884,7 +2985,9 @@
       element.textContent = trimmedName;
     });
 
-    const cinderStage = document.getElementById("cinder-pet-stage");
+    const cinderStage = document.querySelector(
+      "#pet-card-flip-viewport .pet-showcase-panel.is-active .pet-cinder-stage[data-cinder-stage='pet']"
+    );
     if (cinderStage instanceof HTMLElement) {
       cinderStage.dataset.petName = trimmedName;
     }
@@ -2998,7 +3101,6 @@
   }
 
   const onboardingModal = document.getElementById("onboarding-modal");
-  const parentLevelModal = document.getElementById("parent-level-modal");
   const petSetupTriggers = document.querySelectorAll(".pet-setup-trigger");
   function getOnboardingForm() {
     return onboardingModal?.querySelector(".onboarding-form") ?? null;
@@ -3265,33 +3367,238 @@
     });
   }
 
+  function buildPetSwitchUrl(petId, petOwner, returnTab) {
+    const url = new URL(window.location.href);
+    if (returnTab === "pet") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", returnTab);
+    }
+    url.searchParams.set("pet", petId);
+    if (petOwner) {
+      url.searchParams.set("pet_owner", petOwner);
+    } else {
+      url.searchParams.delete("pet_owner");
+    }
+    url.searchParams.delete("add_cat");
+    url.searchParams.delete("breed");
+    return url;
+  }
+
+  function readPetSwitcherTargets(switcher) {
+    if (!(switcher instanceof HTMLElement)) {
+      return [];
+    }
+    return Array.from(switcher.querySelectorAll(".pet-switcher-tab"))
+      .map((tab) => {
+        const href = tab.getAttribute("href");
+        if (!href) {
+          return null;
+        }
+        const tabUrl = new URL(href, window.location.origin);
+        return {
+          petId: tabUrl.searchParams.get("pet") || "",
+          petOwner: tabUrl.searchParams.get("pet_owner") || "",
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function activePetShowcaseIndex(targets, petId, petOwner) {
+    const owner = petOwner || "";
+    return targets.findIndex(
+      (target) => target.petId === petId && (target.petOwner || "") === owner
+    );
+  }
+
+  function petSwitcherDirection(switcher, targetPetId, targetPetOwner) {
+    const owner = targetPetOwner || "";
+    const targets = readPetSwitcherTargets(switcher);
+    const activePanel = document.querySelector("#pet-card-flip-viewport .pet-showcase-panel.is-active");
+    const currentIndex =
+      activePanel instanceof HTMLElement
+        ? activePetShowcaseIndex(
+            targets,
+            activePanel.dataset.petId || "",
+            activePanel.dataset.petOwner || ""
+          )
+        : targets.findIndex(
+            (target) => target.petId === targetPetId && (target.petOwner || "") === owner
+          );
+    const targetIndex = activePetShowcaseIndex(targets, targetPetId, owner);
+    return tasksPetFlipDirection(currentIndex, targetIndex);
+  }
+
+  function updatePetSwitcherUi(petId, petOwner) {
+    const owner = petOwner || "";
+    const switcher = document.querySelector('.pet-switcher[data-return-tab="pet"]');
+    if (!(switcher instanceof HTMLElement)) {
+      return;
+    }
+
+    const targets = readPetSwitcherTargets(switcher);
+    const activeIndex = activePetShowcaseIndex(targets, petId, owner);
+    switcher.querySelectorAll(".pet-switcher-tab").forEach((tab) => {
+      if (!(tab instanceof HTMLAnchorElement)) {
+        return;
+      }
+      const tabUrl = new URL(tab.href, window.location.origin);
+      const match =
+        tabUrl.searchParams.get("pet") === petId &&
+        (tabUrl.searchParams.get("pet_owner") || "") === owner;
+      tab.classList.toggle("pet-switcher-tab-active", match);
+      tab.setAttribute("aria-current", match ? "page" : "false");
+    });
+
+    const count = switcher.querySelector(".pet-switcher-count");
+    if (count instanceof HTMLElement && activeIndex >= 0) {
+      count.textContent = `${activeIndex + 1} of ${targets.length} cats`;
+    }
+  }
+
+  function persistPetSelection(petId, petOwner) {
+    const url = buildPetSwitchUrl(petId, petOwner, "pet");
+    window.history.pushState({}, "", url.toString());
+    window.fetch(url.toString(), { credentials: "same-origin" }).catch(() => {});
+  }
+
+  async function showPetShowcasePanel(petId, petOwner, options = {}) {
+    const viewport = document.getElementById("pet-card-flip-viewport");
+    const panels = viewport?.querySelectorAll(".pet-showcase-panel") || [];
+    const owner = petOwner || "";
+    const targets = readPetSwitcherTargets(
+      document.querySelector('.pet-switcher[data-return-tab="pet"]')
+    );
+    const nextIndex = activePetShowcaseIndex(targets, petId, owner);
+    const activePanel = viewport?.querySelector(".pet-showcase-panel.is-active");
+    const currentIndex =
+      activePanel instanceof HTMLElement
+        ? activePetShowcaseIndex(
+            targets,
+            activePanel.dataset.petId || "",
+            activePanel.dataset.petOwner || ""
+          )
+        : -1;
+    if (
+      !options.skipFlip &&
+      currentIndex >= 0 &&
+      nextIndex >= 0 &&
+      currentIndex === nextIndex
+    ) {
+      return;
+    }
+    const direction =
+      options.direction ||
+      (options.skipFlip ? null : tasksPetFlipDirection(currentIndex, nextIndex));
+
+    const applyPanelSwap = () => {
+      let matched = false;
+      panels.forEach((panel) => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        const match =
+          panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
+        panel.hidden = !match;
+        panel.classList.toggle("is-active", match);
+        if (match) {
+          matched = true;
+        }
+      });
+      if (!matched) {
+        window.location.href = buildPetSwitchUrl(petId, petOwner, "pet").toString();
+        return;
+      }
+      updatePetSwitcherUi(petId, owner);
+      persistPetSelection(petId, owner);
+      window.whiskerRemountPetShowcase?.(viewport);
+    };
+
+    if (direction && viewport && !options.skipFlip) {
+      await runCatCardFlip(viewport, applyPanelSwap, direction);
+      return;
+    }
+
+    applyPanelSwap();
+  }
+
+  function setupPetShowcaseCarousel() {
+    const viewport = document.getElementById("pet-card-flip-viewport");
+    const activePanel = viewport?.querySelector(".pet-showcase-panel.is-active");
+    if (activePanel instanceof HTMLElement) {
+      updatePetSwitcherUi(
+        activePanel.dataset.petId || "",
+        activePanel.dataset.petOwner || ""
+      );
+    }
+    window.whiskerRemountPetShowcase?.(viewport);
+  }
+
+  setupPetShowcaseCarousel();
+
   document.querySelectorAll(".pet-switcher-nav[data-pet-target]").forEach((button) => {
     button.addEventListener("click", () => {
+      const switcher = button.closest(".pet-switcher");
+      const returnTab = switcher?.dataset.returnTab || "pet";
+      if (returnTab === "pet" && document.getElementById("pet-card-flip-viewport")) {
+        const targets = readPetSwitcherTargets(switcher);
+        const activePanel = document.querySelector(
+          "#pet-card-flip-viewport .pet-showcase-panel.is-active"
+        );
+        const currentIndex =
+          activePanel instanceof HTMLElement
+            ? activePetShowcaseIndex(
+                targets,
+                activePanel.dataset.petId || "",
+                activePanel.dataset.petOwner || ""
+              )
+            : 0;
+        const isPrev = button.getAttribute("aria-label") === "Previous cat";
+        const targetIndex = isPrev
+          ? currentIndex <= 0
+            ? targets.length - 1
+            : currentIndex - 1
+          : (currentIndex + 1) % targets.length;
+        const target = targets[targetIndex];
+        if (!target) {
+          return;
+        }
+        showPetShowcasePanel(target.petId, target.petOwner, {
+          direction: isPrev ? "prev" : "next",
+        });
+        return;
+      }
+
       const petId = button.getAttribute("data-pet-target");
       if (!petId) {
         return;
       }
-      const switcher = button.closest(".pet-switcher");
-      const returnTab = switcher?.dataset.returnTab || "pet";
       const petOwner =
         returnTab === "account" ? null : button.getAttribute("data-pet-owner");
-      const url = new URL(window.location.href);
-      if (returnTab === "pet") {
-        url.searchParams.delete("tab");
-      } else {
-        url.searchParams.set("tab", returnTab);
-      }
-      url.searchParams.set("pet", petId);
-      if (petOwner) {
-        url.searchParams.set("pet_owner", petOwner);
-      } else {
-        url.searchParams.delete("pet_owner");
-      }
-      url.searchParams.delete("add_cat");
-      url.searchParams.delete("breed");
-      window.location.href = url.toString();
+      window.location.href = buildPetSwitchUrl(petId, petOwner, returnTab).toString();
     });
   });
+
+  document
+    .querySelectorAll('.pet-switcher[data-return-tab="pet"] .pet-switcher-tab')
+    .forEach((link) => {
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        const href = link.getAttribute("href");
+        if (!href) {
+          return;
+        }
+        const tabUrl = new URL(href, window.location.origin);
+        const petId = tabUrl.searchParams.get("pet");
+        if (!petId) {
+          return;
+        }
+        const petOwner = tabUrl.searchParams.get("pet_owner");
+        const switcher = link.closest(".pet-switcher");
+        const direction = petSwitcherDirection(switcher, petId, petOwner);
+        showPetShowcasePanel(petId, petOwner, { direction });
+      });
+    });
 
   const photoSetupInvalid = params.get("status") === "onboarding_photo_invalid";
 
@@ -3383,53 +3690,6 @@
     });
   });
 
-  const parentLevelClose = document.getElementById("parent-level-close");
-  const parentLevelTriggers = document.querySelectorAll(".parent-level-trigger");
-
-  function openParentLevelModal() {
-    if (!parentLevelModal) {
-      return;
-    }
-    parentLevelModal.hidden = false;
-    lockModalBodyScroll();
-    document.body.classList.add("modal-open");
-    if (parentLevelClose instanceof HTMLElement) {
-      parentLevelClose.focus();
-    }
-  }
-
-  function closeParentLevelModal() {
-    if (!parentLevelModal) {
-      return;
-    }
-    parentLevelModal.hidden = true;
-    document.body.classList.remove("modal-open");
-    unlockModalBodyScroll();
-  }
-
-  parentLevelTriggers.forEach((trigger) => {
-    trigger.addEventListener("click", () => {
-      showTab("points");
-      openParentLevelModal();
-    });
-  });
-
-  if (parentLevelClose) {
-    parentLevelClose.addEventListener("click", closeParentLevelModal);
-  }
-
-  document.querySelectorAll(".parent-level-shop-link").forEach((link) => {
-    link.addEventListener("click", closeParentLevelModal);
-  });
-
-  if (parentLevelModal) {
-    parentLevelModal.addEventListener("click", (event) => {
-      if (event.target === parentLevelModal) {
-        closeParentLevelModal();
-      }
-    });
-  }
-
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") {
       return;
@@ -3441,9 +3701,6 @@
     if (addCatModal instanceof HTMLElement && !addCatModal.hidden) {
       closeAddCatModal();
       return;
-    }
-    if (parentLevelModal && !parentLevelModal.hidden) {
-      closeParentLevelModal();
     }
   });
 
@@ -3915,11 +4172,4 @@
     setupTasksPetSwitcher(tasksPanelCarousel);
   }
 
-  window.addEventListener("whisker:parent-xp", (event) => {
-    const detail = event.detail;
-    if (!detail || typeof detail !== "object") {
-      return;
-    }
-    updateDashboardFromTaskToggle(detail);
-  });
 })();

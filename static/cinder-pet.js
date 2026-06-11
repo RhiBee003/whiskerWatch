@@ -141,25 +141,36 @@
     observer.observe(frame);
   }
 
-  document.querySelectorAll(".pet-user-video-player, .account-pet-video-player").forEach((video) => {
-    bindPetVideoClipLoop(video);
-    applyPetVideoFraming(video);
-    video.addEventListener("loadedmetadata", () => {
+  function initPetMediaIn(root) {
+    const scope = root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll(".pet-user-video-player, .account-pet-video-player").forEach((video) => {
+      bindPetVideoClipLoop(video);
       applyPetVideoFraming(video);
+      video.addEventListener("loadedmetadata", () => {
+        applyPetVideoFraming(video);
+      });
+      watchPetVideoFraming(video);
     });
-    watchPetVideoFraming(video);
-  });
-
-  const stage = document.getElementById("cinder-pet-stage");
-  const videoToggle = stage?.querySelector(".cinder-photo-toggle");
-  const videoWrap = stage?.querySelector(".pet-user-video-optional");
-  const videoPlayer = stage?.querySelector(".pet-user-video-player");
-
-  function petStageName() {
-    return stage?.dataset.petName?.trim() || "your cat";
   }
 
-  if (stage && videoToggle && videoWrap) {
+  function mountCinderPetStage(stage) {
+    if (!(stage instanceof HTMLElement) || stage.dataset.cinderBound === "true") {
+      return;
+    }
+
+    const videoToggle = stage.querySelector(".cinder-photo-toggle");
+    const videoWrap = stage.querySelector(".pet-user-video-optional");
+    const videoPlayer = stage.querySelector(".pet-user-video-player");
+    if (!videoToggle || !videoWrap) {
+      return;
+    }
+
+    stage.dataset.cinderBound = "true";
+
+    function petStageName() {
+      return stage.dataset.petName?.trim() || "your cat";
+    }
+
     if (videoPlayer instanceof HTMLVideoElement) {
       bindPetVideoClipLoop(videoPlayer);
     }
@@ -185,6 +196,22 @@
       }
     });
   }
+
+  function mountPetCinderStages(root) {
+    const scope = root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll('.pet-cinder-stage[data-cinder-stage="pet"]').forEach((stage) => {
+      mountCinderPetStage(stage);
+    });
+  }
+
+  initPetMediaIn(document);
+  mountPetCinderStages(document);
+
+  window.whiskerRemountPetShowcase = function whiskerRemountPetShowcase(root) {
+    const scope = root instanceof HTMLElement ? root : document;
+    initPetMediaIn(scope);
+    mountPetCinderStages(scope);
+  };
 
   const accountStage = document.getElementById("account-pet-photo-stage");
   if (!accountStage) {

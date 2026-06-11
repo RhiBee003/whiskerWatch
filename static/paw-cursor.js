@@ -16,6 +16,8 @@
     "#cinder-pet-stage",
     ".cinder-pet-stage",
     ".cat-home-pet-stage",
+    ".cat-home-playdate-cat",
+    ".cat-home-interactive",
     ".pet-cinder-stage",
   ].join(", ");
 

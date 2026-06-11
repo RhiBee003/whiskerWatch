@@ -71,11 +71,10 @@
     document.body.classList.remove("need-paw-points-open");
 
     const url = new URL(window.location.href);
-    if (url.searchParams.has("status") || url.searchParams.has("decor_id") || url.searchParams.has("outfit_id") || url.searchParams.has("boost_id")) {
+    if (url.searchParams.has("status") || url.searchParams.has("decor_id") || url.searchParams.has("outfit_id")) {
       url.searchParams.delete("status");
       url.searchParams.delete("decor_id");
       url.searchParams.delete("outfit_id");
-      url.searchParams.delete("boost_id");
       window.history.replaceState({}, "", url);
     }
   }
@@ -124,270 +123,161 @@
         url.searchParams.delete("status");
         url.searchParams.delete("decor_id");
         url.searchParams.delete("outfit_id");
-        url.searchParams.delete("boost_id");
-        url.searchParams.delete("petting_bonus_id");
         window.history.replaceState({}, "", url);
       }
     }
   }
 
-  let pettingBonusExpiresAt = null;
-  let pettingBonusCountdownTimer = null;
+  const catHomePetStorageKey = "whiskerCatHomePet";
 
-  function resolvePettingBonusExpiry(expiresAt) {
-    if (Number.isFinite(expiresAt)) {
-      return expiresAt;
+  function roleLabelForCat(catNode, playAsPetId) {
+    const name = catNode.dataset.petName?.trim() || "Cat";
+    const isOwned = catNode.dataset.isOwned === "true";
+    if (isOwned && catNode.dataset.petId === playAsPetId) {
+      return `Playing as ${name}`;
     }
-    if (Number.isFinite(pettingBonusExpiresAt)) {
-      return pettingBonusExpiresAt;
+    if (isOwned) {
+      return "Your housemate";
     }
-
-    const candidates = [
-      document.querySelector(".petting-bonus-active")?.dataset?.expiresAt,
-      document.querySelector(".petting-bonus-card.active")?.dataset?.expiresAt,
-    ];
-
-    for (const value of candidates) {
-      const parsed = Number.parseInt(String(value ?? ""), 10);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-
-    return Number.NaN;
+    const ownerLabel = catNode.dataset.ownerLabel?.trim();
+    return ownerLabel ? `${ownerLabel}'s cat` : "Friend cat";
   }
 
-  function syncPettingBonusExpiryTargets(expiresAt) {
-    const banner = document.querySelector(".petting-bonus-active");
-    if (banner instanceof HTMLElement) {
-      banner.dataset.expiresAt = String(expiresAt);
-    }
-
-    document.querySelectorAll(".petting-bonus-card.active").forEach((card) => {
-      if (card instanceof HTMLElement) {
-        card.dataset.expiresAt = String(expiresAt);
-      }
-    });
-  }
-
-  function finishPettingBonusCountdown() {
-    document.querySelectorAll(".petting-bonus-active").forEach((banner) => {
-      banner.remove();
-    });
-
-    document.querySelectorAll(".petting-bonus-card.active").forEach((card) => {
-      card.classList.remove("active");
-      const badge = card.querySelector(".petting-bonus-badge");
-      if (badge) {
-        badge.textContent = "Bonus ended";
-      }
-    });
-
-    if (pettingBonusCountdownTimer) {
-      window.clearInterval(pettingBonusCountdownTimer);
-      pettingBonusCountdownTimer = null;
-    }
-
-    pettingBonusExpiresAt = null;
-  }
-
-  function updatePettingBonusCountdowns(expiresAt) {
-    const targets = document.querySelectorAll(
-      ".petting-bonus-countdown, .petting-bonus-badge"
-    );
-
-    if (targets.length === 0) {
-      finishPettingBonusCountdown();
+  function updatePlayAsInScene(shared, petId) {
+    const scene = shared.querySelector(".cat-home-playdate-scene");
+    if (!(scene instanceof HTMLElement)) {
       return;
     }
 
-    const expiry = resolvePettingBonusExpiry(expiresAt);
-    if (!Number.isFinite(expiry)) {
-      return;
-    }
+    scene.dataset.playAsPetId = petId;
+    scene.querySelectorAll(".cat-home-playdate-cat").forEach((catNode) => {
+      if (!(catNode instanceof HTMLElement)) {
+        return;
+      }
 
-    const now = Math.floor(Date.now() / 1000);
-    if (expiry <= now) {
-      finishPettingBonusCountdown();
-      return;
-    }
+      const isOwned = catNode.dataset.isOwned === "true";
+      const isPlayAs = isOwned && catNode.dataset.petId === petId;
+      const isHousemate = isOwned && !isPlayAs;
 
-    const secondsLeft = expiry - now;
-    targets.forEach((element) => {
-      if (element.classList.contains("petting-bonus-countdown")) {
-        element.textContent = `${secondsLeft}s`;
-      } else if (element.classList.contains("petting-bonus-badge")) {
-        element.textContent = `Active · ${secondsLeft}s left`;
+      catNode.classList.toggle("cat-home-play-as", isPlayAs);
+      catNode.classList.toggle("cat-home-housemate", isHousemate);
+      catNode.classList.toggle("cat-home-playdate-guest", !isOwned);
+      catNode.dataset.isHousemate = isHousemate ? "true" : "false";
+
+      const name = catNode.dataset.petName?.trim() || "Cat";
+      const bubble = catNode.querySelector(".cat-home-pet-bubble");
+      const roleChip = catNode.querySelector(".cat-home-pet-role-chip");
+      if (bubble) {
+        bubble.textContent = name;
+      }
+      if (roleChip) {
+        roleChip.textContent = roleLabelForCat(catNode, petId);
       }
     });
   }
 
-  function startPettingBonusCountdown(expiresAt) {
-    if (!Number.isFinite(expiresAt)) {
-      return;
-    }
-
-    pettingBonusExpiresAt = expiresAt;
-    syncPettingBonusExpiryTargets(expiresAt);
-    updatePettingBonusCountdowns(expiresAt);
-
-    if (pettingBonusCountdownTimer) {
-      window.clearInterval(pettingBonusCountdownTimer);
-    }
-
-    pettingBonusCountdownTimer = window.setInterval(() => {
-      updatePettingBonusCountdowns();
-    }, 1000);
-  }
-
-  const initialPettingBonusExpiry = Number.parseInt(
-    String(
-      document.querySelector(".petting-bonus-active")?.dataset?.expiresAt ??
-        document.querySelector(".petting-bonus-card.active")?.dataset?.expiresAt ??
-        ""
-    ),
-    10
-  );
-
-  if (Number.isFinite(initialPettingBonusExpiry)) {
-    startPettingBonusCountdown(initialPettingBonusExpiry);
-  }
-
-  const petStage = document.querySelector(".cat-home-pet-stage");
-  if (!petStage) {
-    return;
-  }
-
-  let activePointer = null;
-  let rewardedForActivePointer = false;
-
-  function isPetPetTarget(target) {
-    if (!(target instanceof Element)) {
-      return false;
-    }
-    if (target.closest(".cinder-photo-toggle")) {
-      return false;
-    }
-    return target.closest(".pet-cinder-stage") !== null;
-  }
-
-  function updateCatHomePawPoints(pawPoints) {
-    if (typeof pawPoints !== "number") {
-      return;
-    }
-
-    if (typeof window.whiskerApplyPawPointsBalance === "function") {
-      window.whiskerApplyPawPointsBalance(pawPoints);
-      return;
-    }
-
-    const balance = document.querySelector(".cat-home-balance strong");
-    if (balance) {
-      balance.textContent = String(pawPoints);
-    }
-
-    if (pawPointsModal instanceof HTMLElement) {
-      pawPointsModal.dataset.balance = String(pawPoints);
-    }
-    if (pawPointsBalance) {
-      pawPointsBalance.textContent = String(pawPoints);
-    }
-
-    if (typeof window.whiskerRefreshShopAffordance === "function") {
-      window.whiskerRefreshShopAffordance(pawPoints);
-    }
-  }
-
-  async function awardPetPet() {
+  function writeCatHomePetSelection(petId) {
     try {
-      const response = await fetch("/home/cat-home/pet-pet", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-        },
-        credentials: "same-origin",
-        redirect: "manual",
-      });
-
-      if (response.status === 401 || response.status === 403) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const data = await response.json().catch(() => null);
-      if (!data || !data.ok || typeof data.paw_points !== "number") {
-        return;
-      }
-
-      updateCatHomePawPoints(data.paw_points);
-
-      if (typeof data.petting_bonus_expires_at === "number") {
-        startPettingBonusCountdown(data.petting_bonus_expires_at);
-      }
-
-      if (typeof data.tap_reward === "number" && data.tap_reward > 0) {
-        const bubble = document.querySelector(".cat-home-pet-bubble");
-        if (bubble) {
-          const original = bubble.textContent;
-          const multiplier =
-            typeof data.tap_multiplier === "number" &&
-            data.tap_multiplier > 1 &&
-            typeof data.tap_boost_base === "number" &&
-            data.tap_boost_base > 0
-              ? ` (${data.tap_multiplier}× +${data.tap_boost_base})`
-              : "";
-          bubble.textContent = `+${data.tap_reward}!${multiplier}`;
-          window.setTimeout(() => {
-            bubble.textContent = original;
-          }, 650);
-        }
-      }
+      window.sessionStorage.setItem(catHomePetStorageKey, petId);
     } catch (_error) {
-      // Ignore network errors; the user can tap again.
+      // Ignore storage failures.
     }
   }
 
-  petStage.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (event.button !== 0 || !isPetPetTarget(event.target)) {
+  function readCatHomePetSelection() {
+    try {
+      return window.sessionStorage.getItem(catHomePetStorageKey);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function persistCatHomePet(petId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("pet", petId);
+    window.history.replaceState({}, "", url);
+    window.fetch(url.toString(), { credentials: "same-origin" }).catch(() => {});
+  }
+
+  function applyPlayAs(shared, petId, petName, options = {}) {
+    const picks = shared.querySelectorAll(".cat-home-pet-pick");
+    picks.forEach((pick) => {
+      if (!(pick instanceof HTMLButtonElement)) {
         return;
       }
-      activePointer = event.pointerId;
-      rewardedForActivePointer = false;
-    },
-    { passive: true }
-  );
+      const match = pick.dataset.petId === petId;
+      pick.classList.toggle("is-active", match);
+      pick.setAttribute("aria-current", match ? "true" : "false");
+    });
 
-  function clearActivePointer(pointerId) {
-    if (pointerId !== activePointer) {
-      return;
+    const label = shared.querySelector(".cat-home-play-as-label strong");
+    if (label) {
+      label.textContent = petName;
     }
-    activePointer = null;
-    rewardedForActivePointer = false;
+
+    updatePlayAsInScene(shared, petId);
+    window.whiskerRefreshFriendshipPanel?.(shared);
+    writeCatHomePetSelection(petId);
+    if (!options.skipPersist) {
+      persistCatHomePet(petId);
+    }
+
+    if (typeof window.whiskerClosePlaydateMenu === "function") {
+      window.whiskerClosePlaydateMenu();
+    }
+
+    window.whiskerRemountPetShowcase?.(shared);
   }
 
-  petStage.addEventListener("pointerup", (event) => {
-    clearActivePointer(event.pointerId);
-  });
-
-  petStage.addEventListener("pointercancel", (event) => {
-    clearActivePointer(event.pointerId);
-  });
-
-  petStage.addEventListener("click", (event) => {
-    if (event.target instanceof Element && event.target.closest(".cinder-photo-toggle")) {
-      return;
-    }
-    if (!isPetPetTarget(event.target)) {
-      return;
-    }
-    if (rewardedForActivePointer) {
+  function setupCatHomePlaySwitcher() {
+    const shared = document.getElementById("cat-home-shared");
+    if (!(shared instanceof HTMLElement)) {
       return;
     }
 
-    rewardedForActivePointer = true;
-    event.preventDefault();
-    awardPetPet();
-  });
+    const picks = Array.from(shared.querySelectorAll(".cat-home-pet-pick")).filter(
+      (pick) => pick instanceof HTMLButtonElement
+    );
+    if (picks.length === 0) {
+      return;
+    }
+
+    picks.forEach((pick) => {
+      pick.addEventListener("click", () => {
+        const petId = pick.dataset.petId || "";
+        const petName = pick.dataset.petName || "Cat";
+        if (!petId) {
+          return;
+        }
+        const activePick = shared.querySelector(".cat-home-pet-pick.is-active");
+        if (
+          activePick instanceof HTMLButtonElement &&
+          activePick.dataset.petId === petId
+        ) {
+          return;
+        }
+        applyPlayAs(shared, petId, petName);
+      });
+    });
+
+    const urlPet = new URL(window.location.href).searchParams.get("pet");
+    const saved = readCatHomePetSelection();
+    const knownIds = new Set(
+      picks.map((pick) => pick.dataset.petId || "").filter(Boolean)
+    );
+    const initialPick =
+      picks.find((pick) => pick.dataset.petId === urlPet && knownIds.has(urlPet || "")) ||
+      picks.find((pick) => pick.dataset.petId === saved && knownIds.has(saved || "")) ||
+      picks.find((pick) => pick.classList.contains("is-active")) ||
+      picks[0];
+
+    if (initialPick) {
+      applyPlayAs(shared, initialPick.dataset.petId || "", initialPick.dataset.petName || "Cat", {
+        skipPersist: Boolean(urlPet && urlPet === initialPick.dataset.petId),
+      });
+    }
+  }
+
+  setupCatHomePlaySwitcher();
+
 })();

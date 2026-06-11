@@ -1746,6 +1746,115 @@ footer p {
   font-size: 1.25rem;
 }
 
+.cat-card-flip-viewport {
+  position: relative;
+  perspective: 1400px;
+}
+
+.cat-card-flip-viewport::before {
+  content: "🐾";
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  z-index: 3;
+  font-size: 1.65rem;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.35) rotate(-18deg);
+}
+
+.cat-card-flip-viewport::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 28px;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 50% 45%, rgba(255, 182, 212, 0.5), transparent 72%);
+  transition: opacity 0.28s ease;
+}
+
+.cat-card-flip-viewport.is-flipping::before {
+  animation: cat-card-flip-paw 0.52s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+.cat-card-flip-viewport.is-flipping::after {
+  opacity: 1;
+}
+
+.cat-card-flip-face {
+  transform-style: preserve-3d;
+  transform-origin: center center;
+  backface-visibility: hidden;
+  transition:
+    transform 0.44s cubic-bezier(0.45, 0.05, 0.2, 1.12),
+    opacity 0.34s ease,
+    filter 0.34s ease;
+}
+
+.cat-card-flip-viewport.is-flipping.flip-dir-next .cat-card-flip-face {
+  transform: rotateY(-84deg) scale(0.95) translateZ(-24px);
+  opacity: 0.12;
+  filter: brightness(1.08) saturate(1.12);
+}
+
+.cat-card-flip-viewport.is-flipping.flip-dir-prev .cat-card-flip-face {
+  transform: rotateY(84deg) scale(0.95) translateZ(-24px);
+  opacity: 0.12;
+  filter: brightness(1.08) saturate(1.12);
+}
+
+.cat-card-flip-viewport.is-flipping.is-flip-in .cat-card-flip-face {
+  transform: rotateY(0deg) scale(1);
+  opacity: 1;
+  filter: none;
+  animation: cat-card-flip-settle 0.48s cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+
+@keyframes cat-card-flip-paw {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -28%) scale(0.35) rotate(-18deg);
+  }
+
+  38% {
+    opacity: 1;
+    transform: translate(-50%, -58%) scale(1.08) rotate(10deg);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -92%) scale(0.72) rotate(16deg);
+  }
+}
+
+@keyframes cat-card-flip-settle {
+  0% {
+    transform: rotateY(10deg) scale(1.025);
+  }
+
+  55% {
+    transform: rotateY(-2deg) scale(0.992);
+  }
+
+  100% {
+    transform: rotateY(0deg) scale(1);
+  }
+}
+
+.pet-card-flip-panels {
+  width: 100%;
+}
+
+.pet-showcase-panel[hidden] {
+  display: none !important;
+}
+
+#panel-pet > .pet-switcher {
+  margin-bottom: 0.85rem;
+}
+
 .pet-showcase {
   display: grid;
   grid-template-columns: minmax(0, var(--pet-stage-size)) minmax(0, 1fr);
@@ -2505,6 +2614,12 @@ footer p {
   margin-bottom: 1.25rem;
   min-width: 0;
   max-width: 100%;
+  padding: 0.65rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(208, 112, 152, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(42, 31, 40, 0.08);
 }
 
 .cat-home-header > div:first-child {
@@ -2582,7 +2697,7 @@ footer p {
 
 .cat-home-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
   min-width: 0;
@@ -2594,10 +2709,213 @@ footer p {
   max-width: 100%;
 }
 
+.cat-home-shared {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.cat-home-carousel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.cat-home-flip-viewport {
+  min-width: 0;
+}
+
+.cat-home-panels {
+  min-width: 0;
+}
+
+.cat-home-pet-panel {
+  min-width: 0;
+}
+
+.cat-home-pet-panel[hidden] {
+  display: none !important;
+}
+
+.cat-home-play-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.15rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(42, 31, 40, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(42, 31, 40, 0.08);
+}
+
+.cat-home-pet-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.cat-home-pet-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.4rem 0.9rem 0.4rem 0.45rem;
+  border-radius: 999px;
+  border: 2px solid rgba(208, 112, 152, 0.4);
+  background: rgba(255, 232, 242, 0.95);
+  color: var(--pink-dark);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.cat-home-pet-pick:hover,
+.cat-home-pet-pick:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(208, 112, 152, 0.75);
+  background: rgba(208, 112, 152, 0.08);
+  outline: none;
+}
+
+.cat-home-pet-pick.is-active {
+  background: var(--pink-dark);
+  border-color: var(--pink-dark);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(184, 90, 130, 0.25);
+}
+
+.cat-home-pet-pick-avatar {
+  --pet-pick-hue: 320;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid hsl(var(--pet-pick-hue) 58% 62%);
+  background: hsl(var(--pet-pick-hue) 72% 94%);
+  box-shadow: 0 2px 6px rgba(42, 31, 40, 0.12);
+}
+
+.cat-home-pet-pick-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cat-home-pet-pick-avatar--initial {
+  font-size: 0.95rem;
+  font-weight: 900;
+  color: hsl(var(--pet-pick-hue) 48% 34%);
+}
+
+.cat-home-pet-pick.is-active .cat-home-pet-pick-avatar {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px hsl(var(--pet-pick-hue) 58% 58%);
+}
+
+.cat-home-pet-pick-name {
+  font-weight: 800;
+}
+
+.cat-home-play-as-label {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cat-home-play-as-label strong {
+  color: var(--pink-dark);
+  font-weight: 900;
+}
+
+.cat-home-play-as {
+  z-index: 3;
+}
+
+.cat-home-play-as .cat-home-pet-stack {
+  filter: drop-shadow(0 6px 14px rgba(208, 112, 152, 0.28));
+}
+
+.cat-home-play-as .cat-home-pet-bubble {
+  background: linear-gradient(165deg, #fff8dc 0%, #ffe8f3 100%);
+  border-color: var(--pink-dark);
+  color: var(--pink-dark);
+}
+
+.cat-home-play-as .cat-home-pet-role-chip {
+  background: var(--pink-dark);
+  border-color: var(--pink-dark);
+  color: #fff;
+}
+
+.cat-home-housemate .cat-home-pet-bubble {
+  background: rgba(255, 232, 242, 0.98);
+  border-color: rgba(208, 112, 152, 0.45);
+  color: var(--pink-dark);
+}
+
+.cat-home-housemate .cat-home-pet-role-chip {
+  background: rgba(255, 225, 238, 0.95);
+  border-color: rgba(208, 112, 152, 0.4);
+  color: var(--pink-dark);
+}
+
+.cat-home-playdate-guest .cat-home-pet-bubble {
+  background: rgba(255, 252, 235, 0.98);
+  border-color: rgba(196, 148, 48, 0.55);
+}
+
+.cat-home-playdate-guest .cat-home-pet-role-chip {
+  background: rgba(255, 246, 214, 0.95);
+  border-color: rgba(196, 148, 48, 0.4);
+  color: #7a5a12;
+}
+
+.cat-home-housemate:hover .cat-home-pet-bubble,
+.cat-home-housemate:focus-visible .cat-home-pet-bubble {
+  border-color: rgba(208, 112, 152, 0.75);
+}
+
+.cat-home-carousel.is-switching .cat-home-pet-panel.is-active {
+  animation: cat-home-panel-in 0.28s ease;
+}
+
+@keyframes cat-home-panel-in {
+  from {
+    opacity: 0.55;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .cat-home-stage-card {
   padding: 1rem;
   min-width: 0;
   overflow: hidden;
+}
+
+.cat-home-game-stage {
+  padding: 0.35rem;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 
 .cat-home-shop {
@@ -2607,29 +2925,303 @@ footer p {
 
 .cat-home-scene {
   position: relative;
-  min-height: 25rem;
+  min-height: 28rem;
+  aspect-ratio: 16 / 9;
+  max-height: 36rem;
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid rgba(0, 0, 0, 0.12);
   box-shadow: var(--shadow-md);
 }
 
+.cat-home-scene--immersive {
+  --scene-tilt-x: 0deg;
+  --scene-tilt-y: 0deg;
+  min-height: 32rem;
+  max-height: 42rem;
+  border-radius: 22px;
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(42, 31, 40, 0.45),
+    0 18px 48px rgba(42, 31, 40, 0.38),
+    0 0 80px rgba(208, 112, 152, 0.18);
+  transform: perspective(1200px) rotateX(var(--scene-tilt-x)) rotateY(var(--scene-tilt-y));
+  transform-style: preserve-3d;
+  animation: catHomeSceneEnter 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes catHomeSceneEnter {
+  0% {
+    opacity: 0;
+    transform: perspective(1200px) rotateX(4deg) scale(0.97);
+  }
+
+  100% {
+    opacity: 1;
+    transform: perspective(1200px) rotateX(var(--scene-tilt-x)) rotateY(var(--scene-tilt-y));
+  }
+}
+
 .cat-home-room-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
+  background-color: #f5d0e4;
+  background-image: url("/images/cat-home-backdrop.png");
+  background-position: center center;
+  background-size: cover;
+  background-repeat: no-repeat;
 }
 
-.cat-home-scene[data-room="sunny_nook"] .cat-home-room-bg {
-  background: linear-gradient(165deg, #ffe8b8 0%, #ffd4e8 55%, #f8c4dc 100%);
+.cat-home-scene--immersive .cat-home-room-bg {
+  transform: scale(1.07);
+  will-change: transform;
 }
 
-.cat-home-scene[data-room="starry_night"] .cat-home-room-bg {
-  background: linear-gradient(165deg, #1f2a44 0%, #4a3d7a 45%, #8b6cb8 100%);
+.cat-home-scene-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
 }
 
-.cat-home-scene[data-room="garden_view"] .cat-home-room-bg {
-  background: linear-gradient(165deg, #d8f2c8 0%, #b8e8c8 45%, #f5d8c8 100%);
+.cat-home-ambient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(18px);
+  opacity: 0.55;
+  animation: catHomeOrbDrift 14s ease-in-out infinite;
+}
+
+.cat-home-ambient-orb--1 {
+  top: 8%;
+  left: 12%;
+  width: 7rem;
+  height: 7rem;
+  background: rgba(255, 214, 232, 0.55);
+}
+
+.cat-home-ambient-orb--2 {
+  top: 18%;
+  right: 10%;
+  width: 5.5rem;
+  height: 5.5rem;
+  background: rgba(255, 248, 210, 0.42);
+  animation-delay: -4s;
+}
+
+.cat-home-ambient-orb--3 {
+  bottom: 28%;
+  left: 38%;
+  width: 6rem;
+  height: 6rem;
+  background: rgba(208, 112, 152, 0.35);
+  animation-delay: -8s;
+}
+
+@keyframes catHomeOrbDrift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(12px, -8px, 0) scale(1.08);
+  }
+}
+
+.cat-home-ambient-dust {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.55);
+  animation: catHomeDustFloat 9s linear infinite;
+}
+
+.cat-home-ambient-dust--1 {
+  top: 22%;
+  left: 18%;
+}
+
+.cat-home-ambient-dust--2 {
+  top: 34%;
+  left: 72%;
+  animation-delay: -2.5s;
+  animation-duration: 11s;
+}
+
+.cat-home-ambient-dust--3 {
+  top: 48%;
+  left: 44%;
+  animation-delay: -5s;
+  animation-duration: 13s;
+}
+
+.cat-home-ambient-dust--4 {
+  top: 62%;
+  left: 28%;
+  animation-delay: -7s;
+  animation-duration: 10s;
+}
+
+@keyframes catHomeDustFloat {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.6);
+  }
+
+  15% {
+    opacity: 0.85;
+  }
+
+  85% {
+    opacity: 0.65;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(18px, -42px, 0) scale(1.1);
+  }
+}
+
+.cat-home-scene-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 88% 78% at 50% 42%,
+    transparent 42%,
+    rgba(42, 31, 40, 0.28) 100%
+  );
+}
+
+.cat-home-scene-floor-shadow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38%;
+  z-index: 6;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(42, 31, 40, 0.08) 38%,
+    rgba(42, 31, 40, 0.42) 100%
+  );
+}
+
+.cat-home-scene[data-room="starry_night"] .cat-home-room-bg::after,
+.cat-home-scene[data-room="garden_view"] .cat-home-room-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cat-home-scene[data-room="starry_night"] .cat-home-room-bg::after {
+  background: linear-gradient(
+    165deg,
+    rgba(31, 42, 68, 0.58) 0%,
+    rgba(74, 61, 122, 0.42) 55%,
+    rgba(139, 108, 184, 0.35) 100%
+  );
+}
+
+.cat-home-scene[data-room="garden_view"] .cat-home-room-bg::after {
+  background: linear-gradient(
+    165deg,
+    rgba(184, 232, 200, 0.42) 0%,
+    rgba(152, 210, 168, 0.28) 45%,
+    rgba(245, 216, 200, 0.32) 100%
+  );
+}
+
+.cat-home-equipped-strip {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.65rem;
+  right: 0.65rem;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.cat-home-scene--immersive .cat-home-equipped-strip {
+  top: 0.75rem;
+  left: auto;
+  right: 0.75rem;
+  justify-content: flex-end;
+  max-width: 55%;
+}
+
+.cat-home-equipped-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(208, 112, 152, 0.35);
+  box-shadow: 0 4px 12px rgba(42, 31, 40, 0.12);
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--ink);
+  animation: catHomeEquippedPop 0.45s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.cat-home-scene--immersive .cat-home-equipped-chip {
+  background: rgba(42, 31, 40, 0.62);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(42, 31, 40, 0.28);
+}
+
+.cat-home-equipped-chip-emoji {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.cat-home-equipped-chip-label {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes catHomeEquippedPop {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cat-home-decor-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.cat-home-decor-layer--accent {
+  z-index: 4;
+}
+
+.cat-home-decor-layer .cat-home-prop {
+  pointer-events: auto;
 }
 
 .cat-home-prop {
@@ -2638,17 +3230,66 @@ footer p {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.15rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  gap: 0.2rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(208, 112, 152, 0.28);
+  box-shadow: 0 4px 14px rgba(42, 31, 40, 0.14);
+}
+
+.cat-home-scene--immersive .cat-home-prop {
+  padding: 0.15rem;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.cat-home-scene--immersive .cat-home-interactive {
+  position: relative;
+  border: none;
+  background: transparent;
+}
+
+.cat-home-scene--immersive .cat-home-interactive:hover,
+.cat-home-scene--immersive .cat-home-interactive:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  transform: translateY(-4px) scale(1.08);
+}
+
+.cat-home-scene--immersive .cat-home-interactive::before {
+  content: "";
+  position: absolute;
+  inset: -0.55rem;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  animation: catHomePropPulse 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes catHomePropPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
 }
 
 .cat-home-prop-emoji {
-  font-size: 1.8rem;
+  font-size: 2.35rem;
   line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(42, 31, 40, 0.12));
+}
+
+.cat-home-scene--immersive .cat-home-prop-emoji {
+  filter: drop-shadow(0 4px 10px rgba(42, 31, 40, 0.35));
 }
 
 .cat-home-prop-label {
@@ -2660,13 +3301,13 @@ footer p {
 }
 
 .cat-home-rug {
-  left: 8%;
-  bottom: 12%;
+  left: 4%;
+  bottom: 18%;
 }
 
 .cat-home-bed {
-  right: 8%;
-  bottom: 14%;
+  right: 4%;
+  bottom: 20%;
 }
 
 .cat-home-toy {
@@ -2697,7 +3338,8 @@ footer p {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 2.85rem;
+  padding-top: 3.35rem;
+  gap: 0.2rem;
 }
 
 .cat-home-pet-bubble {
@@ -2706,17 +3348,43 @@ footer p {
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
-  padding: 0.55rem 1.15rem;
+  padding: 0.5rem 1.2rem;
   border-radius: 999px;
   background: #fff;
   border: 2px solid var(--pink-dark);
-  font-size: 0.84rem;
-  font-weight: 800;
+  font-size: 0.95rem;
+  font-weight: 900;
   color: var(--ink);
   text-align: center;
   white-space: nowrap;
+  max-width: min(12rem, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
   box-shadow: 0 4px 12px rgba(42, 31, 40, 0.12);
   z-index: 1;
+}
+
+.cat-home-pet-role-chip {
+  margin: 0;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(208, 112, 152, 0.28);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--pink-dark);
+  white-space: nowrap;
+}
+
+.cat-home-pet-color-hint {
+  margin: 0.1rem 0 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
 }
 
 .cat-home-pet-bubble::before {
@@ -2756,11 +3424,22 @@ footer p {
   gap: 0.5rem;
 }
 
+.cat-home-scene-hud {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 8;
+  display: grid;
+  gap: 0.35rem;
+  pointer-events: none;
+}
+
 .cat-home-mood {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: 1.85rem;
   z-index: 3;
   margin: 0;
   padding: 0.65rem 0.85rem;
@@ -2770,9 +3449,563 @@ footer p {
   text-align: center;
 }
 
+.cat-home-scene--immersive .cat-home-scene-hud .cat-home-mood {
+  position: static;
+  margin: 0;
+  padding: 0.55rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(42, 31, 40, 0.68);
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(42, 31, 40, 0.28);
+}
+
+.cat-home-playdate-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  background: rgba(255, 255, 255, 0.55);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
+
+.cat-home-scene--immersive .cat-home-scene-hud .cat-home-playdate-hint {
+  position: static;
+  margin: 0;
+  padding: 0.38rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(42, 31, 40, 0.52);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.cat-home-cats-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.cat-home-cats-layer .cat-home-playdate-cat {
+  pointer-events: auto;
+}
+
+.cat-home-playdate-cat {
+  cursor: var(--paw-cursor);
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1),
+    filter 0.2s ease,
+    box-shadow 0.2s ease;
+  border-radius: 18px;
+  outline: none;
+}
+
+.cat-home-scene--immersive .cat-home-playdate-cat .pet-cinder-stage {
+  animation: catHomeIdleBob 3.8s ease-in-out infinite;
+}
+
+.cat-home-scene--immersive .cat-home-playdate-cat.is-playdate-react .pet-cinder-stage,
+.cat-home-scene--immersive .cat-home-playdate-cat.is-scene-tap .pet-cinder-stage {
+  animation: none;
+}
+
+@keyframes catHomeIdleBob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.cat-home-scene--immersive .cat-home-play-as .cat-home-pet-stack::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0.15rem;
+  transform: translateX(-50%);
+  width: 72%;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 214, 232, 0.75) 0%,
+    rgba(208, 112, 152, 0.35) 55%,
+    transparent 78%
+  );
+  filter: blur(2px);
+  z-index: 0;
+  animation: catHomeSpotlightPulse 2.8s ease-in-out infinite;
+}
+
+@keyframes catHomeSpotlightPulse {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: translateX(-50%) scaleX(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scaleX(1.06);
+  }
+}
+
+.cat-home-playdate-cat.is-scene-tap,
+.cat-home-interactive.is-scene-tap {
+  animation: catHomeSceneTap 0.42s ease;
+}
+
+@keyframes catHomeSceneTap {
+  0% {
+    filter: brightness(1);
+  }
+
+  35% {
+    filter: brightness(1.12) saturate(1.1);
+  }
+
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cat-home-scene--immersive {
+    animation: none;
+    transform: none;
+  }
+
+  .cat-home-scene--immersive .cat-home-room-bg {
+    transform: scale(1.04);
+  }
+
+  .cat-home-ambient-orb,
+  .cat-home-ambient-dust,
+  .cat-home-scene--immersive .cat-home-playdate-cat .pet-cinder-stage,
+  .cat-home-scene--immersive .cat-home-play-as .cat-home-pet-stack::after,
+  .cat-home-scene--immersive .cat-home-interactive::before,
+  .playdate-menu-panel {
+    animation: none !important;
+  }
+}
+
+.cat-home-playdate-cat:hover,
+.cat-home-playdate-cat:focus-visible {
+  transform: translateY(-4px) scale(1.04);
+  filter: brightness(1.05) saturate(1.08);
+  box-shadow: 0 10px 22px rgba(208, 112, 152, 0.22);
+}
+
+.cat-home-playdate-cat.is-playdate-react {
+  animation: cat-playdate-bounce 0.72s cubic-bezier(0.34, 1.35, 0.64, 1);
+}
+
+@keyframes cat-playdate-bounce {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    transform: translateY(-10px) scale(1.08) rotate(-2deg);
+  }
+  55% {
+    transform: translateY(-3px) scale(1.03) rotate(1deg);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cat-home-pet-slot-0.is-playdate-react {
+  animation-name: cat-playdate-bounce-center;
+}
+
+@keyframes cat-playdate-bounce-center {
+  0% {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+  30% {
+    transform: translateX(-50%) translateY(-10px) scale(1.08) rotate(-2deg);
+  }
+  55% {
+    transform: translateX(-50%) translateY(-3px) scale(1.03) rotate(1deg);
+  }
+  100% {
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+
+.cat-home-friendship-badge {
+  margin: 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(208, 112, 152, 0.35);
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--pink-dark);
+  white-space: nowrap;
+}
+
+.cat-home-play-as .cat-home-friendship-badge {
+  display: none;
+}
+
+.cat-home-friendships-panel {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem 1rem;
+  border-radius: 16px;
+  border: 1px solid rgba(208, 112, 152, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(208, 112, 152, 0.08);
+}
+
+.cat-home-playdate-scene + .cat-home-friendships-panel {
+  border-color: rgba(42, 31, 40, 0.18);
+  background: linear-gradient(165deg, rgba(255, 250, 253, 0.96) 0%, rgba(255, 236, 245, 0.92) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 8px 22px rgba(42, 31, 40, 0.1);
+}
+
+.cat-home-friendships-panel--empty {
+  text-align: center;
+}
+
+.cat-home-friendships-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.cat-home-friendships-header {
+  margin-bottom: 0.75rem;
+}
+
+.cat-home-friendships-header h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  color: var(--pink-dark);
+}
+
+.cat-home-friendships-lead {
+  margin: 0;
+}
+
+.cat-home-friendships-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.cat-home-friendship-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.cat-home-friendship-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+}
+
+.cat-home-friendship-name {
+  font-weight: 800;
+  color: var(--text);
+}
+
+.cat-home-friendship-role {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.cat-home-friendship-meter {
+  position: relative;
+  height: 0.55rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(208, 112, 152, 0.14);
+  border: 1px solid rgba(208, 112, 152, 0.2);
+}
+
+.cat-home-friendship-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f0a8c8 0%, #d07098 55%, #b85a82 100%);
+  transition: width 0.35s ease;
+}
+
+.cat-home-friendship-row[data-score-tier="negative"] .cat-home-friendship-meter-fill {
+  background: linear-gradient(90deg, #c9b8c0 0%, #9a7a88 100%);
+}
+
+.cat-home-friendship-tier {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--pink-dark);
+}
+
+.cat-home-pet-slot-0 {
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+}
+
+.cat-home-pet-slot-0:hover,
+.cat-home-pet-slot-0:focus-visible {
+  transform: translateX(-50%) translateY(-4px) scale(1.04);
+}
+
+.cat-home-pet-slot-1 {
+  left: 14%;
+  bottom: 14%;
+}
+
+.cat-home-pet-slot-2 {
+  left: 68%;
+  bottom: 14%;
+}
+
+.cat-home-pet-slot-3 {
+  left: 32%;
+  bottom: 20%;
+}
+
+.cat-home-pet-slot-4 {
+  left: 54%;
+  bottom: 20%;
+}
+
+.cat-home-pet-slot-5 {
+  left: 8%;
+  bottom: 24%;
+}
+
+.cat-home-pet-slot-6 {
+  left: 76%;
+  bottom: 24%;
+}
+
+.pet-cinder-stage-compact {
+  --pet-stage-size: min(8.5rem, 30vw);
+  --pet-image-scale: 1.05;
+}
+
+.cat-home-interactive {
+  cursor: var(--paw-cursor);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  color: inherit;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1),
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.cat-home-interactive:hover,
+.cat-home-interactive:focus-visible {
+  transform: translateY(-3px) scale(1.06);
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(208, 112, 152, 0.55);
+  box-shadow: 0 8px 18px rgba(208, 112, 152, 0.2);
+  outline: none;
+}
+
+.cat-home-prop-hint {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pink-accent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.cat-home-interactive:hover .cat-home-prop-hint,
+.cat-home-interactive:focus-visible .cat-home-prop-hint {
+  opacity: 1;
+}
+
+.playdate-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(18, 12, 20, 0.58);
+  backdrop-filter: blur(6px);
+}
+
+.playdate-menu[hidden] {
+  display: none !important;
+}
+
+.playdate-menu-panel {
+  width: min(24rem, 100%);
+  max-height: min(80vh, 34rem);
+  overflow: auto;
+  padding: 1rem 1rem 1.1rem;
+  border-radius: 20px;
+  background: linear-gradient(165deg, #fffafd 0%, #fff0f7 100%);
+  border: 2px solid rgba(208, 112, 152, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 22px 48px rgba(42, 31, 40, 0.35);
+  animation: catHomeMenuPop 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes catHomeMenuPop {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.playdate-menu-close {
+  float: right;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--pink-dark);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: var(--paw-cursor);
+}
+
+.playdate-menu-panel h3 {
+  margin: 0 2rem 0.35rem 0;
+  font-size: 1.05rem;
+  color: var(--pink-dark);
+}
+
+.playdate-menu-actions,
+.playdate-menu-picker {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.playdate-action-btn,
+.playdate-picker-btn {
+  width: 100%;
+  text-align: left;
+}
+
+.playdate-action-btn-primary {
+  background: linear-gradient(165deg, var(--pink-dark) 0%, #c85a88 100%);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 800;
+}
+
+.playdate-action-btn-primary:hover,
+.playdate-action-btn-primary:focus-visible {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.playdate-picker-btn {
+  border-radius: 14px;
+  border: 1.5px solid rgba(208, 112, 152, 0.35);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: var(--paw-cursor);
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.playdate-picker-btn:hover,
+.playdate-picker-btn:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(255, 228, 240, 0.95);
+  border-color: rgba(208, 112, 152, 0.65);
+  outline: none;
+}
+
+.playdate-toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%) translateY(12px);
+  z-index: 1300;
+  max-width: min(34rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 999px;
+  background: rgba(42, 31, 40, 0.9);
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transition:
+    opacity 0.28s ease,
+    transform 0.28s ease;
+}
+
+.playdate-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.playdate-toast.is-hiding {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+.playdate-toast.is-positive {
+  background: linear-gradient(165deg, rgba(208, 112, 152, 0.95) 0%, rgba(160, 72, 112, 0.95) 100%);
+}
+
+.playdate-toast[hidden] {
+  display: none !important;
+}
+
+body.playdate-menu-open {
+  overflow: hidden;
+}
+
 .cat-home-outfit-shop,
-.cat-home-tap-boost-shop,
-.cat-home-petting-bonus-shop {
+.cat-home-decor-shop {
   min-width: 0;
   max-width: 100%;
 }
@@ -2833,23 +4066,23 @@ footer p {
   padding: 0.55rem 0.7rem;
 }
 
-.cat-home-tap-boost-shop {
+.cat-home-decor-shop {
   margin-top: 1rem;
   padding-top: 0.95rem;
   border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
-.cat-home-tap-boost-shop h2 {
+.cat-home-decor-shop h2 {
   margin: 0 0 0.35rem;
   font-size: 1.05rem;
 }
 
-.cat-home-tap-boost-shop .field-hint {
+.cat-home-decor-shop .field-hint {
   margin: 0 0 0.65rem;
   font-size: 0.82rem;
 }
 
-.cat-home-tap-boost-slider {
+.cat-home-decor-slider {
   display: flex;
   gap: 0.75rem;
   width: 100%;
@@ -2864,224 +4097,28 @@ footer p {
   overscroll-behavior-x: contain;
 }
 
-.tap-boost-card {
-  background: var(--pink-surface);
-  border: 1px solid rgba(0, 0, 0, 0.14);
-  border-radius: 18px;
-  padding: 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  box-shadow: var(--shadow-sm);
-}
-
-.tap-boost-card-slider {
+.decor-card-slider {
   flex: 0 0 min(10.5rem, 72vw);
   scroll-snap-align: start;
   padding: 0.85rem;
   gap: 0.35rem;
 }
 
-.tap-boost-card.owned {
-  border-color: rgba(47, 107, 63, 0.35);
-  background: rgba(220, 245, 228, 0.55);
+.decor-card-slider .decor-emoji {
+  font-size: 1.65rem;
 }
 
-.tap-boost-card.equipped {
-  border-color: rgba(208, 112, 152, 0.65);
-  box-shadow: var(--shadow-sm), 0 0 0 2px rgba(208, 112, 152, 0.28);
+.decor-card-slider h3 {
+  font-size: 0.92rem;
 }
 
-.tap-boost-emoji {
-  font-size: 2rem;
-  line-height: 1;
-}
-
-.tap-boost-card-slider h3 {
-  font-size: 0.95rem;
-  margin: 0;
-}
-
-.tap-boost-reward {
-  margin: 0;
-  font-size: 0.82rem;
-  font-weight: 800;
-  color: var(--pink-dark);
-}
-
-.tap-boost-price {
-  margin: 0;
-  font-weight: 800;
-  font-size: 0.88rem;
-}
-
-.tap-boost-actions {
-  margin-top: auto;
-}
-
-.tap-boost-btn {
-  width: 100%;
-  font-size: 0.82rem;
-  padding: 0.55rem 0.75rem;
-}
-
-.tap-boost-badge {
-  display: inline-block;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #2f6b3f;
-}
-
-.cat-home-petting-bonus-shop {
-  margin-top: 1rem;
-  padding-top: 0.95rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.1);
-}
-
-.cat-home-petting-bonus-shop h2 {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-}
-
-.cat-home-petting-bonus-shop .field-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.82rem;
-}
-
-.cat-home-petting-bonus-slider {
-  display: flex;
-  gap: 0.75rem;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0.15rem 0.1rem 0.65rem;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  overscroll-behavior-x: contain;
-}
-
-.petting-bonus-card {
-  background: linear-gradient(160deg, rgba(255, 244, 214, 0.9), rgba(255, 236, 244, 0.95));
-  border: 1px solid rgba(208, 112, 152, 0.28);
-  border-radius: 18px;
-  padding: 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  box-shadow: var(--shadow-sm);
-}
-
-.petting-bonus-card-slider {
-  flex: 0 0 min(11.5rem, 74vw);
-  scroll-snap-align: start;
-  padding: 0.85rem;
-  gap: 0.35rem;
-}
-
-.petting-bonus-card.owned {
-  border-color: rgba(47, 107, 63, 0.35);
-}
-
-.petting-bonus-card.active {
-  border-color: rgba(208, 112, 152, 0.75);
-  box-shadow: var(--shadow-sm), 0 0 0 2px rgba(208, 112, 152, 0.28);
-  animation: pettingBonusPulse 1.6s ease-in-out infinite;
-}
-
-@keyframes pettingBonusPulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-
-  50% {
-    transform: scale(1.02);
-  }
-}
-
-.petting-bonus-emoji {
-  font-size: 2rem;
-  line-height: 1;
-}
-
-.petting-bonus-card-slider h3 {
-  font-size: 0.95rem;
-  margin: 0;
-}
-
-.petting-bonus-effect {
-  margin: 0;
+.decor-card-slider .decor-price {
   font-size: 0.8rem;
-  font-weight: 800;
-  color: var(--pink-dark);
-  line-height: 1.35;
 }
 
-.petting-bonus-price {
-  margin: 0;
-  font-weight: 800;
-  font-size: 0.88rem;
-}
-
-.petting-bonus-actions {
-  margin-top: auto;
-}
-
-.petting-bonus-btn {
-  width: 100%;
-  font-size: 0.82rem;
-  padding: 0.55rem 0.75rem;
-}
-
-.petting-bonus-badge {
-  display: inline-block;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--pink-accent);
-}
-
-.petting-bonus-active {
-  margin: 0 0 0.65rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(255, 232, 170, 0.95), rgba(255, 214, 230, 0.95));
-  border: 2px solid rgba(208, 112, 152, 0.45);
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem;
-  max-width: 100%;
-  font-size: 0.86rem;
-  font-weight: 700;
-  color: var(--pink-dark);
-  line-height: 1.35;
-}
-
-.petting-bonus-active-copy {
-  min-width: 0;
-  flex: 1 1 10rem;
-}
-
-.petting-bonus-active-emoji {
-  font-size: 1.45rem;
-  line-height: 1;
-}
-
-.petting-bonus-countdown {
-  font-weight: 900;
-  color: var(--pink-accent);
-}
-
-.cat-home-shop h2 {
-  margin-top: 0;
+.decor-card-slider .decor-btn {
+  font-size: 0.76rem;
+  padding: 0.55rem 0.7rem;
 }
 
 .decor-grid {
@@ -3361,6 +4398,19 @@ html:has(.cat-home-body) {
   overflow-x: hidden;
   max-width: 100%;
   width: 100%;
+  background:
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(74, 45, 66, 0.35) 0%, transparent 55%),
+    linear-gradient(180deg, #f8d4e6 0%, #fac8dd 42%, #ffe8f0 100%);
+}
+
+.cat-home-game-stage .cat-home-outfit-shop,
+.cat-home-game-stage .cat-home-decor-shop {
+  margin-top: 1.15rem;
+  padding: 0.95rem 1rem 0.25rem;
+  border-radius: 18px;
+  border: 1px solid rgba(208, 112, 152, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 22px rgba(42, 31, 40, 0.08);
 }
 
 .cat-home-body .dashboard-topbar {
@@ -3418,9 +4468,18 @@ html:has(.cat-home-body) {
     text-align: center;
   }
 
-  .cat-home-stage-card,
-  .cat-home-shop {
+  .cat-home-stage-card {
     padding: 0.85rem;
+  }
+
+  .cat-home-play-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .cat-home-pet-switcher {
+    justify-content: center;
   }
 
   .cat-home-body .dashboard-topbar {
@@ -3442,13 +4501,60 @@ html:has(.cat-home-body) {
   }
 
   .cat-home-scene {
-    min-height: 21rem;
+    min-height: 18rem;
+    aspect-ratio: 16 / 9;
     max-width: 100%;
   }
 
-  .cat-home-pet-stage {
+  .cat-home-scene--immersive {
+    min-height: 20rem;
+    max-height: none;
+  }
+
+  .cat-home-scene--immersive .cat-home-equipped-strip {
+    max-width: 100%;
+    left: 0.55rem;
+    right: 0.55rem;
+    justify-content: center;
+  }
+
+  .cat-home-pet-stage,
+  .cat-home-playdate-cat {
     bottom: 10%;
     --pet-stage-size: min(11rem, 42vw);
+  }
+
+  .cat-home-pet-slot-0 {
+    left: 50%;
+    bottom: 10%;
+  }
+
+  .cat-home-pet-slot-1 {
+    left: 8%;
+    bottom: 12%;
+  }
+
+  .cat-home-pet-slot-2 {
+    left: 62%;
+    bottom: 12%;
+  }
+
+  .cat-home-pet-slot-3 {
+    left: 24%;
+    bottom: 18%;
+  }
+
+  .cat-home-pet-slot-4 {
+    left: 48%;
+    bottom: 18%;
+  }
+
+  .pet-cinder-stage-compact {
+    --pet-stage-size: min(7.5rem, 28vw);
+  }
+
+  .cat-home-friendship-badge {
+    font-size: 0.6rem;
   }
 
   .cat-home-pet-stack {
@@ -3466,8 +4572,8 @@ html:has(.cat-home-body) {
     display: none;
   }
 
-  .decor-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .cat-home-decor-slider .decor-card-slider {
+    flex-basis: min(9.5rem, 78vw);
   }
 }
 
@@ -3478,8 +4584,7 @@ html:has(.cat-home-body) {
   }
 
   .cat-home-outfit-slider .outfit-card-slider,
-  .tap-boost-card-slider,
-  .petting-bonus-card-slider {
+  .cat-home-decor-slider .decor-card-slider {
     flex-basis: min(9.5rem, 78vw);
   }
 }
@@ -3791,6 +4896,33 @@ html:has(.cat-home-body) {
   color: var(--muted);
 }
 
+.task-health-watch-link-wrap {
+  margin: 0.45rem 0 0;
+}
+
+.task-health-watch-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1.5px solid #f3b8d4;
+  background: linear-gradient(180deg, #fff5fa 0%, #ffe8f3 100%);
+  color: var(--pink-dark);
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(232, 53, 122, 0.08);
+}
+
+.task-health-watch-link:hover,
+.task-health-watch-link:focus-visible {
+  background: #ffe8f3;
+  border-color: var(--pink-accent);
+  color: #c2185b;
+  text-decoration: none;
+}
+
 .task-time-btn {
   display: inline-flex;
   align-items: center;
@@ -3935,6 +5067,11 @@ html:has(.cat-home-body) {
   font-weight: 800;
 }
 
+.calendar-day.has-birthday {
+  background: #ffe3f1;
+  font-weight: 800;
+}
+
 .calendar-day.has-event::after,
 .calendar-day.has-task::after {
   content: "";
@@ -3944,6 +5081,15 @@ html:has(.cat-home-body) {
   border-radius: 50%;
   position: absolute;
   margin-top: 1.1rem;
+}
+
+.calendar-day.has-birthday::after {
+  content: "🎂";
+  font-size: 0.62rem;
+  line-height: 1;
+  position: absolute;
+  margin-top: 1rem;
+  right: 0.2rem;
 }
 
 .calendar-day.has-task {
@@ -4015,6 +5161,18 @@ html:has(.cat-home-body) {
   padding: 0.4rem 0.65rem;
   background: transparent;
   border-color: transparent;
+}
+
+.calendar-schedule-item--birthday {
+  grid-template-columns: 2.2rem minmax(0, 1fr);
+  padding: 0.55rem 0.75rem;
+  background: #fff0f7;
+  border-color: #f3b8d4;
+}
+
+.calendar-schedule-birthday-icon {
+  font-size: 1.1rem;
+  text-align: center;
 }
 
 .calendar-schedule-item.is-done {
@@ -7604,13 +8762,46 @@ body.modal-open:has(
   margin: 0.55rem 0 0.35rem;
 }
 
+.social-post-media-preview-shell {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border-radius: 18px;
+  border: 2px dashed rgba(232, 53, 122, 0.28);
+  background: linear-gradient(180deg, #fff8fc 0%, #fff2f8 100%);
+}
+
+.social-post-media-preview-shell.is-active {
+  border-style: solid;
+  border-color: rgba(232, 53, 122, 0.42);
+  box-shadow: 0 10px 24px rgba(232, 53, 122, 0.1);
+}
+
+.social-post-media-preview-label {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--pink-dark);
+  text-align: center;
+}
+
 .social-post-media-preview {
-  margin-top: 0.75rem;
+  margin-top: 0;
+}
+
+.social-post-media-preview.is-active,
+.social-post-media-preview-shell.is-active .social-post-media-preview {
+  display: block;
 }
 
 .social-post-media-preview .pet-photo-framer-stage--rect {
+  width: 100% !important;
+  max-width: 21.25rem;
   margin-left: auto;
   margin-right: auto;
+}
+
+.social-post-media-preview .pet-photo-framer {
+  margin-top: 0;
 }
 
 .social-post-video-editor {
@@ -9489,6 +10680,16 @@ body.modal-open:has(
   .shelter-search-paw,
   .shelter-search-sun {
     animation: none;
+  }
+
+  .cat-card-flip-viewport::before,
+  .cat-card-flip-viewport::after {
+    display: none;
+  }
+
+  .cat-card-flip-face {
+    transition: none;
+    animation: none !important;
   }
 }
 

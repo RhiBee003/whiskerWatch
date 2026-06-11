@@ -1017,7 +1017,7 @@ pub fn visible_calendar_events_for_viewer(
                 ));
             }
             events.extend(crate::generate_birthday_calendar_events_for_snapshot(
-                &snapshot, today, horizon,
+                &snapshot, today,
             ));
             events.extend(crate::generate_daily_care_calendar_events_for_snapshot(
                 &snapshot, today, horizon,

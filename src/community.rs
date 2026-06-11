@@ -19,7 +19,6 @@ pub struct PublicCatCard {
     pub pet_name: String,
     pub pet_breed: String,
     pub pet_color: String,
-    pub parent_level: u32,
     pub care_streak_days: u32,
     pub pet_photo_url: Option<String>,
     pub pet_video_url: Option<String>,
@@ -118,7 +117,6 @@ pub fn collect_public_cat_cards(
                 pet_name: snapshot.pet_name.clone(),
                 pet_breed: snapshot.pet_breed.clone(),
                 pet_color: snapshot.pet_color.clone(),
-                parent_level: profile.parent_level,
                 care_streak_days: profile.care_streak_days,
                 pet_photo_url: snapshot.pet_photo_url.clone(),
                 pet_video_url: snapshot.pet_video_url.clone(),
@@ -137,9 +135,8 @@ pub fn collect_public_cat_cards(
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => right
-                .parent_level
-                .cmp(&left.parent_level)
-                .then(right.care_streak_days.cmp(&left.care_streak_days))
+                .care_streak_days
+                .cmp(&left.care_streak_days)
                 .then(left.pet_name.cmp(&right.pet_name)),
         }
     });
@@ -293,15 +290,6 @@ pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicC
         String::new()
     };
 
-    let level_line = if show_personal {
-        format!(
-            r#"<p class="community-cat-level">Parent level {level}</p>"#,
-            level = card.parent_level,
-        )
-    } else {
-        String::new()
-    };
-
     let streak_line = if show_personal && !card.deceased && card.care_streak_days >= 3 {
         format!(
             r#"<p class="community-cat-streak">💗 {days}-day care streak</p>"#,
@@ -357,7 +345,6 @@ pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicC
     {breed_line}
     {color_line}
     {memorial_line}
-    {level_line}
     {streak_line}
     {outfit_line}
     {parent_line}
@@ -378,7 +365,6 @@ pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicC
         memorial_line = memorial_line,
         breed_line = breed_line,
         color_line = color_line,
-        level_line = level_line,
         streak_line = streak_line,
         outfit_line = outfit_line,
         parent_line = parent_line,

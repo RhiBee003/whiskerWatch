@@ -33,6 +33,7 @@ mod email_delivery;
 mod memorial;
 mod entitlements;
 mod onboarding_emails;
+mod playdates;
 mod push_notifications;
 mod share_cards;
 mod sharing;
@@ -376,8 +377,6 @@ const MAX_SOCIAL_PHOTO_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SOCIAL_VIDEO_BYTES: usize = 20 * 1024 * 1024;
 const PET_VIDEO_CLIP_MIN_SECONDS: f32 = 3.0;
 const PET_VIDEO_CLIP_MAX_SECONDS: f32 = 6.0;
-const BASE_PET_PET_REWARD: u32 = 1;
-
 #[derive(Serialize, Deserialize, Clone)]
 struct ProfileActivity {
     message: String,
@@ -466,16 +465,6 @@ struct UserProfile {
     owned_decor: Vec<String>,
     #[serde(default = "default_equipped_decor")]
     equipped_decor: HashMap<String, String>,
-    #[serde(default = "default_owned_tap_boosts")]
-    owned_tap_boosts: Vec<String>,
-    #[serde(default = "default_equipped_tap_boost")]
-    equipped_tap_boost: String,
-    #[serde(default)]
-    petting_bonus_inventory: HashMap<String, u32>,
-    #[serde(default)]
-    active_petting_bonus: String,
-    #[serde(default)]
-    petting_bonus_expires_at: u64,
     #[serde(default)]
     owned_breed_guides: Vec<String>,
     #[serde(default)]
@@ -504,6 +493,8 @@ struct UserProfile {
     onboarding_emails_enabled: bool,
     #[serde(default)]
     onboarding_emails_sent: Vec<String>,
+    #[serde(default)]
+    cat_friendships: HashMap<String, i32>,
 }
 
 fn default_onboarding_emails_enabled() -> bool {
@@ -1182,23 +1173,6 @@ struct DecorCatalogItem {
     slot: &'static str,
 }
 
-struct TapBoostCatalogItem {
-    id: &'static str,
-    name: &'static str,
-    emoji: &'static str,
-    price: u32,
-    tap_reward: u32,
-}
-
-struct PettingBonusCatalogItem {
-    id: &'static str,
-    name: &'static str,
-    emoji: &'static str,
-    price: u32,
-    multiplier: u32,
-    duration_secs: u32,
-}
-
 const DECOR_CATALOG: [DecorCatalogItem; 10] = [
     DecorCatalogItem {
         id: "sunny_nook",
@@ -1269,71 +1243,6 @@ const DECOR_CATALOG: [DecorCatalogItem; 10] = [
         emoji: "🪴",
         price: 35,
         slot: "plant",
-    },
-];
-
-const TAP_BOOST_CATALOG: [TapBoostCatalogItem; 5] = [
-    TapBoostCatalogItem {
-        id: "basic_pets",
-        name: "Gentle Pets",
-        emoji: "🐾",
-        price: 0,
-        tap_reward: 1,
-    },
-    TapBoostCatalogItem {
-        id: "happy_taps",
-        name: "Happy Taps",
-        emoji: "😸",
-        price: 40,
-        tap_reward: 2,
-    },
-    TapBoostCatalogItem {
-        id: "super_scratcher",
-        name: "Super Scratcher",
-        emoji: "✨",
-        price: 75,
-        tap_reward: 3,
-    },
-    TapBoostCatalogItem {
-        id: "mega_cuddles",
-        name: "Mega Cuddles",
-        emoji: "💖",
-        price: 120,
-        tap_reward: 5,
-    },
-    TapBoostCatalogItem {
-        id: "legendary_love",
-        name: "Legendary Love",
-        emoji: "🌟",
-        price: 200,
-        tap_reward: 8,
-    },
-];
-
-const PETTING_BONUS_CATALOG: [PettingBonusCatalogItem; 3] = [
-    PettingBonusCatalogItem {
-        id: "purr_rush",
-        name: "Purr Rush",
-        emoji: "💨",
-        price: 30,
-        multiplier: 2,
-        duration_secs: 60,
-    },
-    PettingBonusCatalogItem {
-        id: "cuddle_frenzy",
-        name: "Cuddle Frenzy",
-        emoji: "🔥",
-        price: 75,
-        multiplier: 5,
-        duration_secs: 45,
-    },
-    PettingBonusCatalogItem {
-        id: "love_explosion",
-        name: "Love Explosion",
-        emoji: "💥",
-        price: 150,
-        multiplier: 10,
-        duration_secs: 60,
     },
 ];
 
@@ -1413,41 +1322,12 @@ struct DecorEquipForm {
     decor_id: String,
 }
 
-#[derive(Deserialize)]
-struct TapBoostBuyForm {
-    boost_id: String,
-    #[serde(default, rename = "return_to")]
-    _return_to: String,
-}
-
-#[derive(Deserialize)]
-struct TapBoostEquipForm {
-    boost_id: String,
-    #[serde(default, rename = "return_to")]
-    _return_to: String,
-}
-
-#[derive(Deserialize)]
-struct PettingBonusBuyForm {
-    bonus_id: String,
-    #[serde(default, rename = "return_to")]
-    _return_to: String,
-}
-
-#[derive(Deserialize)]
-struct PettingBonusActivateForm {
-    bonus_id: String,
-    #[serde(default, rename = "return_to")]
-    _return_to: String,
-}
-
 #[derive(Deserialize, Default)]
 struct CatHomeQuery {
     status: Option<String>,
     decor_id: Option<String>,
     outfit_id: Option<String>,
-    boost_id: Option<String>,
-    petting_bonus_id: Option<String>,
+    pet: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1473,8 +1353,6 @@ struct BreedGuideQuery {
 struct NeedPawPointsQuery {
     outfit_id: Option<String>,
     decor_id: Option<String>,
-    boost_id: Option<String>,
-    petting_bonus_id: Option<String>,
     return_to: Option<String>,
 }
 
@@ -1545,11 +1423,6 @@ struct TaskToggleResponse {
     activity_html: String,
     paw_points: u32,
     paw_from_tasks: u32,
-    xp_from_tasks: u32,
-    parent_level: u32,
-    parent_xp: u32,
-    level_progress: u32,
-    level_progress_text: String,
     calendar_data: serde_json::Value,
     show_vet_followup: bool,
     care_streak_days: u32,
@@ -1577,20 +1450,6 @@ struct ShopBuyResponse {
     item_kind: &'static str,
     item_id: String,
     equipped: bool,
-    #[serde(skip_serializing_if = "is_zero_u32")]
-    xp_earned: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_xp: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_level: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    level_progress: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    level_progress_text: Option<String>,
-}
-
-fn is_zero_u32(value: &u32) -> bool {
-    *value == 0
 }
 
 fn shop_buy_json_response(
@@ -1600,26 +1459,13 @@ fn shop_buy_json_response(
     item_kind: &'static str,
     item_id: &str,
     equipped: bool,
-    xp_earned: u32,
 ) -> Response {
     let code = if ok {
         StatusCode::OK
     } else {
         StatusCode::BAD_REQUEST
     };
-    let (paw_points, parent_xp, parent_level, level_progress, level_progress_text) =
-        if let Some(profile) = profile {
-            let (progress, progress_text) = level_progress(profile);
-            (
-                profile.paw_points,
-                Some(profile.parent_xp),
-                Some(profile.parent_level),
-                Some(progress),
-                Some(progress_text),
-            )
-        } else {
-            (0, None, None, None, None)
-        };
+    let paw_points = profile.map(|profile| profile.paw_points).unwrap_or(0);
     (
         code,
         Json(ShopBuyResponse {
@@ -1629,11 +1475,6 @@ fn shop_buy_json_response(
             item_kind,
             item_id: item_id.to_string(),
             equipped,
-            xp_earned,
-            parent_xp,
-            parent_level,
-            level_progress,
-            level_progress_text,
         }),
     )
         .into_response()
@@ -1644,18 +1485,6 @@ struct PetNameChangeResponse {
     ok: bool,
     status: &'static str,
     pet_name: String,
-}
-
-#[derive(Serialize)]
-struct PetPetResponse {
-    ok: bool,
-    paw_points: u32,
-    tap_reward: u32,
-    tap_boost_base: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tap_multiplier: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    petting_bonus_expires_at: Option<u64>,
 }
 
 fn group_form_fields(pairs: Vec<(String, String)>) -> HashMap<String, Vec<String>> {
@@ -2437,8 +2266,9 @@ fn daily_due_label(time_minutes: u16) -> String {
 
 fn sort_tasks_by_time(tasks: &mut [UserTask]) {
     tasks.sort_by(|left, right| {
-        left.time_minutes
-            .cmp(&right.time_minutes)
+        left.completed
+            .cmp(&right.completed)
+            .then_with(|| left.time_minutes.cmp(&right.time_minutes))
             .then_with(|| left.title.cmp(&right.title))
             .then_with(|| left.id.cmp(&right.id))
     });
@@ -2546,7 +2376,6 @@ fn remove_task(profile: &mut UserProfile, task_id: &str, pet_id: &str) -> Option
     let task = profile.tasks.remove(index);
     if task.completed {
         profile.paw_points = profile.paw_points.saturating_sub(task.reward);
-        reverse_parent_xp_for_reward(profile, task.reward);
     }
     if !is_custom_task(task_id) {
         dismiss_task(profile, pet_id, task_id);
@@ -2975,14 +2804,6 @@ fn default_equipped_decor() -> HashMap<String, String> {
     ])
 }
 
-fn default_owned_tap_boosts() -> Vec<String> {
-    vec!["basic_pets".to_string()]
-}
-
-fn default_equipped_tap_boost() -> String {
-    "basic_pets".to_string()
-}
-
 pub(crate) fn default_profile(email: &str) -> UserProfile {
     UserProfile {
         email: email.to_string(),
@@ -3031,11 +2852,6 @@ pub(crate) fn default_profile(email: &str) -> UserProfile {
         pending_purrfect_idea_ids: vec![],
         owned_decor: default_owned_decor(),
         equipped_decor: default_equipped_decor(),
-        owned_tap_boosts: default_owned_tap_boosts(),
-        equipped_tap_boost: default_equipped_tap_boost(),
-        petting_bonus_inventory: HashMap::new(),
-        active_petting_bonus: String::new(),
-        petting_bonus_expires_at: 0,
         owned_breed_guides: Vec::new(),
         premium_unlocked: false,
         additional_pets: Vec::new(),
@@ -3050,6 +2866,7 @@ pub(crate) fn default_profile(email: &str) -> UserProfile {
         notification_sent_dates: HashMap::new(),
         onboarding_emails_enabled: true,
         onboarding_emails_sent: Vec::new(),
+        cat_friendships: HashMap::new(),
     }
 }
 
@@ -3465,7 +3282,7 @@ fn render_pet_avatar(profile: &UserProfile) -> String {
     let pet_id = escape_html_attr(active_pet_id(profile));
     let pet_id_label = escape_html(&pet_stage_id_label(profile, active_pet_id(profile)));
     format!(
-        r#"<div class="pet-cinder-stage" id="cinder-pet-stage" data-pet-name="{display_name}" data-pet-id="{pet_id}">
+        r#"<div class="pet-cinder-stage" data-cinder-stage="pet" data-pet-name="{display_name}" data-pet-id="{pet_id}">
       <p class="pet-cinder-stage-badge" aria-hidden="true">Official Pet ID · {pet_id_label}</p>
       <p class="cinder-pet-label">{display_name}</p>
       <div class="cinder-pet-image-wrap">
@@ -3481,14 +3298,14 @@ fn render_pet_avatar(profile: &UserProfile) -> String {
     )
 }
 
-async fn save_profile(
+pub(crate) async fn save_profile(
     state: &AppState,
     profile: &UserProfile,
 ) -> Result<(), storage::StorageError> {
     state.storage.save_profile(profile)
 }
 
-async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
+pub(crate) async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
     let mut profile = if let Ok(Some(mut profile)) = state.storage.load_profile(email) {
         profile.email = email.to_string();
         profile
@@ -3521,7 +3338,7 @@ async fn get_or_create_profile(state: &AppState, email: &str) -> UserProfile {
         let _ = save_profile(state, &profile).await;
     }
 
-    if ensure_tap_boost_state(&mut profile) {
+    if ensure_decor_state(&mut profile) {
         let _ = save_profile(state, &profile).await;
     }
 
@@ -4119,60 +3936,6 @@ pub(crate) fn push_activity(profile: &mut UserProfile, message: &str) {
     }
 }
 
-const XP_PER_LEVEL: u32 = 100;
-
-fn xp_for_task_reward(reward: u32) -> u32 {
-    std::cmp::max(1, (reward * 3 + 1) / 4)
-}
-
-pub fn xp_for_purchase(spent: u32) -> u32 {
-    std::cmp::min(15, std::cmp::max(1, spent / 10))
-}
-
-pub fn xp_for_points_package(points: u32) -> u32 {
-    std::cmp::min(15, std::cmp::max(1, points / 50))
-}
-
-pub fn award_parent_xp(profile: &mut UserProfile, xp: u32) -> Option<u32> {
-    if xp == 0 {
-        return None;
-    }
-
-    profile.parent_xp = profile.parent_xp.saturating_add(xp);
-    if profile.parent_xp >= XP_PER_LEVEL {
-        profile.parent_xp -= XP_PER_LEVEL;
-        profile.parent_level += 1;
-        let new_level = profile.parent_level;
-        push_activity(
-            profile,
-            &format!("Leveled up to Parent Level {new_level}!"),
-        );
-        return Some(new_level);
-    }
-
-    None
-}
-
-fn grant_purchase_xp(profile: &mut UserProfile, spent: u32) -> u32 {
-    let xp = xp_for_purchase(spent);
-    award_parent_xp(profile, xp);
-    xp
-}
-
-fn level_progress(profile: &UserProfile) -> (u32, String) {
-    let progress = (profile.parent_xp * 100) / XP_PER_LEVEL;
-    let remaining = XP_PER_LEVEL.saturating_sub(profile.parent_xp);
-    let text = if remaining == 0 {
-        "Ready to level up! Complete more tasks.".to_string()
-    } else {
-        format!(
-            "{remaining} XP to reach level {}.",
-            profile.parent_level + 1
-        )
-    };
-    (progress.min(100), text)
-}
-
 fn task_rewards_earned(profile: &UserProfile) -> u32 {
     profile
         .tasks
@@ -4182,153 +3945,12 @@ fn task_rewards_earned(profile: &UserProfile) -> u32 {
         .sum()
 }
 
-fn task_xp_earned(profile: &UserProfile) -> u32 {
-    profile
-        .tasks
-        .iter()
-        .filter(|task| task.completed)
-        .map(|task| xp_for_task_reward(task.reward))
-        .sum()
-}
-
-fn reverse_parent_xp_for_reward(profile: &mut UserProfile, reward: u32) {
-    let mut xp_to_remove = xp_for_task_reward(reward);
-    while xp_to_remove > 0 {
-        if profile.parent_xp >= xp_to_remove {
-            profile.parent_xp -= xp_to_remove;
-            return;
-        }
-        xp_to_remove -= profile.parent_xp;
-        profile.parent_xp = 0;
-        if profile.parent_level <= 1 {
-            return;
-        }
-        profile.parent_level -= 1;
-        profile.parent_xp = XP_PER_LEVEL.saturating_sub(xp_to_remove);
-        return;
-    }
-}
-
 fn reopen_completed_task(profile: &mut UserProfile, index: usize) -> (String, u32) {
     let reward = profile.tasks[index].reward;
     let title = profile.tasks[index].title.clone();
     profile.tasks[index].completed = false;
     profile.paw_points = profile.paw_points.saturating_sub(reward);
-    reverse_parent_xp_for_reward(profile, reward);
     (title, reward)
-}
-
-fn outfit_points_spent(profile: &UserProfile) -> u32 {
-    profile
-        .owned_outfits
-        .iter()
-        .filter_map(|id| outfit_by_id(id))
-        .map(|outfit| outfit.price)
-        .sum()
-}
-
-fn decor_points_spent(profile: &UserProfile) -> u32 {
-    profile
-        .owned_decor
-        .iter()
-        .filter_map(|id| decor_by_id(id))
-        .map(|decor| decor.price)
-        .sum()
-}
-
-fn shop_points_spent(profile: &UserProfile) -> u32 {
-    outfit_points_spent(profile) + decor_points_spent(profile)
-}
-
-fn purchased_paw_points(profile: &UserProfile) -> u32 {
-    profile
-        .activity
-        .iter()
-        .filter_map(|item| {
-            let message = item.message.as_str();
-            if !message.contains("Purchased") || !message.contains("paw points") {
-                return None;
-            }
-            message
-                .split_whitespace()
-                .find_map(|word| word.parse::<u32>().ok())
-        })
-        .sum()
-}
-
-fn lifetime_xp(profile: &UserProfile) -> u32 {
-    profile
-        .parent_level
-        .saturating_sub(1)
-        .saturating_mul(XP_PER_LEVEL)
-        .saturating_add(profile.parent_xp)
-}
-
-fn render_parent_level_breakdown(profile: &UserProfile) -> String {
-    let xp_from_tasks = task_xp_earned(profile);
-    let paw_from_tasks = task_rewards_earned(profile);
-    let paw_spent = shop_points_spent(profile);
-    let paw_purchased = purchased_paw_points(profile);
-    let lifetime = lifetime_xp(profile);
-    let xp_remaining = XP_PER_LEVEL.saturating_sub(profile.parent_xp);
-    let progress_pct = (profile.parent_xp * 100) / XP_PER_LEVEL;
-
-    format!(
-        r#"<div class="onboarding-backdrop parent-level-backdrop" id="parent-level-modal" role="dialog" aria-modal="true" aria-labelledby="parent-level-title" hidden>
-  <div class="onboarding-modal parent-level-modal">
-    <button type="button" class="parent-level-close" id="parent-level-close" aria-label="Close breakdown">&times;</button>
-    <h2 id="parent-level-title">Parent Level {level} Breakdown</h2>
-    <p class="parent-level-intro">Track your XP progress and paw points earned as a cat parent.</p>
-    <div class="parent-level-sections">
-      <section class="parent-level-section">
-        <h3>XP</h3>
-        <dl class="parent-level-dl">
-          <dt>Current level</dt>
-          <dd>Level {level}</dd>
-          <dt>XP this level</dt>
-          <dd>{parent_xp} / {xp_per_level}</dd>
-          <dt>Progress</dt>
-          <dd>
-            <div class="level-bar" aria-hidden="true"><span class="level-fill" style="width: {progress_pct}%"></span></div>
-            <span class="parent-level-progress-text">{xp_remaining} XP to level {next_level}</span>
-          </dd>
-          <dt>Lifetime XP</dt>
-          <dd>{lifetime}</dd>
-          <dt>From care tasks</dt>
-          <dd>+{xp_from_tasks} XP</dd>
-        </dl>
-      </section>
-      <section class="parent-level-section">
-        <h3>Paw Points</h3>
-        <dl class="parent-level-dl">
-          <dt>Available balance</dt>
-          <dd><a href="/home/cat-home" class="parent-level-shop-link">{paw_points_balance}</a></dd>
-          <dt>From care tasks</dt>
-          <dd>+{paw_from_tasks}</dd>
-          <dt>Purchased</dt>
-          <dd>+{paw_purchased}</dd>
-          <dt>Spent in shop</dt>
-          <dd>-{paw_spent}</dd>
-        </dl>
-        <p class="parent-level-shop-hint"><a href="/home/cat-home" class="parent-level-shop-link">Visit {pet_name}'s home</a> to browse outfits and spend paw points.</p>
-      </section>
-    </div>
-  </div>
-</div>"#,
-        level = profile.parent_level,
-        parent_xp = profile.parent_xp,
-        xp_per_level = XP_PER_LEVEL,
-        progress_pct = progress_pct,
-        xp_remaining = xp_remaining,
-        next_level = profile.parent_level + 1,
-        lifetime = lifetime,
-        xp_from_tasks = xp_from_tasks,
-        paw_points_balance = paw_points_amount_html(profile.paw_points),
-        paw_from_tasks = paw_from_tasks,
-        paw_purchased = paw_purchased,
-        paw_spent = paw_spent,
-        pet_name = escape_html(&profile.pet_name),
-    )
 }
 
 fn outfit_by_id(id: &str) -> Option<&'static OutfitCatalogItem> {
@@ -4339,131 +3961,57 @@ fn decor_by_id(id: &str) -> Option<&'static DecorCatalogItem> {
     DECOR_CATALOG.iter().find(|item| item.id == id)
 }
 
-fn tap_boost_by_id(id: &str) -> Option<&'static TapBoostCatalogItem> {
-    TAP_BOOST_CATALOG.iter().find(|item| item.id == id)
-}
+const DECOR_SLOTS: [&str; 5] = ["room", "rug", "bed", "toy", "plant"];
 
-fn ensure_tap_boost_state(profile: &mut UserProfile) -> bool {
+fn ensure_decor_state(profile: &mut UserProfile) -> bool {
+    if !profile_has_pet(profile) {
+        return false;
+    }
+
     let mut changed = false;
-
-    if profile.owned_tap_boosts.is_empty() {
-        profile.owned_tap_boosts = default_owned_tap_boosts();
+    if profile.owned_decor.is_empty() {
+        profile.owned_decor = default_owned_decor();
         changed = true;
-    } else if !profile.owned_tap_boosts.iter().any(|id| id == "basic_pets") {
-        profile.owned_tap_boosts.insert(0, "basic_pets".to_string());
+    } else {
+        for starter in default_owned_decor() {
+            if !profile.owned_decor.iter().any(|id| id == &starter) {
+                profile.owned_decor.push(starter);
+                changed = true;
+            }
+        }
+    }
+
+    let before = profile.equipped_decor.len();
+    profile.equipped_decor.retain(|slot, id| {
+        decor_by_id(id).is_some_and(|decor| decor.slot == slot.as_str())
+            && profile.owned_decor.iter().any(|owned| owned == id)
+    });
+    if profile.equipped_decor.len() != before {
         changed = true;
     }
 
-    let equipped_id = profile.equipped_tap_boost.trim();
-    let equipped_owned = !equipped_id.is_empty()
-        && tap_boost_by_id(equipped_id).is_some()
-        && profile.owned_tap_boosts.iter().any(|id| id == equipped_id);
-
-    if !equipped_owned {
-        let best_id = profile
-            .owned_tap_boosts
+    for slot in DECOR_SLOTS {
+        let equipped_valid = profile
+            .equipped_decor
+            .get(slot)
+            .and_then(|id| decor_by_id(id))
+            .is_some_and(|decor| decor.slot == slot);
+        if equipped_valid {
+            continue;
+        }
+        if let Some(decor) = profile
+            .owned_decor
             .iter()
-            .filter_map(|id| tap_boost_by_id(id).map(|boost| (id.clone(), boost.tap_reward)))
-            .max_by_key(|(_, reward)| *reward)
-            .map(|(id, _)| id)
-            .unwrap_or_else(default_equipped_tap_boost);
-        profile.equipped_tap_boost = best_id;
-        changed = true;
+            .find_map(|id| decor_by_id(id).filter(|decor| decor.slot == slot))
+        {
+            profile
+                .equipped_decor
+                .insert(slot.to_string(), decor.id.to_string());
+            changed = true;
+        }
     }
 
     changed
-}
-
-fn equipped_tap_boost_reward(profile: &UserProfile) -> u32 {
-    tap_boost_by_id(profile.equipped_tap_boost.trim())
-        .map(|boost| boost.tap_reward)
-        .unwrap_or(BASE_PET_PET_REWARD)
-}
-
-fn petting_bonus_by_id(id: &str) -> Option<&'static PettingBonusCatalogItem> {
-    PETTING_BONUS_CATALOG.iter().find(|item| item.id == id)
-}
-
-fn clear_expired_petting_bonus(profile: &mut UserProfile) {
-    if profile.petting_bonus_expires_at == 0 {
-        return;
-    }
-    if profile.petting_bonus_expires_at <= timestamp_now() {
-        profile.active_petting_bonus.clear();
-        profile.petting_bonus_expires_at = 0;
-    }
-}
-
-fn active_petting_bonus_multiplier(profile: &UserProfile) -> Option<u32> {
-    if profile.petting_bonus_expires_at <= timestamp_now() {
-        return None;
-    }
-    let bonus_id = profile.active_petting_bonus.trim();
-    if bonus_id.is_empty() {
-        return None;
-    }
-    petting_bonus_by_id(bonus_id).map(|bonus| bonus.multiplier)
-}
-
-fn petting_bonus_inventory_count(profile: &UserProfile, bonus_id: &str) -> u32 {
-    profile
-        .petting_bonus_inventory
-        .get(bonus_id)
-        .copied()
-        .unwrap_or(0)
-}
-
-fn add_petting_bonus_to_inventory(profile: &mut UserProfile, bonus_id: &str) {
-    let entry = profile
-        .petting_bonus_inventory
-        .entry(bonus_id.to_string())
-        .or_insert(0);
-    *entry = entry.saturating_add(1);
-}
-
-fn consume_petting_bonus_from_inventory(profile: &mut UserProfile, bonus_id: &str) -> bool {
-    let Some(count) = profile.petting_bonus_inventory.get_mut(bonus_id) else {
-        return false;
-    };
-    if *count == 0 {
-        return false;
-    }
-    *count -= 1;
-    if *count == 0 {
-        profile.petting_bonus_inventory.remove(bonus_id);
-    }
-    true
-}
-
-fn effective_tap_reward(profile: &UserProfile) -> (u32, u32, Option<u32>) {
-    let tap_boost_base = equipped_tap_boost_reward(profile);
-    let petting_multiplier = active_petting_bonus_multiplier(profile);
-    let total = petting_multiplier
-        .map(|multiplier| tap_boost_base.saturating_mul(multiplier))
-        .unwrap_or(tap_boost_base);
-    (total, tap_boost_base, petting_multiplier)
-}
-
-fn render_petting_bonus_duration_label(duration_secs: u32) -> String {
-    if duration_secs == 1 {
-        "1 second".to_string()
-    } else {
-        format!("{duration_secs} seconds")
-    }
-}
-
-fn render_petting_bonus_stacked_label(profile: &UserProfile, multiplier: u32) -> String {
-    let tap_boost_base = equipped_tap_boost_reward(profile);
-    let total = tap_boost_base.saturating_mul(multiplier);
-    format!(
-        "{multiplier}× your +{tap_boost_base} boost · +{total} per tap",
-        tap_boost_base = tap_boost_base,
-        total = total,
-    )
-}
-
-fn render_tap_reward_label(reward: u32) -> String {
-    format!("+{reward} per pet")
 }
 
 fn decor_slot_label(slot: &str) -> &'static str {
@@ -4490,6 +4038,34 @@ fn equipped_decor_for_slot<'a>(
         .owned_decor
         .iter()
         .find_map(|id| decor_by_id(id).filter(|decor| decor.slot == slot))
+}
+
+fn render_cat_home_equipped_strip(profile: &UserProfile) -> String {
+    let mut chips: Vec<String> = Vec::new();
+    for slot in DECOR_SLOTS {
+        let Some(decor) = equipped_decor_for_slot(profile, slot) else {
+            continue;
+        };
+        chips.push(format!(
+            r#"<span class="cat-home-equipped-chip" title="{name}"><span class="cat-home-equipped-chip-emoji" aria-hidden="true">{emoji}</span><span class="cat-home-equipped-chip-label">{name}</span></span>"#,
+            name = escape_html(decor.name),
+            emoji = decor.emoji,
+        ));
+    }
+    let outfit = profile.equipped_outfit.trim();
+    if !outfit.is_empty() {
+        chips.push(format!(
+            r#"<span class="cat-home-equipped-chip cat-home-equipped-chip--outfit" title="{outfit}"><span class="cat-home-equipped-chip-emoji" aria-hidden="true">👗</span><span class="cat-home-equipped-chip-label">{outfit}</span></span>"#,
+            outfit = escape_html(outfit),
+        ));
+    }
+    if chips.is_empty() {
+        return String::new();
+    }
+    format!(
+        r#"<div class="cat-home-equipped-strip" aria-label="Placed in your family cat home">{chips}</div>"#,
+        chips = chips.join(""),
+    )
 }
 
 const MONTH_NAMES: [&str; 12] = [
@@ -4663,6 +4239,16 @@ fn format_time_from_minutes(minutes: u16) -> String {
     format!("{hour_12}:{mins:02} {period}")
 }
 
+fn calendar_event_kind(event: &CalendarEvent) -> &'static str {
+    if event.id.is_some() {
+        "user"
+    } else if event.title.to_ascii_lowercase().contains("birthday") {
+        "birthday"
+    } else {
+        "generated"
+    }
+}
+
 fn calendar_event_from_date(date: NaiveDate, title: &str) -> CalendarEvent {
     let time_minutes = default_event_time_minutes();
     CalendarEvent {
@@ -4811,33 +4397,10 @@ fn birthday_in_year(birth: NaiveDate, year: i32) -> Option<NaiveDate> {
 fn generate_birthday_calendar_events(
     profile: &UserProfile,
     today: NaiveDate,
-    horizon: NaiveDate,
 ) -> Vec<CalendarEvent> {
-    let Some(birth) = profile.pet_birth_date.as_deref().and_then(parse_vet_date) else {
-        return vec![];
-    };
-
-    let pet_name = if profile.pet_name.is_empty() {
-        "Your cat".to_string()
-    } else {
-        profile.pet_name.clone()
-    };
-
-    let mut events = Vec::new();
-    for year in today.year()..=horizon.year() {
-        let Some(birthday) = birthday_in_year(birth, year) else {
-            continue;
-        };
-        if birthday < today || birthday > horizon {
-            continue;
-        }
-        events.push(calendar_event_from_date(
-            birthday,
-            &format!("{pet_name}'s birthday"),
-        ));
-    }
-
-    events
+    pet_snapshot(profile, PRIMARY_PET_ID)
+        .map(|snapshot| generate_birthday_calendar_events_for_snapshot(&snapshot, today))
+        .unwrap_or_default()
 }
 
 fn history_dates_for_kind(history: &[VaccineRecord], kind: VaccineKind) -> Vec<NaiveDate> {
@@ -5048,7 +4611,6 @@ fn generate_vaccine_calendar_events(
 pub(crate) fn generate_birthday_calendar_events_for_snapshot(
     snapshot: &PetSnapshot,
     today: NaiveDate,
-    horizon: NaiveDate,
 ) -> Vec<CalendarEvent> {
     let Some(birth) = pet_birth_date_for_snapshot(snapshot, today) else {
         return vec![];
@@ -5060,14 +4622,13 @@ pub(crate) fn generate_birthday_calendar_events_for_snapshot(
         snapshot.pet_name.clone()
     };
 
+    let start_year = today.year() - 1;
+    let end_year = today.year() + 2;
     let mut events = Vec::new();
-    for year in today.year()..=horizon.year() {
+    for year in start_year..=end_year {
         let Some(birthday) = birthday_in_year(birth, year) else {
             continue;
         };
-        if birthday < today || birthday > horizon {
-            continue;
-        }
         events.push(calendar_event_from_date(
             birthday,
             &format!("{pet_name}'s birthday"),
@@ -5189,7 +4750,6 @@ pub(crate) fn merge_calendar_events(
     signup_date: NaiveDate,
 ) -> Vec<CalendarEvent> {
     let today = Local::now().date_naive();
-    let horizon = signup_date + Duration::days(730);
     let mut events = Vec::new();
     let premium_health =
         entitlements::can_access_health_records(profile.premium_unlocked, &profile.email);
@@ -5211,7 +4771,6 @@ pub(crate) fn merge_calendar_events(
         events.extend(generate_birthday_calendar_events_for_snapshot(
             &snapshot,
             today,
-            horizon,
         ));
     }
 
@@ -7561,30 +7120,16 @@ fn shop_item_from_cat_home_query(query: &CatHomeQuery) -> Option<ShopItemQuote> 
     shop_item_from_query(&NeedPawPointsQuery {
         decor_id: query.decor_id.clone(),
         outfit_id: query.outfit_id.clone(),
-        boost_id: query.boost_id.clone(),
-        petting_bonus_id: query.petting_bonus_id.clone(),
         return_to: None,
     })
 }
 
-fn cat_home_need_paw_points_redirect(
-    decor_id: Option<&str>,
-    outfit_id: Option<&str>,
-    boost_id: Option<&str>,
-    petting_bonus_id: Option<&str>,
-) -> Redirect {
+fn cat_home_need_paw_points_redirect(decor_id: Option<&str>, outfit_id: Option<&str>) -> Redirect {
     let mut query = "status=need_paw_points".to_string();
     if let Some(id) = decor_id.filter(|id| !id.trim().is_empty()) {
         query.push_str(&format!("&decor_id={}", urlencoding::encode(id.trim())));
     } else if let Some(id) = outfit_id.filter(|id| !id.trim().is_empty()) {
         query.push_str(&format!("&outfit_id={}", urlencoding::encode(id.trim())));
-    } else if let Some(id) = boost_id.filter(|id| !id.trim().is_empty()) {
-        query.push_str(&format!("&boost_id={}", urlencoding::encode(id.trim())));
-    } else if let Some(id) = petting_bonus_id.filter(|id| !id.trim().is_empty()) {
-        query.push_str(&format!(
-            "&petting_bonus_id={}",
-            urlencoding::encode(id.trim())
-        ));
     }
     Redirect::to(&format!("/home/cat-home?{query}"))
 }
@@ -7640,16 +7185,6 @@ fn render_need_paw_points_modal(
             hero_emoji = decor.emoji.to_string();
         } else if let Some(outfit) = OUTFIT_CATALOG.iter().find(|entry| entry.name == item.name) {
             hero_emoji = outfit.emoji.to_string();
-        } else if let Some(boost) = TAP_BOOST_CATALOG
-            .iter()
-            .find(|entry| entry.name == item.name)
-        {
-            hero_emoji = boost.emoji.to_string();
-        } else if let Some(bonus) = PETTING_BONUS_CATALOG
-            .iter()
-            .find(|entry| entry.name == item.name)
-        {
-            hero_emoji = bonus.emoji.to_string();
         }
     }
 
@@ -7673,7 +7208,6 @@ fn render_need_paw_points_modal(
       <h3 id="need-paw-points-earn-title">Or earn paw points</h3>
       <ul class="need-paw-points-earn-list">
         <li>Complete care tasks on the <a href="/home?tab=tasks">Tasks</a> tab.</li>
-        <li>Pet your cat here for bonus points per tap.</li>
       </ul>
     </section>
     <p class="need-paw-points-actions">
@@ -7721,38 +7255,7 @@ fn shop_item_from_query(query: &NeedPawPointsQuery) -> Option<ShopItemQuote> {
         });
     }
 
-    if let Some(id) = query.boost_id.as_deref() {
-        let boost = tap_boost_by_id(id.trim())?;
-        if boost.price == 0 {
-            return None;
-        }
-        return Some(ShopItemQuote {
-            name: boost.name,
-            price: boost.price,
-        });
-    }
-
-    if let Some(id) = query.petting_bonus_id.as_deref() {
-        let bonus = petting_bonus_by_id(id.trim())?;
-        return Some(ShopItemQuote {
-            name: bonus.name,
-            price: bonus.price,
-        });
-    }
-
     None
-}
-
-fn tap_boost_redirect(status: &str) -> Redirect {
-    Redirect::to(&format!("/home/cat-home?status={status}"))
-}
-
-fn tap_boost_return_hidden_field(return_to: Option<&str>) -> &'static str {
-    if return_to == Some("cat_home") {
-        r#"<input type="hidden" name="return_to" value="cat_home" />"#
-    } else {
-        ""
-    }
 }
 
 fn outfit_redirect(_return_to: &str, status: &str) -> Redirect {
@@ -7781,277 +7284,6 @@ fn render_cat_home_outfit_shop(profile: &UserProfile) -> String {
         pet_name = pet_name,
         cards = cards,
     )
-}
-
-fn render_cat_home_tap_boost_shop(profile: &UserProfile) -> String {
-    let cards = render_tap_boost_cards_inner(profile, true, Some("cat_home"));
-    let active_reward = equipped_tap_boost_reward(profile);
-    let (effective_reward, _, petting_multiplier) = effective_tap_reward(profile);
-    let reward_hint = if let Some(multiplier) = petting_multiplier {
-        format!(
-            "currently <strong>{}</strong> per tap while your petting bonus is active (<strong>{}</strong> base boost × {multiplier})",
-            render_tap_reward_label(effective_reward),
-            render_tap_reward_label(active_reward),
-            multiplier = multiplier,
-        )
-    } else {
-        format!(
-            "currently <strong>{}</strong> per tap",
-            render_tap_reward_label(active_reward),
-        )
-    };
-
-    format!(
-        r#"<section class="cat-home-tap-boost-shop" aria-label="Pet tap boosts">
-  <h2>Level up petting</h2>
-  <p class="field-hint">Each tap on your cat earns paw points. Boosts raise how much you get per pet — {reward_hint}.</p>
-  <div class="cat-home-tap-boost-slider" tabindex="0">
-    {cards}
-  </div>
-</section>"#,
-        reward_hint = reward_hint,
-        cards = cards,
-    )
-}
-
-fn petting_bonus_return_hidden_field(return_to: Option<&str>) -> &'static str {
-    if return_to == Some("cat_home") {
-        r#"<input type="hidden" name="return_to" value="cat_home" />"#
-    } else {
-        ""
-    }
-}
-
-fn petting_bonus_redirect(status: &str) -> Redirect {
-    Redirect::to(&format!("/home/cat-home?status={status}"))
-}
-
-fn render_petting_bonus_active_banner(profile: &UserProfile) -> String {
-    let multiplier = active_petting_bonus_multiplier(profile);
-    let Some(multiplier) = multiplier else {
-        return String::new();
-    };
-    let bonus_id = profile.active_petting_bonus.trim();
-    let Some(bonus) = petting_bonus_by_id(bonus_id) else {
-        return String::new();
-    };
-    let seconds_left = profile
-        .petting_bonus_expires_at
-        .saturating_sub(timestamp_now());
-
-    format!(
-        r#"<p class="petting-bonus-active" role="status" data-expires-at="{expires_at}" data-multiplier="{multiplier}">
-  <span class="petting-bonus-active-emoji" aria-hidden="true">{emoji}</span>
-  <span class="petting-bonus-active-copy"><strong>{name}</strong> · {multiplier_label} · <span class="petting-bonus-countdown">{seconds_left}s</span> left</span>
-</p>"#,
-        expires_at = profile.petting_bonus_expires_at,
-        multiplier = multiplier,
-        emoji = bonus.emoji,
-        name = escape_html(bonus.name),
-        multiplier_label = render_petting_bonus_stacked_label(profile, multiplier),
-        seconds_left = seconds_left,
-    )
-}
-
-fn render_cat_home_petting_bonus_shop(profile: &UserProfile) -> String {
-    let cards = render_petting_bonus_cards_inner(profile, true, Some("cat_home"));
-    let active_boost = render_tap_reward_label(equipped_tap_boost_reward(profile));
-    format!(
-        r#"<section class="cat-home-petting-bonus-shop" aria-label="Timed petting bonuses">
-  <h2>Petting bonuses</h2>
-  <p class="field-hint">Timed multipliers stack on your active tap boost ({active_boost}). A 10× bonus on +5 pays +50 per tap.</p>
-  <div class="cat-home-petting-bonus-slider" tabindex="0">
-    {cards}
-  </div>
-</section>"#,
-        active_boost = active_boost,
-        cards = cards,
-    )
-}
-
-fn render_petting_bonus_cards_inner(
-    profile: &UserProfile,
-    slider_card: bool,
-    return_to: Option<&str>,
-) -> String {
-    let return_field = petting_bonus_return_hidden_field(return_to);
-    let card_class = if slider_card {
-        "petting-bonus-card petting-bonus-card-slider"
-    } else {
-        "petting-bonus-card"
-    };
-    let now = timestamp_now();
-
-    PETTING_BONUS_CATALOG
-        .iter()
-        .map(|bonus| {
-            let owned = petting_bonus_inventory_count(profile, bonus.id);
-            let active = profile.active_petting_bonus == bonus.id
-                && profile.petting_bonus_expires_at > now;
-            let mut classes = vec![card_class];
-            if owned > 0 {
-                classes.push("owned");
-            }
-            if active {
-                classes.push("active");
-            }
-
-            let effect_label = format!(
-                "{} for {}",
-                render_petting_bonus_stacked_label(profile, bonus.multiplier),
-                render_petting_bonus_duration_label(bonus.duration_secs),
-            );
-
-            let data_attrs = if active {
-                format!(
-                    r#" data-bonus-id="{}" data-expires-at="{}""#,
-                    escape_html_attr(bonus.id),
-                    profile.petting_bonus_expires_at,
-                )
-            } else {
-                String::new()
-            };
-
-            let (action, purchase_attrs) = if active {
-                let seconds_left = profile.petting_bonus_expires_at.saturating_sub(now);
-                (
-                    format!(
-                        r#"<span class="petting-bonus-badge">Active · {seconds_left}s left</span>"#,
-                        seconds_left = seconds_left,
-                    ),
-                    String::new(),
-                )
-            } else if owned > 0 {
-                (
-                    format!(
-                        r#"<form action="/home/petting-bonuses/activate" method="post"><input type="hidden" name="bonus_id" value="{}" />{return_field}<button type="submit" class="download-btn petting-bonus-btn">Activate ({owned} ready)</button></form>"#,
-                        escape_html_attr(bonus.id),
-                        return_field = return_field,
-                        owned = owned,
-                    ),
-                    String::new(),
-                )
-            } else {
-                let purchase_attrs = shop_purchase_data_attrs(
-                    "bonus",
-                    bonus.id,
-                    bonus.price,
-                    bonus.name,
-                    bonus.emoji,
-                    return_to,
-                );
-                let action = if profile.paw_points < bonus.price {
-                    render_shop_points_shortfall_trigger(bonus.name, bonus.price, bonus.emoji)
-                } else {
-                    format!(
-                        r#"<form action="/home/petting-bonuses/buy" method="post"><input type="hidden" name="bonus_id" value="{}" />{return_field}<button type="submit" class="download-btn petting-bonus-btn">Buy for {} pts</button></form>"#,
-                        escape_html_attr(bonus.id),
-                        bonus.price,
-                        return_field = return_field,
-                    )
-                };
-                (action, purchase_attrs)
-            };
-
-            format!(
-                r#"<article class="{}{}{}"><div class="petting-bonus-emoji">{}</div><h3>{}</h3><p class="petting-bonus-effect">{}</p><p class="petting-bonus-price">{}</p><div class="petting-bonus-actions">{}</div></article>"#,
-                classes.join(" "),
-                purchase_attrs,
-                data_attrs,
-                bonus.emoji,
-                escape_html(bonus.name),
-                effect_label,
-                paw_points_amount_html(bonus.price),
-                action,
-            )
-        })
-        .collect()
-}
-
-fn render_tap_boost_cards_inner(
-    profile: &UserProfile,
-    slider_card: bool,
-    return_to: Option<&str>,
-) -> String {
-    let return_field = tap_boost_return_hidden_field(return_to);
-    let card_class = if slider_card {
-        "tap-boost-card tap-boost-card-slider"
-    } else {
-        "tap-boost-card"
-    };
-
-    TAP_BOOST_CATALOG
-        .iter()
-        .map(|boost| {
-            let owned = profile.owned_tap_boosts.iter().any(|id| id == boost.id);
-            let equipped = profile.equipped_tap_boost == boost.id;
-            let mut classes = vec![card_class];
-            if owned {
-                classes.push("owned");
-            }
-            if equipped {
-                classes.push("equipped");
-            }
-
-            let price_label = if boost.price == 0 {
-                "Included".to_string()
-            } else {
-                paw_points_amount_html(boost.price)
-            };
-
-            let (action, purchase_attrs) = if equipped {
-                (
-                    r#"<span class="tap-boost-badge">Active boost</span>"#.to_string(),
-                    String::new(),
-                )
-            } else if owned {
-                (
-                    format!(
-                        r#"<form action="/home/tap-boosts/equip" method="post"><input type="hidden" name="boost_id" value="{}" />{return_field}<button type="submit" class="download-btn tap-boost-btn">Activate</button></form>"#,
-                        escape_html_attr(boost.id),
-                        return_field = return_field,
-                    ),
-                    String::new(),
-                )
-            } else if boost.price == 0 {
-                (
-                    r#"<span class="tap-boost-badge">Starter boost</span>"#.to_string(),
-                    String::new(),
-                )
-            } else {
-                let purchase_attrs = shop_purchase_data_attrs(
-                    "boost",
-                    boost.id,
-                    boost.price,
-                    boost.name,
-                    boost.emoji,
-                    return_to,
-                );
-                let action = if profile.paw_points < boost.price {
-                    render_shop_points_shortfall_trigger(boost.name, boost.price, boost.emoji)
-                } else {
-                    format!(
-                        r#"<form action="/home/tap-boosts/buy" method="post"><input type="hidden" name="boost_id" value="{}" />{return_field}<button type="submit" class="download-btn tap-boost-btn">Buy for {} pts</button></form>"#,
-                        escape_html_attr(boost.id),
-                        boost.price,
-                        return_field = return_field,
-                    )
-                };
-                (action, purchase_attrs)
-            };
-
-            format!(
-                r#"<article class="{}{}"><div class="tap-boost-emoji">{}</div><h3>{}</h3><p class="tap-boost-reward">{}</p><p class="tap-boost-price">{}</p><div class="tap-boost-actions">{}</div></article>"#,
-                classes.join(" "),
-                purchase_attrs,
-                boost.emoji,
-                escape_html(boost.name),
-                render_tap_reward_label(boost.tap_reward),
-                price_label,
-                action
-            )
-        })
-        .collect()
 }
 
 fn render_outfit_cards_inner(
@@ -8128,7 +7360,26 @@ fn render_outfit_cards_inner(
         .collect()
 }
 
-fn render_decor_cards(profile: &UserProfile) -> String {
+fn render_cat_home_decor_shop(profile: &UserProfile) -> String {
+    let cards = render_decor_cards(profile, true);
+    format!(
+        r#"<section class="cat-home-decor-shop" aria-label="Home decor shop">
+  <h2>Home decor shop</h2>
+  <p class="field-hint">Swipe to browse rugs, beds, toys, plants, and room themes. Each slot holds one item at a time.</p>
+  <div class="cat-home-decor-slider" tabindex="0">
+    {cards}
+  </div>
+</section>"#,
+        cards = cards,
+    )
+}
+
+fn render_decor_cards(profile: &UserProfile, slider_card: bool) -> String {
+    let card_class = if slider_card {
+        "decor-card decor-card-slider"
+    } else {
+        "decor-card"
+    };
     DECOR_CATALOG
         .iter()
         .map(|decor| {
@@ -8137,7 +7388,7 @@ fn render_decor_cards(profile: &UserProfile) -> String {
                 .equipped_decor
                 .get(decor.slot)
                 .is_some_and(|id| id == decor.id);
-            let mut classes = vec!["decor-card"];
+            let mut classes = vec![card_class];
             if owned {
                 classes.push("owned");
             }
@@ -8204,92 +7455,244 @@ fn render_decor_cards(profile: &UserProfile) -> String {
         .collect()
 }
 
-fn render_cat_home_scene(profile: &UserProfile) -> String {
-    let pet_name = if profile.pet_name.trim().is_empty() {
-        "Your cat".to_string()
-    } else {
-        profile.pet_name.clone()
-    };
-    let room = equipped_decor_for_slot(profile, "room")
+fn render_cat_home_scene(state: &AppState, viewer: &UserProfile, play_as_pet_id: &str) -> String {
+    let room = equipped_decor_for_slot(viewer, "room")
         .map(|decor| decor.id)
         .unwrap_or("sunny_nook");
-    let rug = equipped_decor_for_slot(profile, "rug");
-    let bed = equipped_decor_for_slot(profile, "bed");
-    let toy = equipped_decor_for_slot(profile, "toy");
-    let plant = equipped_decor_for_slot(profile, "plant");
+    let rug = equipped_decor_for_slot(viewer, "rug");
+    let bed = equipped_decor_for_slot(viewer, "bed");
+    let toy = equipped_decor_for_slot(viewer, "toy");
+    let plant = equipped_decor_for_slot(viewer, "plant");
 
-    let rug_layer = rug.map(|decor| {
-        format!(
-            r#"<div class="cat-home-prop cat-home-rug" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
-            escape_html(decor.name),
-            decor.emoji,
-            escape_html(decor.name),
-        )
-    }).unwrap_or_default();
+    let rug_layer = rug
+        .map(|decor| {
+            playdates::render_interactive_prop("rug", "rug", decor.name, decor.emoji)
+        })
+        .unwrap_or_default();
 
-    let bed_layer = bed.map(|decor| {
-        format!(
-            r#"<div class="cat-home-prop cat-home-bed" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
-            escape_html(decor.name),
-            decor.emoji,
-            escape_html(decor.name),
-        )
-    }).unwrap_or_default();
+    let bed_layer = bed
+        .map(|decor| {
+            playdates::render_interactive_prop("bed", "bed", decor.name, decor.emoji)
+        })
+        .unwrap_or_default();
 
-    let toy_layer = toy.map(|decor| {
-        format!(
-            r#"<div class="cat-home-prop cat-home-toy" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
-            escape_html(decor.name),
-            decor.emoji,
-            escape_html(decor.name),
-        )
-    }).unwrap_or_default();
+    let toy_layer = toy
+        .map(|decor| {
+            playdates::render_interactive_prop("toy", "toy", decor.name, decor.emoji)
+        })
+        .unwrap_or_default();
 
-    let plant_layer = plant.map(|decor| {
-        format!(
-            r#"<div class="cat-home-prop cat-home-plant" title="{}"><span class="cat-home-prop-emoji" aria-hidden="true">{}</span><span class="cat-home-prop-label">{}</span></div>"#,
-            escape_html(decor.name),
-            decor.emoji,
-            escape_html(decor.name),
-        )
-    }).unwrap_or_default();
+    let plant_layer = plant
+        .map(|decor| {
+            playdates::render_interactive_prop("plant", "plant", decor.name, decor.emoji)
+        })
+        .unwrap_or_default();
 
-    let petting_bonus_banner = render_petting_bonus_active_banner(profile);
+    let equipped_strip = render_cat_home_equipped_strip(viewer);
+
+    playdates::render_playdate_scene(
+        state,
+        viewer,
+        play_as_pet_id,
+        room,
+        &rug_layer,
+        &bed_layer,
+        &toy_layer,
+        &plant_layer,
+        &equipped_strip,
+    )
+}
+
+fn render_cat_home_shops(profile: &UserProfile) -> String {
+    format!(
+        "{}{}",
+        render_cat_home_outfit_shop(profile),
+        render_cat_home_decor_shop(profile),
+    )
+}
+
+fn render_cat_home_panel_scene(
+    state: &AppState,
+    profile: &UserProfile,
+    pet_id: &str,
+) -> String {
+    if memorial::pet_is_deceased(profile, pet_id) {
+        memorial::render_angel_cat_home_scene_for_pet(profile, pet_id)
+    } else {
+        render_cat_home_scene(state, profile, pet_id)
+    }
+}
+
+fn render_cat_home_stage_card(
+    state: &AppState,
+    profile: &UserProfile,
+    pet_id: &str,
+    pet_name: &str,
+) -> String {
+    let scene = render_cat_home_panel_scene(state, profile, pet_id);
+    let shops = if memorial::pet_is_deceased(profile, pet_id) {
+        String::new()
+    } else {
+        render_cat_home_shops(profile)
+    };
 
     format!(
-        r#"<div class="cat-home-scene" data-room="{room}">
-  <div class="cat-home-room-bg" aria-hidden="true"></div>
-  {petting_bonus_banner}
-  {rug_layer}
-  {bed_layer}
-  <div class="cat-home-pet-stage">
-    <div class="cat-home-pet-stack">
-      <p class="cat-home-pet-bubble" role="note">pet me!</p>
-      {pet_avatar}
-    </div>
-  </div>
-  {toy_layer}
-  {plant_layer}
-  <p class="cat-home-mood">{pet_name} is relaxing in their play area.</p>
+        r#"<section class="dashboard-card cat-home-stage-card cat-home-game-stage" aria-label="Family cat home play area">
+  {scene}
+  {shops}
+</section>"#,
+        scene = scene,
+        shops = shops,
+    )
+}
+
+fn pet_name_initial(name: &str) -> String {
+    name.trim()
+        .chars()
+        .find(|ch| !ch.is_whitespace())
+        .map(|ch| ch.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".to_string())
+}
+
+fn pet_accent_hue(pet_id: &str) -> u16 {
+    let mut hash = 0u32;
+    for byte in pet_id.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(u32::from(byte));
+    }
+    ((hash % 300) + 20) as u16
+}
+
+fn render_cat_home_pet_pick_avatar(profile: &UserProfile, pet_id: &str, pet_name: &str) -> String {
+    let initial = pet_name_initial(pet_name);
+    let hue = pet_accent_hue(pet_id);
+    if let Some(url) = pet_snapshot(profile, pet_id)
+        .and_then(|snapshot| snapshot.pet_photo_url)
+        .filter(|url| !url.trim().is_empty())
+    {
+        return format!(
+            r#"<span class="cat-home-pet-pick-avatar" style="--pet-pick-hue:{hue}">
+  <img src="{src}" alt="" width="32" height="32" decoding="async" />
+</span>"#,
+            hue = hue,
+            src = escape_html_attr(&url),
+        );
+    }
+
+    format!(
+        r#"<span class="cat-home-pet-pick-avatar cat-home-pet-pick-avatar--initial" style="--pet-pick-hue:{hue}" aria-hidden="true">{initial}</span>"#,
+        hue = hue,
+        initial = escape_html(&initial),
+    )
+}
+
+fn render_cat_home_play_switcher(
+    profile: &UserProfile,
+    pets: &[(String, String)],
+    active_index: usize,
+) -> String {
+    let buttons = pets
+        .iter()
+        .enumerate()
+        .map(|(index, (pet_id, pet_name))| {
+            let active_class = if index == active_index {
+                " is-active"
+            } else {
+                ""
+            };
+            let angel = memorial::pet_switcher_angel_suffix(profile, pet_id, &profile.email);
+            let avatar = render_cat_home_pet_pick_avatar(profile, pet_id, pet_name);
+            format!(
+                r#"<button type="button" class="cat-home-pet-pick{active_class}" data-pet-id="{pet_id}" data-pet-name="{pet_name}" aria-current="{current}" aria-label="Play as {label}">
+  {avatar}
+  <span class="cat-home-pet-pick-name">{label}</span>
+</button>"#,
+                active_class = active_class,
+                pet_id = escape_html_attr(pet_id),
+                pet_name = escape_html_attr(pet_name),
+                current = if index == active_index { "true" } else { "false" },
+                label = escape_html(&format!("{pet_name}{angel}")),
+                avatar = avatar,
+            )
+        })
+        .collect::<String>();
+    let active_name = pets
+        .get(active_index)
+        .map(|(_, name)| name.as_str())
+        .unwrap_or("your cat");
+
+    format!(
+        r#"<div class="cat-home-play-toolbar">
+  <p class="cat-home-play-as-label">Playing as <strong>{active_name}</strong></p>
+  <nav class="cat-home-pet-switcher" aria-label="Choose cat to play as">{buttons}</nav>
 </div>"#,
-        room = escape_html_attr(room),
-        petting_bonus_banner = petting_bonus_banner,
-        rug_layer = rug_layer,
-        bed_layer = bed_layer,
-        toy_layer = toy_layer,
-        plant_layer = plant_layer,
-        pet_avatar = render_pet_avatar(profile),
-        pet_name = escape_html(&pet_name),
+        buttons = buttons,
+        active_name = escape_html(active_name),
+    )
+}
+
+fn render_cat_home_layout(state: &AppState, profile: &UserProfile) -> (String, String, String, String) {
+    let pets = list_pet_summaries(profile);
+    if pets.is_empty() {
+        return (
+            "Cat Home".to_string(),
+            "Visit your cat's virtual play area.".to_string(),
+            String::new(),
+            String::new(),
+        );
+    }
+
+    let active_id = active_pet_id(profile).to_string();
+    let active_index = pets
+        .iter()
+        .position(|(id, _)| id == &active_id)
+        .unwrap_or(0);
+    let active_name = pets
+        .get(active_index)
+        .map(|(_, name)| name.as_str())
+        .unwrap_or("your cat");
+    let play_switcher = if pets.len() > 1 {
+        render_cat_home_play_switcher(profile, &pets, active_index)
+    } else {
+        String::new()
+    };
+    let stage_card = render_cat_home_stage_card(state, profile, &active_id, active_name);
+    let layout = if play_switcher.is_empty() {
+        format!(
+            r#"<div class="cat-home-layout cat-home-layout--single">
+  {stage_card}
+</div>"#,
+            stage_card = stage_card,
+        )
+    } else {
+        format!(
+            r#"<div class="cat-home-layout">
+  {stage_card}
+</div>"#,
+            stage_card = stage_card,
+        )
+    };
+
+    let intro = if pets.len() > 1 {
+        "All your cats share one family home. Pick which cat you're playing as.".to_string()
+    } else {
+        "Your family's virtual cat home — host playdates with friends' cats and decorate with paw points.".to_string()
+    };
+
+    (
+        "Family Cat Home".to_string(),
+        intro,
+        play_switcher,
+        layout,
     )
 }
 
 fn cat_home_status_block(status: Option<&str>) -> String {
     match status {
         Some("decor_bought") => {
-            r#"<p class="auth-success status-flash" role="status">Yay! Decor purchased and placed in your cat's home! 🏡</p>"#
+            r#"<p class="auth-success status-flash" role="status">Yay! Decor purchased and placed in the family cat home! 🏡</p>"#
         }
         Some("decor_equipped") => {
-            r#"<p class="auth-success status-flash" role="status">Decor placed in your cat's home! 🏡</p>"#
+            r#"<p class="auth-success status-flash" role="status">Decor placed in the family cat home! 🏡</p>"#
         }
         Some("decor_owned") => {
             r#"<p class="auth-error status-flash" role="alert">You already own that decor item.</p>"#
@@ -8310,33 +7713,6 @@ fn cat_home_status_block(status: Option<&str>) -> String {
         Some("outfit_points") => "",
         Some("outfit_invalid") => {
             r#"<p class="auth-error status-flash" role="alert">That outfit is not available.</p>"#
-        }
-        Some("boost_bought") => {
-            r#"<p class="auth-success status-flash" role="status">Yay! Tap boost purchased and activated! Pet your cat for bigger rewards! 🐾</p>"#
-        }
-        Some("boost_equipped") => {
-            r#"<p class="auth-success status-flash" role="status">Tap boost activated! Pet your cat for bigger paw points! 🐾</p>"#
-        }
-        Some("boost_owned") => {
-            r#"<p class="auth-error status-flash" role="alert">You already own that tap boost.</p>"#
-        }
-        Some("boost_invalid") => {
-            r#"<p class="auth-error status-flash" role="alert">That tap boost is not available.</p>"#
-        }
-        Some("petting_bonus_bought") => {
-            r#"<p class="auth-success status-flash" role="status">Yay! Petting bonus purchased! Activate it when you're ready for a points rush! ⚡</p>"#
-        }
-        Some("petting_bonus_activated") => {
-            r#"<p class="auth-success status-flash" role="status">Petting bonus activated! Pet your cat fast while the multiplier lasts! 💥</p>"#
-        }
-        Some("petting_bonus_active") => {
-            r#"<p class="auth-error status-flash" role="alert">A petting bonus is already running. Wait for it to finish before activating another.</p>"#
-        }
-        Some("petting_bonus_empty") => {
-            r#"<p class="auth-error status-flash" role="alert">You don't have that petting bonus in your inventory. Buy one first.</p>"#
-        }
-        Some("petting_bonus_invalid") => {
-            r#"<p class="auth-error status-flash" role="alert">That petting bonus is not available.</p>"#
         }
         _ => "",
     }
@@ -8494,6 +7870,28 @@ fn tasks_panel_active_index(
         .unwrap_or(0)
 }
 
+fn render_task_health_watch_outs_link(task: &UserTask) -> String {
+    if !breed_guides::is_health_watch_outs_task(&task.id) {
+        return String::new();
+    }
+
+    let Some(slug) = breed_guides::slug_from_breed_guide_task_id(&task.id) else {
+        return String::new();
+    };
+
+    let breed_name = breed_guides::guide_for_slug(&slug)
+        .map(|guide| guide.breed_name)
+        .unwrap_or_else(|| slug.replace('_', " "));
+
+    format!(
+        r#"<p class="task-health-watch-link-wrap">
+  <a href="{url}" class="task-health-watch-link">🩺 Peek at {breed} health watch-outs 🐾</a>
+</p>"#,
+        url = escape_html_attr(&breed_guides::health_watch_outs_guide_url(&slug)),
+        breed = escape_html(&breed_name),
+    )
+}
+
 fn render_task_delete_form(task: &UserTask, pet_owner_field: &str) -> String {
     format!(
         r#"<form action="/home/tasks/delete" method="post" class="task-delete-form" onsubmit="return confirm('Remove this task?');"><input type="hidden" name="task_id" value="{id}" /><input type="hidden" name="pet_id" value="{pet_id}" />{pet_owner_field}<button type="submit" class="task-delete-btn" aria-label="Remove {title}">−</button></form>"#,
@@ -8518,6 +7916,7 @@ fn render_task_item_html(task: &UserTask, pet_owner_field: &str) -> String {
         r#"<span class="task-remove-spacer" aria-hidden="true"></span>"#.to_string()
     };
     let (timeline_time, timeline_frequency) = render_task_timeline_labels(task);
+    let health_watch_link = render_task_health_watch_outs_link(task);
     format!(
         r#"<li class="task-item task-timeline-item{completed_class}">
   <div class="task-timeline-node" aria-hidden="true">
@@ -8529,6 +7928,7 @@ fn render_task_item_html(task: &UserTask, pet_owner_field: &str) -> String {
     <div class="task-item-body">
       <p class="task-title">{title}</p>
       <p class="task-due">{due_html}</p>
+      {health_watch_link}
     </div>
     <div class="task-item-actions">
       <form class="task-toggle-form" action="/home/tasks/toggle" method="post">
@@ -8546,6 +7946,7 @@ fn render_task_item_html(task: &UserTask, pet_owner_field: &str) -> String {
         timeline_frequency = escape_html(&timeline_frequency),
         title = escape_html(&task.title),
         due_html = render_task_due_html(task),
+        health_watch_link = health_watch_link,
         id = escape_html_attr(&task.id),
         pet_id = escape_html_attr(&task.pet_id),
         pet_owner_field = pet_owner_field,
@@ -8680,6 +8081,129 @@ fn render_task_list(profile: &UserProfile) -> String {
     )
 }
 
+fn pet_view_for_accessible_pet(
+    state: &AppState,
+    viewer: &UserProfile,
+    pet: &sharing::AccessiblePetSummary,
+) -> UserProfile {
+    let mut scoped = viewer.clone();
+    let owner = if pet.is_owned {
+        None
+    } else {
+        Some(pet.owner_email.as_str())
+    };
+    sharing::set_active_pet_selection(&mut scoped, &pet.pet_id, owner);
+    sharing::active_pet_view_profile(state, &scoped)
+}
+
+fn scoped_profile_for_accessible_pet(
+    viewer: &UserProfile,
+    pet: &sharing::AccessiblePetSummary,
+) -> UserProfile {
+    let mut scoped = viewer.clone();
+    let owner = if pet.is_owned {
+        None
+    } else {
+        Some(pet.owner_email.as_str())
+    };
+    sharing::set_active_pet_selection(&mut scoped, &pet.pet_id, owner);
+    scoped
+}
+
+fn render_pet_showcase_panel(
+    state: &AppState,
+    viewer: &UserProfile,
+    pet: &sharing::AccessiblePetSummary,
+    is_active: bool,
+) -> String {
+    let pet_view = pet_view_for_accessible_pet(state, viewer, pet);
+    let scoped = scoped_profile_for_accessible_pet(viewer, pet);
+    let active_class = if is_active { " is-active" } else { "" };
+    let hidden = if is_active { "" } else { " hidden" };
+    format!(
+        r##"<div class="pet-showcase-panel{active_class}" data-pet-id="{pet_id}" data-pet-owner="{pet_owner}" data-pet-label="{pet_label}"{hidden}>
+  {vet_alert}
+  <div class="pet-showcase">
+    {avatar}
+    <div class="pet-details">
+      {shared_banner}
+      <h1>{pet_name}</h1>
+      <p class="pet-meta">{pet_meta}</p>
+      <p class="pet-outfit">Wearing: <strong>{equipped_outfit}</strong></p>
+      <p class="pet-blurb">{pet_blurb}</p>
+      {pet_check_cta}
+      {pet_video_upload_cta}
+      {pet_setup_cta}
+      {pet_health_info}
+    </div>
+  </div>
+</div>"##,
+        active_class = active_class,
+        pet_id = escape_html_attr(&pet.pet_id),
+        pet_owner = escape_html_attr(&pet.owner_email),
+        pet_label = escape_html_attr(&pet.pet_name),
+        hidden = hidden,
+        vet_alert = render_vet_urgency_alert(&pet_view, "pet-tab-vet-alert"),
+        avatar = render_pet_avatar(&pet_view),
+        shared_banner = sharing::render_shared_pet_banner(state, &scoped),
+        pet_name = escape_html(&display_pet_name(&pet_view)),
+        pet_meta = render_pet_meta(&pet_view),
+        equipped_outfit = escape_html(&viewer.equipped_outfit),
+        pet_blurb = render_pet_blurb(&pet_view),
+        pet_check_cta = render_pet_check_cta(&pet_view),
+        pet_video_upload_cta = render_pet_video_upload_cta(&pet_view),
+        pet_setup_cta = render_pet_setup_cta(viewer),
+        pet_health_info = render_pet_health_info(&pet_view),
+    )
+}
+
+fn render_pet_showcase_carousel(state: &AppState, viewer: &UserProfile) -> String {
+    let pets = sharing::list_accessible_pets(state, viewer);
+    if pets.is_empty() {
+        let pet_view = sharing::active_pet_view_profile(state, viewer);
+        return format!(
+            r##"<div class="pet-showcase-panel is-active" data-pet-id="{pet_id}" data-pet-owner="{pet_owner}" data-pet-label="{pet_label}">
+  {vet_alert}
+  <div class="pet-showcase">
+    {avatar}
+    <div class="pet-details">
+      {shared_banner}
+      <h1>{pet_name}</h1>
+      <p class="pet-meta">{pet_meta}</p>
+      <p class="pet-outfit">Wearing: <strong>{equipped_outfit}</strong></p>
+      <p class="pet-blurb">{pet_blurb}</p>
+      {pet_check_cta}
+      {pet_video_upload_cta}
+      {pet_setup_cta}
+      {pet_health_info}
+    </div>
+  </div>
+</div>"##,
+            pet_id = escape_html_attr(&viewer.active_pet_id),
+            pet_owner = escape_html_attr(&viewer.email),
+            pet_label = escape_html_attr(&display_pet_name(&pet_view)),
+            vet_alert = render_vet_urgency_alert(&pet_view, "pet-tab-vet-alert"),
+            avatar = render_pet_avatar(&pet_view),
+            shared_banner = sharing::render_shared_pet_banner(state, viewer),
+            pet_name = escape_html(&display_pet_name(&pet_view)),
+            pet_meta = render_pet_meta(&pet_view),
+            equipped_outfit = escape_html(&viewer.equipped_outfit),
+            pet_blurb = render_pet_blurb(&pet_view),
+            pet_check_cta = render_pet_check_cta(&pet_view),
+            pet_video_upload_cta = render_pet_video_upload_cta(&pet_view),
+            pet_setup_cta = render_pet_setup_cta(viewer),
+            pet_health_info = render_pet_health_info(&pet_view),
+        );
+    }
+
+    let active_index = tasks_panel_active_index(&pets, viewer);
+    pets
+        .iter()
+        .enumerate()
+        .map(|(index, pet)| render_pet_showcase_panel(state, viewer, pet, index == active_index))
+        .collect::<String>()
+}
+
 fn render_tasks_panel(state: &AppState, viewer: &UserProfile) -> String {
     let pets = sharing::list_accessible_pets(state, viewer);
     if pets.is_empty() {
@@ -8772,7 +8296,9 @@ fn render_tasks_panel(state: &AppState, viewer: &UserProfile) -> String {
 
     format!(
         r#"<div class="tasks-panel-carousel" id="tasks-panel-carousel">
-  <div class="tasks-pet-panels">{panels}</div>
+  <div class="cat-card-flip-viewport tasks-pet-flip-viewport">
+    <div class="cat-card-flip-face tasks-pet-panels">{panels}</div>
+  </div>
   {dots}
 </div>"#,
         panels = panels,
@@ -8813,12 +8339,16 @@ fn render_calendar_grid(
         html.push_str(r#"<span class="calendar-day empty"></span>"#);
     }
 
-    let event_days: HashSet<u32> =
-        sharing::visible_calendar_events_for_viewer(state, viewer, today)
-            .iter()
-            .filter(|e| e.month == month && e.year == year)
-            .map(|e| e.day)
-            .collect();
+    let month_events: Vec<_> = sharing::visible_calendar_events_for_viewer(state, viewer, today)
+        .into_iter()
+        .filter(|event| event.month == month && event.year == year)
+        .collect();
+    let event_days: HashSet<u32> = month_events.iter().map(|event| event.day).collect();
+    let birthday_days: HashSet<u32> = month_events
+        .iter()
+        .filter(|event| calendar_event_kind(event) == "birthday")
+        .map(|event| event.day)
+        .collect();
 
     let task_days: HashSet<u32> = calendar_profile
         .tasks
@@ -8835,6 +8365,9 @@ fn render_calendar_grid(
         }
         if event_days.contains(&day) {
             classes.push("has-event");
+        }
+        if birthday_days.contains(&day) {
+            classes.push("has-birthday");
         }
         if task_days.contains(&day) {
             classes.push("has-task");
@@ -8893,6 +8426,7 @@ fn render_calendar_data_json(
                 "time_label": event.time_label,
                 "time_minutes": event.time_minutes,
                 "user_created": event.id.is_some(),
+                "kind": calendar_event_kind(event),
             })
         })
         .collect();
@@ -9353,7 +8887,6 @@ async fn dashboard_page(
         .as_ref()
         .map(|u| u.last_name.clone())
         .unwrap_or_default();
-    let (level_progress_pct, level_progress_text) = level_progress(&profile);
     let (calendar_month, calendar_year) =
         resolve_calendar_view(query.cal_month.as_deref(), query.cal_year.as_deref());
     let (form_name, form_email) = form_prefill(&state, &jar).await;
@@ -9462,18 +8995,16 @@ async fn dashboard_page(
             "{{PAW_POINTS_BALANCE}}",
             &paw_points_amount_html(profile.paw_points),
         )
-        .replace("{{PARENT_LEVEL}}", &profile.parent_level.to_string())
         .replace(
             "{{CARE_STREAK_CHIP}}",
             &streak_rewards::render_care_streak_chip(&profile),
         )
         .replace("{{STREAK_CARD_SECTION}}", &streak_card_section)
-        .replace("{{LEVEL_PROGRESS}}", &level_progress_pct.to_string())
-        .replace(
-            "{{LEVEL_PROGRESS_TEXT}}",
-            &escape_html(&level_progress_text),
-        )
         .replace("{{PET_SWITCHER}}", &sharing::render_pet_switcher(&state, &profile))
+        .replace(
+            "{{PET_SHOWCASE_PANELS}}",
+            &render_pet_showcase_carousel(&state, &profile),
+        )
         .replace("{{SHARED_PET_BANNER}}", &sharing::render_shared_pet_banner(&state, &profile))
         .replace("{{PET_NAME}}", &escape_html(&display_pet_name(&pet_view)))
         .replace("{{PET_BLURB}}", &render_pet_blurb(&pet_view))
@@ -9528,10 +9059,6 @@ async fn dashboard_page(
         .replace(
             "{{VET_FOLLOWUP_MODAL}}",
             &render_vet_followup_modal(&profile, show_vet_followup),
-        )
-        .replace(
-            "{{PARENT_LEVEL_BREAKDOWN_MODAL}}",
-            &render_parent_level_breakdown(&profile),
         )
         .replace("{{SHARE_CARD_MODAL}}", render_share_card_modal())
         .replace("{{HEALTH_TAB_CONTENT}}", &render_health_tab(&pet_view))
@@ -10483,7 +10010,7 @@ async fn outfit_buy(
 
     let Some(outfit) = outfit_by_id(form.outfit_id.trim()) else {
         return if wants_json {
-            shop_buy_json_response(false, "outfit_invalid", None, "outfit", "", false, 0)
+            shop_buy_json_response(false, "outfit_invalid", None, "outfit", "", false)
         } else {
             outfit_redirect("", "outfit_invalid").into_response()
         };
@@ -10500,7 +10027,6 @@ async fn outfit_buy(
                 "outfit",
                 outfit.id,
                 false,
-                0,
             )
         } else {
             outfit_redirect("", "outfit_owned").into_response()
@@ -10516,22 +10042,20 @@ async fn outfit_buy(
                 "outfit",
                 outfit.id,
                 false,
-                0,
             )
         } else {
-            cat_home_need_paw_points_redirect(None, Some(outfit.id), None, None).into_response()
+            cat_home_need_paw_points_redirect(None, Some(outfit.id)).into_response()
         };
     }
 
     profile.paw_points -= outfit.price;
     profile.owned_outfits.push(outfit.id.to_string());
     profile.equipped_outfit = outfit.name.to_string();
-    let xp_earned = grant_purchase_xp(&mut profile, outfit.price);
     push_activity(
         &mut profile,
         &format!(
-            "Purchased {} for {} paw points (+{} XP).",
-            outfit.name, outfit.price, xp_earned
+            "Purchased {} for {} paw points.",
+            outfit.name, outfit.price
         ),
     );
 
@@ -10543,11 +10067,10 @@ async fn outfit_buy(
             "outfit",
             outfit.id,
             true,
-            xp_earned,
         ),
         Ok(()) => outfit_redirect("", "outfit_bought").into_response(),
         Err(_) if wants_json => {
-            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false, 0)
+            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
         }
         Err(_) => outfit_redirect("", "outfit_invalid").into_response(),
     }
@@ -10556,21 +10079,31 @@ async fn outfit_buy(
 async fn outfit_equip(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Form(form): Form<OutfitEquipForm>,
 ) -> impl IntoResponse {
+    let wants_json = wants_json_response(&headers);
     let email = match user_redirect_if_missing(&state, &jar) {
         Ok(email) => email,
-        Err(redirect) => return redirect,
+        Err(redirect) => return redirect.into_response(),
     };
 
     let Some(outfit) = outfit_by_id(form.outfit_id.trim()) else {
-        return outfit_redirect("", "outfit_invalid");
+        return if wants_json {
+            shop_buy_json_response(false, "outfit_invalid", None, "outfit", "", false)
+        } else {
+            outfit_redirect("", "outfit_invalid").into_response()
+        };
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
 
     if !profile.owned_outfits.iter().any(|id| id == outfit.id) {
-        return outfit_redirect("", "outfit_invalid");
+        return if wants_json {
+            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
+        } else {
+            outfit_redirect("", "outfit_invalid").into_response()
+        };
     }
 
     profile.equipped_outfit = outfit.name.to_string();
@@ -10581,8 +10114,19 @@ async fn outfit_equip(
     );
 
     match save_profile(&state, &profile).await {
-        Ok(()) => outfit_redirect("", "outfit_equipped"),
-        Err(_) => outfit_redirect("", "outfit_invalid"),
+        Ok(()) if wants_json => shop_buy_json_response(
+            true,
+            "outfit_equipped",
+            Some(&profile),
+            "outfit",
+            outfit.id,
+            true,
+        ),
+        Ok(()) => outfit_redirect("", "outfit_equipped").into_response(),
+        Err(_) if wants_json => {
+            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
+        }
+        Err(_) => outfit_redirect("", "outfit_invalid").into_response(),
     }
 }
 
@@ -10600,7 +10144,7 @@ async fn decor_buy(
 
     let Some(decor) = decor_by_id(form.decor_id.trim()) else {
         return if wants_json {
-            shop_buy_json_response(false, "decor_invalid", None, "decor", "", false, 0)
+            shop_buy_json_response(false, "decor_invalid", None, "decor", "", false)
         } else {
             Redirect::to("/home/cat-home?status=decor_invalid").into_response()
         };
@@ -10608,7 +10152,7 @@ async fn decor_buy(
 
     if decor.price == 0 {
         return if wants_json {
-            shop_buy_json_response(false, "decor_invalid", None, "decor", decor.id, false, 0)
+            shop_buy_json_response(false, "decor_invalid", None, "decor", decor.id, false)
         } else {
             Redirect::to("/home/cat-home?status=decor_invalid").into_response()
         };
@@ -10629,7 +10173,6 @@ async fn decor_buy(
                 "decor",
                 decor.id,
                 false,
-                0,
             )
         } else {
             Redirect::to("/home/cat-home?status=decor_owned").into_response()
@@ -10645,10 +10188,9 @@ async fn decor_buy(
                 "decor",
                 decor.id,
                 false,
-                0,
             )
         } else {
-            cat_home_need_paw_points_redirect(Some(decor.id), None, None, None).into_response()
+            cat_home_need_paw_points_redirect(Some(decor.id), None).into_response()
         };
     }
 
@@ -10658,12 +10200,11 @@ async fn decor_buy(
         .equipped_decor
         .insert(decor.slot.to_string(), decor.id.to_string());
     let pet_name = profile.pet_name.clone();
-    let xp_earned = grant_purchase_xp(&mut profile, decor.price);
     push_activity(
         &mut profile,
         &format!(
-            "Purchased {} for {} paw points for {}'s home (+{} XP).",
-            decor.name, decor.price, pet_name, xp_earned
+            "Purchased {} for {} paw points for {}'s home.",
+            decor.name, decor.price, pet_name
         ),
     );
 
@@ -10675,300 +10216,47 @@ async fn decor_buy(
             "decor",
             decor.id,
             true,
-            xp_earned,
         ),
         Ok(()) => Redirect::to("/home/cat-home?status=decor_bought").into_response(),
         Err(_) if wants_json => {
-            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false, 0)
+            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
         }
         Err(_) => Redirect::to("/home/cat-home?status=decor_invalid").into_response(),
-    }
-}
-
-async fn tap_boost_buy(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    headers: HeaderMap,
-    Form(form): Form<TapBoostBuyForm>,
-) -> impl IntoResponse {
-    let wants_json = wants_json_response(&headers);
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
-        Err(redirect) => return redirect.into_response(),
-    };
-
-    let Some(boost) = tap_boost_by_id(form.boost_id.trim()) else {
-        return if wants_json {
-            shop_buy_json_response(false, "boost_invalid", None, "boost", "", false, 0)
-        } else {
-            tap_boost_redirect("boost_invalid").into_response()
-        };
-    };
-
-    if boost.price == 0 {
-        return if wants_json {
-            shop_buy_json_response(false, "boost_invalid", None, "boost", boost.id, false, 0)
-        } else {
-            tap_boost_redirect("boost_invalid").into_response()
-        };
-    }
-
-    let mut profile = get_or_create_profile(&state, &email).await;
-
-    if !profile_has_pet(&profile) {
-        return Redirect::to("/home?tab=pet").into_response();
-    }
-
-    if profile.owned_tap_boosts.iter().any(|id| id == boost.id) {
-        return if wants_json {
-            shop_buy_json_response(
-                false,
-                "boost_owned",
-                Some(&profile),
-                "boost",
-                boost.id,
-                false,
-                0,
-            )
-        } else {
-            tap_boost_redirect("boost_owned").into_response()
-        };
-    }
-
-    if profile.paw_points < boost.price {
-        return if wants_json {
-            shop_buy_json_response(
-                false,
-                "need_paw_points",
-                Some(&profile),
-                "boost",
-                boost.id,
-                false,
-                0,
-            )
-        } else {
-            cat_home_need_paw_points_redirect(None, None, Some(boost.id), None).into_response()
-        };
-    }
-
-    profile.paw_points -= boost.price;
-    profile.owned_tap_boosts.push(boost.id.to_string());
-    profile.equipped_tap_boost = boost.id.to_string();
-    let xp_earned = grant_purchase_xp(&mut profile, boost.price);
-    push_activity(
-        &mut profile,
-        &format!(
-            "Purchased {} tap boost (+{} per pet) for {} paw points (+{} XP).",
-            boost.name, boost.tap_reward, boost.price, xp_earned
-        ),
-    );
-
-    match save_profile(&state, &profile).await {
-        Ok(()) if wants_json => shop_buy_json_response(
-            true,
-            "boost_bought",
-            Some(&profile),
-            "boost",
-            boost.id,
-            true,
-            xp_earned,
-        ),
-        Ok(()) => tap_boost_redirect("boost_bought").into_response(),
-        Err(_) if wants_json => {
-            shop_buy_json_response(false, "boost_invalid", Some(&profile), "boost", boost.id, false, 0)
-        }
-        Err(_) => tap_boost_redirect("boost_invalid").into_response(),
-    }
-}
-
-async fn tap_boost_equip(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Form(form): Form<TapBoostEquipForm>,
-) -> impl IntoResponse {
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
-        Err(redirect) => return redirect,
-    };
-
-    let Some(boost) = tap_boost_by_id(form.boost_id.trim()) else {
-        return tap_boost_redirect("boost_invalid");
-    };
-
-    let mut profile = get_or_create_profile(&state, &email).await;
-
-    if !profile_has_pet(&profile) {
-        return Redirect::to("/home?tab=pet");
-    }
-
-    if !profile.owned_tap_boosts.iter().any(|id| id == boost.id) {
-        return tap_boost_redirect("boost_invalid");
-    }
-
-    profile.equipped_tap_boost = boost.id.to_string();
-    push_activity(
-        &mut profile,
-        &format!(
-            "Activated {} tap boost (+{} per pet).",
-            boost.name, boost.tap_reward
-        ),
-    );
-
-    match save_profile(&state, &profile).await {
-        Ok(()) => tap_boost_redirect("boost_equipped"),
-        Err(_) => tap_boost_redirect("boost_invalid"),
-    }
-}
-
-async fn petting_bonus_buy(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    headers: HeaderMap,
-    Form(form): Form<PettingBonusBuyForm>,
-) -> impl IntoResponse {
-    let wants_json = wants_json_response(&headers);
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
-        Err(redirect) => return redirect.into_response(),
-    };
-
-    let Some(bonus) = petting_bonus_by_id(form.bonus_id.trim()) else {
-        return if wants_json {
-            shop_buy_json_response(false, "petting_bonus_invalid", None, "bonus", "", false, 0)
-        } else {
-            petting_bonus_redirect("petting_bonus_invalid").into_response()
-        };
-    };
-
-    let mut profile = get_or_create_profile(&state, &email).await;
-
-    if !profile_has_pet(&profile) {
-        return Redirect::to("/home?tab=pet").into_response();
-    }
-
-    if profile.paw_points < bonus.price {
-        return if wants_json {
-            shop_buy_json_response(
-                false,
-                "need_paw_points",
-                Some(&profile),
-                "bonus",
-                bonus.id,
-                false,
-                0,
-            )
-        } else {
-            cat_home_need_paw_points_redirect(None, None, None, Some(bonus.id)).into_response()
-        };
-    }
-
-    profile.paw_points -= bonus.price;
-    add_petting_bonus_to_inventory(&mut profile, bonus.id);
-    let xp_earned = grant_purchase_xp(&mut profile, bonus.price);
-    push_activity(
-        &mut profile,
-        &format!(
-            "Purchased {} petting bonus ({}× for {} seconds) for {} paw points (+{} XP).",
-            bonus.name, bonus.multiplier, bonus.duration_secs, bonus.price, xp_earned
-        ),
-    );
-
-    match save_profile(&state, &profile).await {
-        Ok(()) if wants_json => shop_buy_json_response(
-            true,
-            "petting_bonus_bought",
-            Some(&profile),
-            "bonus",
-            bonus.id,
-            false,
-            xp_earned,
-        ),
-        Ok(()) => petting_bonus_redirect("petting_bonus_bought").into_response(),
-        Err(_) if wants_json => shop_buy_json_response(
-            false,
-            "petting_bonus_invalid",
-            Some(&profile),
-            "bonus",
-            bonus.id,
-            false,
-            0,
-        ),
-        Err(_) => petting_bonus_redirect("petting_bonus_invalid").into_response(),
-    }
-}
-
-async fn petting_bonus_activate(
-    State(state): State<AppState>,
-    jar: CookieJar,
-    Form(form): Form<PettingBonusActivateForm>,
-) -> impl IntoResponse {
-    let email = match user_redirect_if_missing(&state, &jar) {
-        Ok(email) => email,
-        Err(redirect) => return redirect,
-    };
-
-    let Some(bonus) = petting_bonus_by_id(form.bonus_id.trim()) else {
-        return petting_bonus_redirect("petting_bonus_invalid");
-    };
-
-    let mut profile = get_or_create_profile(&state, &email).await;
-
-    if !profile_has_pet(&profile) {
-        return Redirect::to("/home?tab=pet");
-    }
-
-    clear_expired_petting_bonus(&mut profile);
-
-    if active_petting_bonus_multiplier(&profile).is_some() {
-        return petting_bonus_redirect("petting_bonus_active");
-    }
-
-    if petting_bonus_inventory_count(&profile, bonus.id) == 0 {
-        return petting_bonus_redirect("petting_bonus_empty");
-    }
-
-    if !consume_petting_bonus_from_inventory(&mut profile, bonus.id) {
-        return petting_bonus_redirect("petting_bonus_empty");
-    }
-
-    profile.active_petting_bonus = bonus.id.to_string();
-    profile.petting_bonus_expires_at = timestamp_now() + u64::from(bonus.duration_secs);
-    push_activity(
-        &mut profile,
-        &format!(
-            "Activated {} petting bonus ({}× points for {} seconds).",
-            bonus.name, bonus.multiplier, bonus.duration_secs
-        ),
-    );
-
-    match save_profile(&state, &profile).await {
-        Ok(()) => petting_bonus_redirect("petting_bonus_activated"),
-        Err(_) => petting_bonus_redirect("petting_bonus_invalid"),
     }
 }
 
 async fn decor_equip(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: HeaderMap,
     Form(form): Form<DecorEquipForm>,
 ) -> impl IntoResponse {
+    let wants_json = wants_json_response(&headers);
     let email = match user_redirect_if_missing(&state, &jar) {
         Ok(email) => email,
-        Err(redirect) => return redirect,
+        Err(redirect) => return redirect.into_response(),
     };
 
     let Some(decor) = decor_by_id(form.decor_id.trim()) else {
-        return Redirect::to("/home/cat-home?status=decor_invalid");
+        return if wants_json {
+            shop_buy_json_response(false, "decor_invalid", None, "decor", "", false)
+        } else {
+            Redirect::to("/home/cat-home?status=decor_invalid").into_response()
+        };
     };
 
     let mut profile = get_or_create_profile(&state, &email).await;
 
     if !profile_has_pet(&profile) {
-        return Redirect::to("/home?tab=pet");
+        return Redirect::to("/home?tab=pet").into_response();
     }
 
     if !profile.owned_decor.iter().any(|id| id == decor.id) {
-        return Redirect::to("/home/cat-home?status=decor_invalid");
+        return if wants_json {
+            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
+        } else {
+            Redirect::to("/home/cat-home?status=decor_invalid").into_response()
+        };
     }
 
     profile
@@ -10981,8 +10269,19 @@ async fn decor_equip(
     );
 
     match save_profile(&state, &profile).await {
-        Ok(()) => Redirect::to("/home/cat-home?status=decor_equipped"),
-        Err(_) => Redirect::to("/home/cat-home?status=decor_invalid"),
+        Ok(()) if wants_json => shop_buy_json_response(
+            true,
+            "decor_equipped",
+            Some(&profile),
+            "decor",
+            decor.id,
+            true,
+        ),
+        Ok(()) => Redirect::to("/home/cat-home?status=decor_equipped").into_response(),
+        Err(_) if wants_json => {
+            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
+        }
+        Err(_) => Redirect::to("/home/cat-home?status=decor_invalid").into_response(),
     }
 }
 
@@ -11009,79 +10308,22 @@ async fn paw_points_balance(State(state): State<AppState>, jar: CookieJar) -> Re
         .into_response()
 }
 
-async fn pet_pet(State(state): State<AppState>, jar: CookieJar, headers: HeaderMap) -> Response {
-    let wants_json = wants_json_response(&headers);
+async fn playdate_interact(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(request): Json<playdates::PlaydateInteractRequest>,
+) -> Response {
     let Some(email) = api_user_email(&state, &jar) else {
-        return api_auth_error(wants_json);
+        return api_auth_error(true);
     };
 
-    let profile = get_or_create_profile(&state, &email).await;
-    if !profile_has_pet(&profile) {
-        return if wants_json {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
-            )
-                .into_response()
-        } else {
-            Redirect::to("/home?tab=pet").into_response()
-        };
-    }
-
-    let pet_view = sharing::active_pet_view_profile(&state, &profile);
-    if memorial::active_pet_is_deceased(&pet_view) {
-        return if wants_json {
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "ok": true,
-                    "status": "memorial",
-                    "message": "Your angel cat is resting peacefully."
-                })),
-            )
-                .into_response()
-        } else {
-            Redirect::to("/home/cat-home?status=memorial_peace").into_response()
-        };
-    }
-
-    let mut profile = profile;
-    clear_expired_petting_bonus(&mut profile);
-    let (tap_reward, tap_boost_base, tap_multiplier) = effective_tap_reward(&profile);
-    profile.paw_points = profile.paw_points.saturating_add(tap_reward);
-    let petting_bonus_expires_at = if tap_multiplier.is_some() {
-        Some(profile.petting_bonus_expires_at)
-    } else {
-        None
-    };
-
-    match save_profile(&state, &profile).await {
-        Ok(()) => {
-            if wants_json {
-                Json(PetPetResponse {
-                    ok: true,
-                    paw_points: profile.paw_points,
-                    tap_reward,
-                    tap_boost_base,
-                    tap_multiplier,
-                    petting_bonus_expires_at,
-                })
-                .into_response()
-            } else {
-                Redirect::to("/home/cat-home").into_response()
-            }
-        }
-        Err(_) => {
-            if wants_json {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "ok": false, "status": "error" })),
-                )
-                    .into_response()
-            } else {
-                Redirect::to("/home/cat-home?status=pet_pet_failed").into_response()
-            }
-        }
+    match playdates::apply_playdate_interaction(&state, &email, &request).await {
+        Ok(response) => Json(response).into_response(),
+        Err(status) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "ok": false, "status": status })),
+        )
+            .into_response(),
     }
 }
 
@@ -11095,17 +10337,15 @@ async fn cat_home_page(
         Err(redirect) => return redirect.into_response(),
     };
 
-    let profile = get_or_create_profile(&state, &email).await;
+    let mut profile = get_or_create_profile(&state, &email).await;
     if !profile_has_pet(&profile) {
         return Redirect::to("/home?tab=pet").into_response();
     }
 
-    let pet_view = sharing::active_pet_view_profile(&state, &profile);
-    let mut profile = profile;
-    let expires_before = profile.petting_bonus_expires_at;
-    clear_expired_petting_bonus(&mut profile);
-    if profile.petting_bonus_expires_at != expires_before {
-        let _ = save_profile(&state, &profile).await;
+    if let Some(pet_id) = query.pet.as_deref() {
+        if pet_id_exists(&profile, pet_id) && set_active_pet(&mut profile, pet_id) {
+            let _ = save_profile(&state, &profile).await;
+        }
     }
 
     let user = user_for_email(&state, &email);
@@ -11113,12 +10353,8 @@ async fn cat_home_page(
         .as_ref()
         .map(|u| u.username.clone())
         .unwrap_or_else(|| "Parent".to_string());
-    let pet_name = display_pet_name(&pet_view);
-    let cat_home_scene = if memorial::active_pet_is_deceased(&pet_view) {
-        memorial::render_angel_cat_home_scene(&pet_view)
-    } else {
-        render_cat_home_scene(&pet_view)
-    };
+    let (cat_home_title, cat_home_intro, cat_home_play_switcher, cat_home_layout) =
+        render_cat_home_layout(&state, &profile);
 
     match fs::read_to_string("templates/cat-home.html").await {
         Ok(template) => {
@@ -11129,23 +10365,13 @@ async fn cat_home_page(
                     "{{STATUS_BLOCK}}",
                     &cat_home_status_block(query.status.as_deref()),
                 )
-                .replace("{{PET_NAME}}", &escape_html(&pet_name))
+                .replace("{{CAT_HOME_PLAY_SWITCHER}}", &cat_home_play_switcher)
+                .replace("{{CAT_HOME_TITLE}}", &escape_html(&cat_home_title))
+                .replace("{{CAT_HOME_INTRO}}", &escape_html(&cat_home_intro))
+                .replace("{{PET_NAME}}", &escape_html(&cat_home_title))
                 .replace("{{PAW_POINTS}}", &profile.paw_points.to_string())
                 .replace("{{PAW_POINTS_ICON}}", paw_points_icon_html())
-                .replace("{{CAT_HOME_SCENE}}", &cat_home_scene)
-                .replace(
-                    "{{CAT_HOME_OUTFIT_SHOP}}",
-                    &render_cat_home_outfit_shop(&profile),
-                )
-                .replace(
-                    "{{CAT_HOME_TAP_BOOST_SHOP}}",
-                    &render_cat_home_tap_boost_shop(&profile),
-                )
-                .replace(
-                    "{{CAT_HOME_PETTING_BONUS_SHOP}}",
-                    &render_cat_home_petting_bonus_shop(&profile),
-                )
-                .replace("{{DECOR_CARDS}}", &render_decor_cards(&profile))
+                .replace("{{CAT_HOME_LAYOUT}}", &cat_home_layout)
                 .replace(
                     "{{NEED_PAW_POINTS_MODAL}}",
                     &render_need_paw_points_modal(
@@ -11182,7 +10408,6 @@ fn task_dashboard_json_response(
     show_vet_followup: bool,
     share_card: Option<share_cards::ShareCardOffer>,
 ) -> Response {
-    let (level_progress_pct, level_progress_text) = level_progress(profile);
     let calendar_month = current_calendar_month();
     let calendar_year = current_calendar_year();
     let calendar_profile = sharing::calendar_view_profile(state, profile);
@@ -11204,11 +10429,6 @@ fn task_dashboard_json_response(
         activity_html: render_activity_list(profile),
         paw_points: profile.paw_points,
         paw_from_tasks: task_rewards_earned(profile),
-        xp_from_tasks: task_xp_earned(profile),
-        parent_level: profile.parent_level,
-        parent_xp: profile.parent_xp,
-        level_progress: level_progress_pct,
-        level_progress_text,
         calendar_data,
         show_vet_followup,
         care_streak_days: profile.care_streak_days,
@@ -11631,6 +10851,7 @@ async fn task_toggle(
 
         if owner.tasks[index].completed {
             let (title, reward) = reopen_completed_task(&mut owner, index);
+            sort_tasks_by_time(&mut owner.tasks);
             viewer.paw_points = viewer.paw_points.saturating_sub(reward);
             push_activity(
                 &mut viewer,
@@ -11662,13 +10883,12 @@ async fn task_toggle(
             owner.tasks[index].due_month = Some(today.month());
             owner.tasks[index].due_year = Some(today.year() as u32);
         }
+        sort_tasks_by_time(&mut owner.tasks);
 
         viewer.paw_points += reward;
-        let xp_earned = xp_for_task_reward(reward);
-        let level_up = award_parent_xp(&mut viewer, xp_earned);
         push_activity(
             &mut viewer,
-            &format!("Completed \"{title}\" and earned {reward} paw points (+{xp_earned} XP)."),
+            &format!("Completed \"{title}\" and earned {reward} paw points."),
         );
 
         let streak_milestone = if share_cards::is_care_streak_task(task_id) {
@@ -11685,7 +10905,6 @@ async fn task_toggle(
 
         let share_card = share_cards::share_offer_for_task_completion(
             &viewer,
-            level_up,
             streak_milestone,
             &stripe_payments::public_app_url(),
             timestamp_now(),
@@ -11735,6 +10954,7 @@ async fn task_toggle(
 
     if viewer.tasks[index].completed {
         let (title, reward) = reopen_completed_task(&mut viewer, index);
+        sort_tasks_by_time(&mut viewer.tasks);
         push_activity(
             &mut viewer,
             &format!("Reopened task: {title}. −{reward} paw points."),
@@ -11762,13 +10982,12 @@ async fn task_toggle(
         viewer.tasks[index].due_month = Some(today.month());
         viewer.tasks[index].due_year = Some(today.year() as u32);
     }
+    sort_tasks_by_time(&mut viewer.tasks);
 
     viewer.paw_points += reward;
-    let xp_earned = xp_for_task_reward(reward);
-    let level_up = award_parent_xp(&mut viewer, xp_earned);
     push_activity(
         &mut viewer,
-        &format!("Completed \"{title}\" and earned {reward} paw points (+{xp_earned} XP)."),
+        &format!("Completed \"{title}\" and earned {reward} paw points."),
     );
 
     let streak_milestone = if share_cards::is_care_streak_task(task_id) {
@@ -11785,7 +11004,6 @@ async fn task_toggle(
 
     let share_card = share_cards::share_offer_for_task_completion(
         &viewer,
-        level_up,
         streak_milestone,
         &stripe_payments::public_app_url(),
         timestamp_now(),
@@ -14226,14 +13444,9 @@ mod tests {
             memorial_videos: Vec::new(),
             memorial_comfort_seen: false,
             pending_purrfect_idea_ids: vec![],
-            owned_decor: default_owned_decor(),
-            equipped_decor: default_equipped_decor(),
-            owned_tap_boosts: default_owned_tap_boosts(),
-            equipped_tap_boost: default_equipped_tap_boost(),
-            petting_bonus_inventory: HashMap::new(),
-            active_petting_bonus: String::new(),
-            petting_bonus_expires_at: 0,
-            owned_breed_guides: Vec::new(),
+        owned_decor: default_owned_decor(),
+        equipped_decor: default_equipped_decor(),
+        owned_breed_guides: Vec::new(),
             premium_unlocked: false,
             additional_pets: Vec::new(),
             active_pet_id: PRIMARY_PET_ID.to_string(),
@@ -14247,6 +13460,7 @@ mod tests {
             notification_sent_dates: HashMap::new(),
             onboarding_emails_enabled: true,
             onboarding_emails_sent: Vec::new(),
+            cat_friendships: HashMap::new(),
         }
     }
 
@@ -14368,6 +13582,32 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.title.contains("Persian breed wellness exam")));
+    }
+
+    #[test]
+    fn health_watch_outs_tasks_link_to_breed_guide_section() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "British Shorthair".to_string();
+        profile.owned_breed_guides.push("british-shorthair".to_string());
+
+        assert!(ensure_breed_guide_tasks(&mut profile));
+        let breed_task_ids: Vec<String> = profile
+            .tasks
+            .iter()
+            .filter(|task| breed_guides::is_breed_guide_task_id(&task.id))
+            .map(|task| task.id.clone())
+            .collect();
+        assert!(
+            breed_task_ids.iter().any(|task_id| {
+                breed_guides::is_health_watch_outs_task(task_id)
+            }),
+            "expected health watch-outs task, got {breed_task_ids:?}"
+        );
+
+        let html = render_task_list(&profile);
+        assert!(html.contains("task-health-watch-link"));
+        assert!(html.contains("/home/breed-guide/british-shorthair#guide-health"));
+        assert!(html.contains("Peek at British Shorthair health watch-outs"));
     }
 
     #[test]
@@ -14568,10 +13808,15 @@ mod tests {
         let mut profile = test_profile_weeks(52, "indoor");
         assert!(refresh_profile_tasks(&mut profile));
 
-        let times: Vec<u16> = profile.tasks.iter().map(|task| task.time_minutes).collect();
+        let incomplete_times: Vec<u16> = profile
+            .tasks
+            .iter()
+            .filter(|task| !task.completed)
+            .map(|task| task.time_minutes)
+            .collect();
         assert!(
-            times.windows(2).all(|pair| pair[0] <= pair[1]),
-            "expected tasks in time order, got {times:?}"
+            incomplete_times.windows(2).all(|pair| pair[0] <= pair[1]),
+            "expected incomplete tasks in time order, got {incomplete_times:?}"
         );
 
         assert!(apply_task_time_to_profile(
@@ -14585,6 +13830,47 @@ mod tests {
             .position(|task| task.id == "play_session")
             .expect("play task");
         assert_eq!(play_index, 0, "early play time should move task to the top");
+    }
+
+    #[test]
+    fn completed_tasks_sort_to_bottom_of_list() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        assert!(refresh_profile_tasks(&mut profile));
+
+        let litter_index = profile
+            .tasks
+            .iter()
+            .position(|task| task.id == "litter_check" && task.pet_id == PRIMARY_PET_ID)
+            .expect("litter check task");
+        profile.tasks[litter_index].completed = true;
+        sort_tasks_by_time(&mut profile.tasks);
+
+        let first_incomplete = profile
+            .tasks
+            .iter()
+            .position(|task| !task.completed)
+            .expect("incomplete task");
+        let last_completed = profile
+            .tasks
+            .iter()
+            .rposition(|task| task.completed)
+            .expect("completed task");
+        assert!(
+            first_incomplete < last_completed,
+            "completed tasks should appear after incomplete tasks"
+        );
+
+        let html = render_task_list(&profile);
+        let litter_pos = html
+            .find(r#"class="task-item task-timeline-item completed""#)
+            .expect("completed litter task row");
+        let incomplete_pos = html
+            .find(r#"class="task-item task-timeline-item""#)
+            .expect("incomplete task row");
+        assert!(
+            incomplete_pos < litter_pos,
+            "completed tasks should render below incomplete tasks"
+        );
     }
 
     #[test]
@@ -14649,56 +13935,6 @@ mod tests {
 
         let titles: Vec<_> = events.iter().map(|event| event.title.as_str()).collect();
         assert_eq!(titles, vec!["Morning brush", "Lunch water", "Evening meds"]);
-    }
-
-    #[test]
-    fn parent_level_breakdown_computes_xp_and_paw_points() {
-        let mut profile = test_profile_weeks(12, "indoor");
-        profile.parent_level = 3;
-        profile.parent_xp = 40;
-        profile.paw_points = 85;
-        profile.tasks = vec![UserTask {
-            id: "t1".to_string(),
-            title: "Feed".to_string(),
-            completed: true,
-            due_label: "Today".to_string(),
-            due_day: None,
-            due_month: None,
-            due_year: None,
-            time_minutes: 480,
-            reward: 20,
-            pet_id: PRIMARY_PET_ID.to_string(),
-        }];
-        profile.owned_outfits = vec!["classic_collar".to_string(), "cozy_sweater".to_string()];
-        profile.activity.push(ProfileActivity {
-            message: "Purchased 100 paw points via Stripe Checkout.".to_string(),
-            timestamp: 1,
-        });
-
-        assert_eq!(lifetime_xp(&profile), 240);
-        assert_eq!(task_xp_earned(&profile), 15);
-        assert_eq!(task_rewards_earned(&profile), 20);
-        assert_eq!(outfit_points_spent(&profile), 50);
-        assert_eq!(purchased_paw_points(&profile), 100);
-
-        let html = render_parent_level_breakdown(&profile);
-        assert!(html.contains("Parent Level 3 Breakdown"));
-        assert!(html.contains("40 / 100"));
-        assert!(html.contains("href=\"/home/cat-home\""));
-        assert!(html.contains("85"));
-        assert!(html.contains("paw-points-icon"));
-        assert!(html.contains("+20"));
-        assert!(html.contains("-50"));
-    }
-
-    #[test]
-    fn level_progress_reports_remaining_xp() {
-        let mut profile = test_profile_weeks(12, "indoor");
-        profile.parent_level = 2;
-        profile.parent_xp = 75;
-        let (pct, text) = level_progress(&profile);
-        assert_eq!(pct, 75);
-        assert!(text.contains("25 XP to reach level 3"));
     }
 
     #[test]
@@ -14849,20 +14085,61 @@ mod tests {
         profile.pet_age_years = Some(2);
 
         let today = NaiveDate::from_ymd_opt(2026, 3, 1).expect("date");
-        let horizon = today + Duration::days(730);
-        let events = generate_birthday_calendar_events(&profile, today, horizon);
-        assert!(events.iter().any(|event| {
-            event.year == 2026
-                && event.month == 6
-                && event.day == 15
-                && event.title.contains("birthday")
-        }));
-        assert!(events.iter().any(|event| {
-            event.year == 2027
-                && event.month == 6
-                && event.day == 15
-                && event.title.contains("birthday")
-        }));
+        let events = generate_birthday_calendar_events(&profile, today);
+        for year in [2025_u32, 2026, 2027, 2028] {
+            assert!(
+                events.iter().any(|event| {
+                    event.year == year
+                        && event.month == 6
+                        && event.day == 15
+                        && event.title.contains("birthday")
+                }),
+                "missing birthday for {year}"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_calendar_includes_birthdays_for_every_household_cat() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_name = "Cinder".to_string();
+        profile.pet_birth_date = Some("2020-06-07".to_string());
+        profile.pet_age_weeks = None;
+        profile.pet_age_years = Some(6);
+        profile.additional_pets.push(HouseholdPet {
+            id: "pet_luna".to_string(),
+            pet_name: "Luna".to_string(),
+            pet_breed: "Siamese".to_string(),
+            pet_color: "Seal point".to_string(),
+            pet_mood: "Happy".to_string(),
+            pet_age_weeks: None,
+            pet_age_years: Some(2),
+            pet_birth_date: Some("2024-03-20".to_string()),
+            last_vet_date: None,
+            never_been_to_vet: false,
+            pet_conditions: String::new(),
+            pet_medications: String::new(),
+            pet_indoor_outdoor: Some("indoor".to_string()),
+            pet_vaccines_unknown: false,
+            vaccine_history: vec![],
+            care_schedule: default_care_schedule(),
+            pet_photo_url: None,
+            pet_video_url: None,
+            pet_video_clip_start: None,
+            pet_video_clip_duration: None,
+            pet_video_zoom: None,
+            pet_video_offset_x: None,
+            pet_video_offset_y: None,
+            deceased: false,
+            deceased_at: None,
+            memorial_videos: vec![],
+            memorial_comfort_seen: false,
+        });
+
+        let today = NaiveDate::from_ymd_opt(2026, 6, 5).expect("date");
+        let events = merge_calendar_events(&profile, today);
+        assert!(events.iter().any(|event| event.title.contains("Cinder's birthday")));
+        assert!(events.iter().any(|event| event.title.contains("Luna's birthday")));
     }
 
     #[test]
@@ -15354,16 +14631,170 @@ mod tests {
     }
 
     #[test]
+    fn friendship_key_is_canonical_between_two_cats() {
+        let key_ab = playdates::friendship_key("a@x.com", "pet_a", "b@x.com", "pet_b");
+        let key_ba = playdates::friendship_key("b@x.com", "pet_b", "a@x.com", "pet_a");
+        assert_eq!(key_ab, key_ba);
+    }
+
+    #[test]
+    fn friendship_tiers_cover_positive_and_negative_scores() {
+        assert_eq!(playdates::friendship_tier(-25).0, "Frenemies");
+        assert_eq!(playdates::friendship_tier(0).0, "Strangers");
+        assert_eq!(playdates::friendship_tier(85).0, "Besties");
+    }
+
+    fn test_profile_with_second_cat(name: &str, id: &str) -> UserProfile {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.premium_unlocked = true;
+        profile.pet_name = "Cinder".to_string();
+        profile.additional_pets.push(HouseholdPet {
+            id: id.to_string(),
+            pet_name: name.to_string(),
+            pet_breed: "Siamese".to_string(),
+            pet_color: "Seal point".to_string(),
+            pet_mood: "Happy".to_string(),
+            pet_age_weeks: None,
+            pet_age_years: Some(2),
+            pet_birth_date: Some("2024-06-01".to_string()),
+            last_vet_date: None,
+            never_been_to_vet: false,
+            pet_conditions: String::new(),
+            pet_medications: String::new(),
+            pet_indoor_outdoor: Some("indoor".to_string()),
+            vaccine_history: vec![],
+            pet_vaccines_unknown: false,
+            care_schedule: default_care_schedule(),
+            pet_photo_url: None,
+            pet_video_url: None,
+            pet_video_clip_start: None,
+            pet_video_clip_duration: None,
+            pet_video_zoom: None,
+            pet_video_offset_x: None,
+            pet_video_offset_y: None,
+            deceased: false,
+            deceased_at: None,
+            memorial_videos: Vec::new(),
+            memorial_comfort_seen: false,
+        });
+        profile
+    }
+
+    #[test]
+    fn cat_home_layout_renders_one_shared_home_for_multiple_cats() {
+        let state = routing_test_state();
+        let profile = test_profile_with_second_cat("Luna", "pet_luna");
+        let (title, intro, play_switcher, layout) = render_cat_home_layout(&state, &profile);
+        assert_eq!(title, "Family Cat Home");
+        assert!(intro.contains("share one family home"));
+        assert!(play_switcher.contains("cat-home-play-toolbar"));
+        assert!(play_switcher.contains("cat-home-pet-switcher"));
+        assert!(play_switcher.contains(r#"data-pet-id="pet_luna""#));
+        assert!(play_switcher.contains("Luna"));
+        assert!(play_switcher.contains("Playing as"));
+        assert!(!layout.contains("cat-home-carousel"));
+        assert!(!layout.contains("cat-home-pet-panel"));
+        assert!(!layout.contains("cat-home-play-toolbar"));
+        assert_eq!(layout.matches("cat-home-stage-card").count(), 1);
+    }
+
+    #[test]
+    fn cat_home_scene_labels_housemates_for_multi_cat_homes() {
+        let state = routing_test_state();
+        let profile = test_profile_with_second_cat("Luna", "pet_luna");
+        let scene = render_cat_home_scene(&state, &profile, PRIMARY_PET_ID);
+        assert!(scene.contains("Cinder"));
+        assert!(scene.contains("Luna"));
+        assert!(scene.contains("cat-home-pet-role-chip"));
+        assert!(scene.contains("Playing as Cinder"));
+        assert!(scene.contains("Your housemate"));
+        assert!(scene.contains("cat-home-housemate"));
+        assert!(scene.contains("cat-home-playdate-hint"));
+        assert!(scene.contains("family cat home"));
+        assert!(scene.contains("cat-home-friendships-panel"));
+        assert!(scene.contains("cat-home-friendship-meter"));
+        assert!(scene.contains("Cinder&apos;s friendships"));
+        assert!(scene.contains("cat-home-friendship-name"));
+    }
+
+    #[test]
+    fn friendship_progress_percent_maps_clamped_scores() {
+        assert_eq!(playdates::friendship_progress_percent(-50), 0);
+        assert_eq!(playdates::friendship_progress_percent(0), 33);
+        assert_eq!(playdates::friendship_progress_percent(100), 100);
+        assert_eq!(playdates::friendship_progress_percent(200), 100);
+    }
+
+    #[test]
+    fn ensure_decor_state_repairs_missing_equipped_slots_from_owned_decor() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.owned_decor = vec![
+            "sunny_nook".to_string(),
+            "soft_mat".to_string(),
+            "cloud_bed".to_string(),
+        ];
+        profile.equipped_decor.clear();
+
+        assert!(ensure_decor_state(&mut profile));
+        assert_eq!(
+            profile.equipped_decor.get("room").map(String::as_str),
+            Some("sunny_nook")
+        );
+        assert_eq!(
+            profile.equipped_decor.get("rug").map(String::as_str),
+            Some("soft_mat")
+        );
+        assert_eq!(
+            profile.equipped_decor.get("bed").map(String::as_str),
+            Some("cloud_bed")
+        );
+    }
+
+    fn friendship_level_display_shows_points_out_of_next_tier_goal() {
+        assert_eq!(playdates::format_friendship_level_display(42), "42 / 55");
+        assert_eq!(playdates::format_friendship_level_display(0), "0 / 10");
+        assert_eq!(playdates::format_friendship_level_display(85), "85 / 100");
+        assert_eq!(playdates::friendship_next_level_target(54), 55);
+        assert_eq!(playdates::friendship_tier_progress_percent(42), 48);
+        assert_eq!(playdates::friendship_tier_progress_percent(54), 96);
+    }
+
+    #[test]
+    fn overly_friendly_playdate_actions_backfire_before_buddies() {
+        let groom = playdates::action_by_id("groom").expect("groom");
+        let chirp = playdates::action_by_id("chirp").expect("chirp");
+        let sniff = playdates::action_by_id("sniff").expect("sniff");
+        let play = playdates::action_by_id("play_together").expect("play together");
+
+        assert_eq!(playdates::effective_friendship_delta(54, groom), -10);
+        assert_eq!(playdates::effective_friendship_delta(30, groom), -10);
+        assert_eq!(playdates::effective_friendship_delta(55, groom), 10);
+        assert_eq!(playdates::effective_friendship_delta(40, chirp), 5);
+        assert_eq!(playdates::effective_friendship_delta(40, sniff), 4);
+        assert_eq!(playdates::effective_friendship_delta(40, play), -14);
+        assert!(playdates::playdate_action_backfired(40, groom));
+        assert!(!playdates::playdate_action_backfired(55, groom));
+        assert!(!playdates::playdate_action_backfired(40, chirp));
+        assert!(!playdates::playdate_action_backfired(40, sniff));
+    }
+
+    #[test]
     fn cat_home_scene_renders_room_and_starter_decor() {
+        let state = routing_test_state();
         let mut profile = test_profile_weeks(52, "indoor");
         profile.pet_breed = "Domestic Shorthair".to_string();
-        let scene = render_cat_home_scene(&profile);
+        let scene = render_cat_home_scene(&state, &profile, PRIMARY_PET_ID);
         assert!(scene.contains(r#"data-room="sunny_nook""#));
+        assert!(scene.contains("cat-home-playdate-scene"));
         assert!(scene.contains("cat-home-pet-stage"));
         assert!(scene.contains("cat-home-pet-stack"));
         assert!(scene.contains("cat-home-pet-bubble"));
-        assert!(scene.contains("pet me!"));
+        assert!(scene.contains("cat-home-pet-role-chip"));
+        assert!(scene.contains("cat-home-interactive"));
+        assert!(scene.contains("cat-home-decor-layer"));
         assert!(scene.contains("Soft Mat"));
+        assert!(scene.contains("cat-home-equipped-strip"));
+        assert!(scene.contains("Sunny Window Nook"));
     }
 
     #[test]
@@ -15374,7 +14805,7 @@ mod tests {
         profile.owned_decor = default_owned_decor();
         profile.equipped_decor = default_equipped_decor();
 
-        let cards = render_decor_cards(&profile);
+        let cards = render_decor_cards(&profile, false);
         assert!(cards.contains("Cozy Hammock"));
         assert!(cards.contains("need-paw-points-trigger"));
         assert!(cards.contains(r#"data-shop-purchasable="true""#));
@@ -15455,8 +14886,6 @@ mod tests {
             Query(NeedPawPointsQuery {
                 decor_id: Some("hammock".to_string()),
                 outfit_id: None,
-                boost_id: None,
-                petting_bonus_id: None,
                 return_to: Some("cat_home".to_string()),
             }),
         )
@@ -15544,134 +14973,6 @@ mod tests {
     }
 
     #[test]
-    fn cat_home_tap_boost_shop_renders_slider_with_rewards() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.pet_breed = "Domestic Shorthair".to_string();
-        profile.paw_points = 100;
-        let shop = render_cat_home_tap_boost_shop(&profile);
-        assert!(shop.contains("cat-home-tap-boost-shop"));
-        assert!(shop.contains("cat-home-tap-boost-slider"));
-        assert!(shop.contains("Level up petting"));
-        assert!(shop.contains("+1 per pet"));
-        assert!(shop.contains("Happy Taps"));
-        assert!(shop.contains(r#"name="return_to" value="cat_home""#));
-        assert!(shop.contains(r#"action="/home/tap-boosts/buy""#));
-    }
-
-    #[test]
-    fn equipped_tap_boost_reward_uses_active_boost() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.equipped_tap_boost = "mega_cuddles".to_string();
-        assert_eq!(equipped_tap_boost_reward(&profile), 5);
-    }
-
-    #[tokio::test]
-    async fn tap_boost_buy_activates_happy_taps() {
-        use axum::body::Body;
-        use axum::http::Request;
-        use tower::util::ServiceExt;
-
-        let state = routing_test_state();
-        let email = "tap-boost-buy@example.com";
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.email = email.to_string();
-        profile.pet_breed = "Domestic Shorthair".to_string();
-        profile.paw_points = 50;
-        state.storage.save_profile(&profile).expect("save profile");
-
-        let jar = create_user_session(&state, CookieJar::new(), email);
-        let cookie = jar
-            .get(USER_SESSION_COOKIE)
-            .expect("session cookie should be set");
-        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
-
-        let uploads = state.storage.data_dir().join("uploads");
-        let _ = std::fs::create_dir_all(&uploads);
-        let app = build_app(state.clone(), uploads);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/home/tap-boosts/buy")
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .header("cookie", cookie_header)
-                    .body(Body::from("boost_id=happy_taps&return_to=cat_home"))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(
-            response_location(response),
-            "/home/cat-home?status=boost_bought"
-        );
-
-        let updated = state
-            .storage
-            .load_profile(email)
-            .expect("load profile")
-            .expect("profile");
-        assert_eq!(updated.paw_points, 10);
-        assert_eq!(updated.equipped_tap_boost, "happy_taps");
-        assert!(updated.owned_tap_boosts.iter().any(|id| id == "happy_taps"));
-    }
-
-    #[tokio::test]
-    async fn pet_pet_awards_active_tap_boost_reward() {
-        use axum::body::Body;
-        use axum::http::Request;
-        use tower::util::ServiceExt;
-
-        let state = routing_test_state();
-        let email = "tap-boost-pet@example.com";
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.email = email.to_string();
-        profile.paw_points = 10;
-        profile.equipped_tap_boost = "happy_taps".to_string();
-        profile.owned_tap_boosts = vec!["basic_pets".to_string(), "happy_taps".to_string()];
-        state.storage.save_profile(&profile).expect("save profile");
-
-        let jar = create_user_session(&state, CookieJar::new(), email);
-        let cookie = jar
-            .get(USER_SESSION_COOKIE)
-            .expect("session cookie should be set");
-        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
-
-        let uploads = state.storage.data_dir().join("uploads");
-        let _ = std::fs::create_dir_all(&uploads);
-        let app = build_app(state.clone(), uploads);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/home/cat-home/pet-pet")
-                    .header("accept", "application/json")
-                    .header("cookie", cookie_header)
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_html(response).await;
-        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
-        assert_eq!(data["ok"], true);
-        assert_eq!(data["tap_reward"], 2);
-        assert_eq!(data["paw_points"], 12);
-
-        let updated = state
-            .storage
-            .load_profile(email)
-            .expect("load profile")
-            .expect("profile");
-        assert_eq!(updated.paw_points, 12);
-    }
-
-    #[test]
     fn cat_home_status_block_includes_outfit_flash_messages() {
         assert!(cat_home_status_block(Some("outfit_bought")).contains("Outfit purchased"));
         assert!(cat_home_status_block(Some("outfit_points")).is_empty());
@@ -15696,8 +14997,7 @@ mod tests {
                 status: Some("need_paw_points".to_string()),
                 decor_id: Some("hammock".to_string()),
                 outfit_id: None,
-                boost_id: None,
-                petting_bonus_id: None,
+                pet: None,
             }),
         )
         .await
@@ -15730,8 +15030,7 @@ mod tests {
                 status: Some("need_paw_points".to_string()),
                 decor_id: Some("hammock".to_string()),
                 outfit_id: None,
-                boost_id: None,
-                petting_bonus_id: None,
+                pet: None,
             }),
         )
         .await
@@ -15761,12 +15060,16 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let html = response_html(response).await;
         assert!(
-            !html.contains("{{CAT_HOME_OUTFIT_SHOP}}"),
-            "cat home page leaked outfit shop placeholder"
+            !html.contains("{{CAT_HOME_PLAY_SWITCHER}}"),
+            "cat home page leaked play switcher placeholder"
         );
         assert!(
-            !html.contains("{{CAT_HOME_TAP_BOOST_SHOP}}"),
-            "cat home page leaked tap boost shop placeholder"
+            !html.contains("{{CAT_HOME_LAYOUT}}"),
+            "cat home page leaked layout placeholder"
+        );
+        assert!(
+            !html.contains("{{CAT_HOME_TITLE}}"),
+            "cat home page leaked title placeholder"
         );
         assert!(
             !html.contains("{{PAW_POINTS_ICON}}"),
@@ -15780,156 +15083,13 @@ mod tests {
         assert!(html.contains("need-paw-points-modal"));
         assert!(html.contains("cat-home-outfit-shop"));
         assert!(html.contains("cat-home-outfit-slider"));
-        assert!(html.contains("cat-home-tap-boost-shop"));
-        assert!(
-            !html.contains("{{CAT_HOME_PETTING_BONUS_SHOP}}"),
-            "cat home page leaked petting bonus shop placeholder"
-        );
-        assert!(html.contains("cat-home-petting-bonus-shop"));
-        assert!(html.contains("Petting bonuses"));
-        assert!(html.contains("Love Explosion"));
-        assert!(html.contains("Level up petting"));
+        assert!(!html.contains("cat-home-tap-boost-shop"));
+        assert!(!html.contains("{{CAT_HOME_INTRO}}"));
+        assert!(html.contains("cat-home-decor-shop"));
+        assert!(html.contains("cat-home-decor-slider"));
+        assert!(!html.contains("cat-home-petting-bonus-shop"));
+        assert!(!html.contains("Level up petting"));
         assert!(html.contains("Dress up"));
-    }
-
-    #[test]
-    fn cat_home_petting_bonus_shop_renders_timed_multipliers() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.pet_breed = "Domestic Shorthair".to_string();
-        profile.paw_points = 200;
-        profile.equipped_tap_boost = "mega_cuddles".to_string();
-        profile.owned_tap_boosts = vec!["basic_pets".to_string(), "mega_cuddles".to_string()];
-
-        let shop = render_cat_home_petting_bonus_shop(&profile);
-        assert!(shop.contains("10× your +5 boost · +50 per tap"));
-        assert!(shop.contains("60 seconds"));
-        assert!(shop.contains("Love Explosion"));
-        assert!(shop.contains("+5 per pet"));
-    }
-
-    #[test]
-    fn effective_tap_reward_stacks_petting_bonus_on_equipped_boost() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.equipped_tap_boost = "mega_cuddles".to_string();
-        profile.active_petting_bonus = "love_explosion".to_string();
-        profile.petting_bonus_expires_at = timestamp_now() + 60;
-
-        let (total, base, multiplier) = effective_tap_reward(&profile);
-        assert_eq!(base, 5);
-        assert_eq!(multiplier, Some(10));
-        assert_eq!(total, 50);
-    }
-
-    #[test]
-    fn ensure_tap_boost_state_repairs_invalid_equipped_boost() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.owned_tap_boosts = vec!["basic_pets".to_string(), "happy_taps".to_string()];
-        profile.equipped_tap_boost = "missing_boost".to_string();
-
-        assert!(ensure_tap_boost_state(&mut profile));
-        assert_eq!(profile.equipped_tap_boost, "happy_taps");
-    }
-
-    #[tokio::test]
-    async fn petting_bonus_buy_adds_inventory() {
-        use axum::body::Body;
-        use axum::http::Request;
-        use tower::util::ServiceExt;
-
-        let state = routing_test_state();
-        let email = "petting-bonus-buy@example.com";
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.email = email.to_string();
-        profile.pet_breed = "Domestic Shorthair".to_string();
-        profile.paw_points = 200;
-        state.storage.save_profile(&profile).expect("save profile");
-
-        let jar = create_user_session(&state, CookieJar::new(), email);
-        let cookie = jar
-            .get(USER_SESSION_COOKIE)
-            .expect("session cookie should be set");
-        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
-
-        let uploads = state.storage.data_dir().join("uploads");
-        let _ = std::fs::create_dir_all(&uploads);
-        let app = build_app(state.clone(), uploads);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/home/petting-bonuses/buy")
-                    .header("content-type", "application/x-www-form-urlencoded")
-                    .header("cookie", cookie_header)
-                    .body(Body::from("bonus_id=love_explosion&return_to=cat_home"))
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(
-            response_location(response),
-            "/home/cat-home?status=petting_bonus_bought"
-        );
-
-        let updated = state
-            .storage
-            .load_profile(email)
-            .expect("load profile")
-            .expect("profile");
-        assert_eq!(updated.paw_points, 50);
-        assert_eq!(petting_bonus_inventory_count(&updated, "love_explosion"), 1);
-    }
-
-    #[tokio::test]
-    async fn pet_pet_awards_petting_bonus_multiplier() {
-        use axum::body::Body;
-        use axum::http::Request;
-        use tower::util::ServiceExt;
-
-        let state = routing_test_state();
-        let email = "petting-bonus-pet@example.com";
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.email = email.to_string();
-        profile.paw_points = 10;
-        profile.equipped_tap_boost = "happy_taps".to_string();
-        profile.owned_tap_boosts = vec!["basic_pets".to_string(), "happy_taps".to_string()];
-        profile.active_petting_bonus = "love_explosion".to_string();
-        profile.petting_bonus_expires_at = timestamp_now() + 60;
-        state.storage.save_profile(&profile).expect("save profile");
-
-        let jar = create_user_session(&state, CookieJar::new(), email);
-        let cookie = jar
-            .get(USER_SESSION_COOKIE)
-            .expect("session cookie should be set");
-        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
-
-        let uploads = state.storage.data_dir().join("uploads");
-        let _ = std::fs::create_dir_all(&uploads);
-        let app = build_app(state.clone(), uploads);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/home/cat-home/pet-pet")
-                    .header("accept", "application/json")
-                    .header("cookie", cookie_header)
-                    .body(Body::empty())
-                    .expect("request"),
-            )
-            .await
-            .expect("response");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_html(response).await;
-        let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
-        assert_eq!(data["ok"], true);
-        assert_eq!(data["tap_reward"], 20);
-        assert_eq!(data["tap_boost_base"], 2);
-        assert_eq!(data["tap_multiplier"], 10);
-        assert_eq!(data["paw_points"], 30);
     }
 
     #[tokio::test]
@@ -15982,59 +15142,6 @@ mod tests {
             .expect("load profile")
             .expect("profile");
         assert_eq!(updated.pet_name, "Pippin");
-    }
-
-    #[tokio::test]
-    async fn pet_pet_awards_one_paw_point_per_request() {
-        use axum::body::Body;
-        use axum::http::Request;
-        use tower::util::ServiceExt;
-
-        let state = routing_test_state();
-        let email = "pet-pet@example.com";
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.email = email.to_string();
-        profile.paw_points = 10;
-        state.storage.save_profile(&profile).expect("save profile");
-
-        let jar = create_user_session(&state, CookieJar::new(), email);
-        let cookie = jar
-            .get(USER_SESSION_COOKIE)
-            .expect("session cookie should be set");
-        let cookie_header = format!("{}={}", cookie.name(), cookie.value());
-
-        let uploads = state.storage.data_dir().join("uploads");
-        let _ = std::fs::create_dir_all(&uploads);
-        let app = build_app(state.clone(), uploads);
-
-        for expected in [11_u32, 12] {
-            let response = app
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .uri("/home/cat-home/pet-pet")
-                        .header("accept", "application/json")
-                        .header("cookie", cookie_header.clone())
-                        .body(Body::empty())
-                        .expect("request"),
-                )
-                .await
-                .expect("response");
-
-            assert_eq!(response.status(), StatusCode::OK);
-            let body = response_html(response).await;
-            let data: serde_json::Value = serde_json::from_str(&body).expect("json response");
-            assert_eq!(data["ok"], true);
-            assert_eq!(data["paw_points"], expected);
-        }
-
-        let updated = state
-            .storage
-            .load_profile(email)
-            .expect("load profile")
-            .expect("profile");
-        assert_eq!(updated.paw_points, 12);
     }
 
     #[test]
@@ -16654,7 +15761,7 @@ mod tests {
             1_700_000_000,
         )
         .expect("offer");
-        assert_eq!(offer.headline, "My cat Mochi hit level 10! 🐾");
+        assert_eq!(offer.headline, "Mochi leveled up to 10! 🐾✨");
         assert!(offer.url.contains("/share/"));
     }
 
@@ -16994,7 +16101,6 @@ mod tests {
     fn reopening_task_deducts_paw_points_without_going_negative() {
         let mut profile = test_profile_weeks(52, "indoor");
         profile.paw_points = 100;
-        profile.parent_xp = 20;
         profile.tasks = vec![UserTask {
             id: "feed_breakfast".to_string(),
             title: "Morning feeding".to_string(),
@@ -17012,63 +16118,11 @@ mod tests {
         assert_eq!(reward, 15);
         assert!(!profile.tasks[0].completed);
         assert_eq!(profile.paw_points, 85);
-        assert_eq!(profile.parent_xp, 9);
 
         profile.paw_points = 10;
         profile.tasks[0].completed = true;
         let (_title, _) = reopen_completed_task(&mut profile, 0);
         assert_eq!(profile.paw_points, 0);
-    }
-
-    #[test]
-    fn reopening_task_reverses_level_up_from_completion() {
-        let mut profile = test_profile_weeks(52, "indoor");
-        profile.parent_level = 2;
-        profile.parent_xp = 5;
-        profile.paw_points = 40;
-        profile.tasks = vec![UserTask {
-            id: "replace_litter".to_string(),
-            title: "Replace litter".to_string(),
-            completed: true,
-            due_label: "Weekly · anytime".to_string(),
-            due_day: None,
-            due_month: None,
-            due_year: None,
-            time_minutes: 600,
-            reward: 50,
-            pet_id: PRIMARY_PET_ID.to_string(),
-        }];
-
-        let (_title, _) = reopen_completed_task(&mut profile, 0);
-        assert_eq!(profile.paw_points, 0);
-        assert_eq!(profile.parent_level, 1);
-        assert_eq!(profile.parent_xp, 68);
-    }
-
-    #[test]
-    fn xp_for_task_reward_is_higher_than_half_paw_points() {
-        assert_eq!(xp_for_task_reward(10), 7);
-        assert_eq!(xp_for_task_reward(15), 11);
-        assert_eq!(xp_for_task_reward(20), 15);
-        assert_eq!(xp_for_task_reward(50), 37);
-    }
-
-    #[test]
-    fn xp_for_purchase_scales_with_price_and_caps() {
-        assert_eq!(xp_for_purchase(0), 1);
-        assert_eq!(xp_for_purchase(30), 3);
-        assert_eq!(xp_for_purchase(80), 8);
-        assert_eq!(xp_for_purchase(200), 15);
-    }
-
-    #[test]
-    fn grant_purchase_xp_can_level_up_parent() {
-        let mut profile = default_profile("buyer@example.com");
-        profile.parent_xp = 95;
-        let xp = grant_purchase_xp(&mut profile, 80);
-        assert_eq!(xp, 8);
-        assert_eq!(profile.parent_xp, 3);
-        assert_eq!(profile.parent_level, 2);
     }
 
     #[test]
@@ -17465,7 +16519,7 @@ mod tests {
         );
         assert!(html.contains("Biscuit"));
         assert!(html.contains("Ragdoll"));
-        assert!(html.contains("Parent level 8"));
+        assert!(!html.contains("Parent level"));
     }
 
     #[test]
@@ -17812,7 +16866,7 @@ mod tests {
         assert!(friend_profile_html.contains("Nap time!"));
         assert!(friend_profile_html.contains("parent-profile-posts"));
         assert!(friend_profile_html.contains("Caring for"));
-        assert!(friend_profile_html.contains("Parent level"));
+        assert!(!friend_profile_html.contains("Parent level"));
 
         let stranger_profile_html =
             social_posts::render_parent_profile_page(&state, &owner.email, "stranger", true);
@@ -17939,8 +16993,10 @@ mod tests {
         assert!(html.contains("<h2>Posts</h2>"));
         assert!(html.contains("Share a photo or video"));
         assert!(html.contains("social-post-media-preview-community"));
+        assert!(html.contains("social-post-media-preview-shell"));
+        assert!(html.contains("Preview before posting"));
         assert!(html.contains("social-post-form-community"));
-        assert!(html.contains("preview, crop, and trim"));
+        assert!(html.contains("preview here to crop or trim"));
     }
 
     #[test]
@@ -18772,16 +17828,9 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/calendar/event", post(calendar_event_add))
         .route("/home/cat-home", get(cat_home_page))
         .route("/home/paw-points", get(paw_points_balance))
-        .route("/home/cat-home/pet-pet", post(pet_pet))
+        .route("/home/cat-home/playdate", post(playdate_interact))
         .route("/home/decor/buy", post(decor_buy))
         .route("/home/decor/equip", post(decor_equip))
-        .route("/home/tap-boosts/buy", post(tap_boost_buy))
-        .route("/home/tap-boosts/equip", post(tap_boost_equip))
-        .route("/home/petting-bonuses/buy", post(petting_bonus_buy))
-        .route(
-            "/home/petting-bonuses/activate",
-            post(petting_bonus_activate),
-        )
         .route(
             "/home/community/visibility",
             post(community_visibility_submit),

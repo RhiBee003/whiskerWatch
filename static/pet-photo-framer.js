@@ -9,6 +9,7 @@
     exportFileName: "pet-photo.jpg",
     manual: false,
     skipFormSubmit: false,
+    onReady: null,
   };
 
   const framers = {};
@@ -183,6 +184,9 @@
 
       setupDrag();
       applyTransform();
+      if (typeof cfg.onReady === "function") {
+        cfg.onReady();
+      }
     }
 
     function loadEditor(file, framing = null) {
