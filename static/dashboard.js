@@ -606,75 +606,86 @@
     const label = carousel.querySelector(".tasks-pet-dot-label");
     const targets = readTasksPetTargets(carousel);
     const nextIndex = activeTasksPetIndex(targets, petId, owner);
-    const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
-    const currentIndex =
-      activePanel instanceof HTMLElement
-        ? activeTasksPetIndex(
-            targets,
-            activePanel.dataset.petId || "",
-            activePanel.dataset.petOwner || ""
-          )
-        : -1;
-    const direction =
-      options.direction ||
-      (options.skipFlip ? null : tasksPetFlipDirection(currentIndex, nextIndex));
-    let activeLabel = "";
 
-    const applyPanelSwap = () => {
-      panels.forEach((panel) => {
-        if (!(panel instanceof HTMLElement)) {
-          return;
-        }
-        const match =
-          panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
-        panel.hidden = !match;
-        panel.classList.toggle("is-active", match);
-        if (match) {
-          activeLabel = panel.dataset.petLabel || "";
-        }
-      });
-
-      dots.forEach((dot) => {
-        if (!(dot instanceof HTMLButtonElement)) {
-          return;
-        }
-        const match =
-          dot.dataset.petId === petId && (dot.dataset.petOwner || "") === owner;
-        dot.classList.toggle("is-active", match);
-        dot.setAttribute("aria-current", match ? "true" : "false");
-        if (match) {
-          activeLabel = dot.dataset.petLabel || activeLabel;
-        }
-      });
-
-      if (label instanceof HTMLElement && activeLabel) {
-        label.textContent = activeLabel;
+    if (!options.force) {
+      const activeDot = carousel.querySelector(".tasks-pet-dot.is-active");
+      if (
+        activeDot instanceof HTMLButtonElement &&
+        activeDot.dataset.petId === petId &&
+        (activeDot.dataset.petOwner || "") === owner
+      ) {
+        return;
       }
+    }
 
-      updateTasksPetArrows(carousel, nextIndex, targets.length);
-      writeTasksPetSelection(petId, owner);
-    };
+    let targetPanel = null;
 
-    const viewport = carousel.querySelector(".cat-card-flip-viewport");
-    if (direction && viewport && !options.skipFlip) {
-      await runCatCardFlip(viewport, applyPanelSwap, direction);
+    panels.forEach((panel) => {
+      if (!(panel instanceof HTMLElement)) {
+        return;
+      }
+      const match =
+        panel.dataset.petId === petId && (panel.dataset.petOwner || "") === owner;
+      panel.hidden = !match;
+      panel.classList.toggle("is-active", match);
+      if (match) {
+        targetPanel = panel;
+      }
+    });
+
+    if (!(targetPanel instanceof HTMLElement)) {
       return;
     }
 
-    applyPanelSwap();
+    let activeLabel = targetPanel.dataset.petLabel || "";
+    dots.forEach((dot) => {
+      if (!(dot instanceof HTMLButtonElement)) {
+        return;
+      }
+      const match =
+        dot.dataset.petId === petId && (dot.dataset.petOwner || "") === owner;
+      dot.classList.toggle("is-active", match);
+      dot.setAttribute("aria-current", match ? "true" : "false");
+      if (match) {
+        activeLabel = dot.dataset.petLabel || activeLabel;
+      }
+    });
+
+    if (label instanceof HTMLElement && activeLabel) {
+      label.textContent = activeLabel;
+    }
+
+    updateTasksPetArrows(carousel, nextIndex, targets.length);
+    writeTasksPetSelection(petId, owner);
+
+    targetPanel.querySelectorAll(".task-add-form input[name='pet_id']").forEach((input) => {
+      if (input instanceof HTMLInputElement) {
+        input.value = petId;
+      }
+    });
   }
 
-  function showTasksPetPanelAtIndex(carousel, index, fromIndex) {
+  function showTasksPetPanelAtIndex(carousel, index) {
     const targets = readTasksPetTargets(carousel);
     const target = targets[index];
     if (!target) {
       return;
     }
-    const direction =
-      typeof fromIndex === "number"
-        ? tasksPetFlipDirection(fromIndex, index)
-        : "next";
-    showTasksPetPanel(carousel, target.petId, target.petOwner, { direction });
+    showTasksPetPanel(carousel, target.petId, target.petOwner);
+  }
+
+  function activeTasksPetDotIndex(carousel) {
+    const targets = readTasksPetTargets(carousel);
+    const activeDot = carousel.querySelector(".tasks-pet-dot.is-active");
+    if (!(activeDot instanceof HTMLButtonElement)) {
+      return 0;
+    }
+    const index = activeTasksPetIndex(
+      targets,
+      activeDot.dataset.petId || "",
+      activeDot.dataset.petOwner || ""
+    );
+    return index >= 0 ? index : 0;
   }
 
   function setupTasksPetSwitcher(carousel) {
@@ -688,26 +699,10 @@
         return;
       }
       dot.addEventListener("click", () => {
-        const targets = readTasksPetTargets(carousel);
-        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
-        const currentIndex =
-          activePanel instanceof HTMLElement
-            ? activeTasksPetIndex(
-                targets,
-                activePanel.dataset.petId || "",
-                activePanel.dataset.petOwner || ""
-              )
-            : -1;
-        const nextIndex = activeTasksPetIndex(
-          targets,
-          dot.dataset.petId || "",
-          dot.dataset.petOwner || ""
-        );
         showTasksPetPanel(
           carousel,
           dot.dataset.petId || "",
-          dot.dataset.petOwner || "",
-          { direction: tasksPetFlipDirection(currentIndex, nextIndex) }
+          dot.dataset.petOwner || ""
         );
       });
     });
@@ -716,35 +711,18 @@
     const nextArrow = carousel.querySelector(".tasks-pet-arrow-next");
     if (prevArrow instanceof HTMLButtonElement) {
       prevArrow.addEventListener("click", () => {
-        const targets = readTasksPetTargets(carousel);
-        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
-        const currentIndex =
-          activePanel instanceof HTMLElement
-            ? activeTasksPetIndex(
-                targets,
-                activePanel.dataset.petId || "",
-                activePanel.dataset.petOwner || ""
-              )
-            : 0;
+        const currentIndex = activeTasksPetDotIndex(carousel);
         if (currentIndex > 0) {
-          showTasksPetPanelAtIndex(carousel, currentIndex - 1, currentIndex);
+          showTasksPetPanelAtIndex(carousel, currentIndex - 1);
         }
       });
     }
     if (nextArrow instanceof HTMLButtonElement) {
       nextArrow.addEventListener("click", () => {
         const targets = readTasksPetTargets(carousel);
-        const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
-        const currentIndex =
-          activePanel instanceof HTMLElement
-            ? activeTasksPetIndex(
-                targets,
-                activePanel.dataset.petId || "",
-                activePanel.dataset.petOwner || ""
-              )
-            : 0;
+        const currentIndex = activeTasksPetDotIndex(carousel);
         if (currentIndex >= 0 && currentIndex < targets.length - 1) {
-          showTasksPetPanelAtIndex(carousel, currentIndex + 1, currentIndex);
+          showTasksPetPanelAtIndex(carousel, currentIndex + 1);
         }
       });
     }
@@ -758,18 +736,17 @@
           (panel.dataset.petOwner || "") === saved.petOwner
       );
       if (hasPanel) {
-        showTasksPetPanel(carousel, saved.petId, saved.petOwner, { skipFlip: true });
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
         return;
       }
     }
 
-    const activePanel = carousel.querySelector(".tasks-pet-panel.is-active");
-    if (activePanel instanceof HTMLElement) {
+    const activeDot = carousel.querySelector(".tasks-pet-dot.is-active");
+    if (activeDot instanceof HTMLButtonElement) {
       showTasksPetPanel(
         carousel,
-        activePanel.dataset.petId || "",
-        activePanel.dataset.petOwner || "",
-        { skipFlip: true }
+        activeDot.dataset.petId || "",
+        activeDot.dataset.petOwner || ""
       );
     }
   }
@@ -796,7 +773,7 @@
           (panel.dataset.petOwner || "") === saved.petOwner
       );
       if (hasPanel) {
-        showTasksPetPanel(carousel, saved.petId, saved.petOwner, { skipFlip: true });
+        showTasksPetPanel(carousel, saved.petId, saved.petOwner);
       }
     }
   }
@@ -3492,7 +3469,7 @@
       (options.skipFlip ? null : tasksPetFlipDirection(currentIndex, nextIndex));
 
     const applyPanelSwap = () => {
-      let matched = false;
+      let targetPanel = null;
       panels.forEach((panel) => {
         if (!(panel instanceof HTMLElement)) {
           return;
@@ -3502,16 +3479,16 @@
         panel.hidden = !match;
         panel.classList.toggle("is-active", match);
         if (match) {
-          matched = true;
+          targetPanel = panel;
         }
       });
-      if (!matched) {
+      if (!(targetPanel instanceof HTMLElement)) {
         window.location.href = buildPetSwitchUrl(petId, petOwner, "pet").toString();
         return;
       }
       updatePetSwitcherUi(petId, owner);
       persistPetSelection(petId, owner);
-      window.whiskerRemountPetShowcase?.(viewport);
+      window.whiskerRemountPetShowcase?.(targetPanel);
     };
 
     if (direction && viewport && !options.skipFlip) {

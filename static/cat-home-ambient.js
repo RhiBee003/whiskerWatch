@@ -33,17 +33,17 @@
 
       const x = (clientX - rect.left) / rect.width - 0.5;
       const y = (clientY - rect.top) / rect.height - 0.5;
-      targetX = Math.max(-1, Math.min(1, x)) * 14;
-      targetY = Math.max(-1, Math.min(1, y)) * 10;
+      targetX = Math.max(-1, Math.min(1, x)) * 8;
+      targetY = Math.max(-1, Math.min(1, y)) * 6;
     }
 
     function tick() {
       currentX += (targetX - currentX) * 0.08;
       currentY += (targetY - currentY) * 0.08;
 
-      roomBg.style.transform = `scale(1.07) translate3d(${currentX}px, ${currentY}px, 0)`;
-      scene.style.setProperty("--scene-tilt-x", `${(-currentY * 0.35).toFixed(2)}deg`);
-      scene.style.setProperty("--scene-tilt-y", `${(currentX * 0.45).toFixed(2)}deg`);
+      roomBg.style.transform = `scale(1.02) translate3d(${currentX}px, ${currentY}px, 0)`;
+      scene.style.setProperty("--scene-tilt-x", `${(-currentY * 0.22).toFixed(2)}deg`);
+      scene.style.setProperty("--scene-tilt-y", `${(currentX * 0.28).toFixed(2)}deg`);
 
       frame = window.requestAnimationFrame(tick);
     }

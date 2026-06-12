@@ -46,6 +46,18 @@
     return name || "Cat";
   }
 
+  function setBubbleText(bubble, text) {
+    if (!(bubble instanceof HTMLElement)) {
+      return;
+    }
+    const nameEl = bubble.querySelector(".cat-home-pet-bubble-name");
+    if (nameEl instanceof HTMLElement) {
+      nameEl.textContent = text;
+      return;
+    }
+    bubble.textContent = text;
+  }
+
   function sameCat(left, right) {
     return left.petId === right.petId && left.owner === right.owner;
   }
@@ -468,17 +480,17 @@
       const actorBubble = actor.element.querySelector(".cat-home-pet-bubble");
       const targetBubble = target.element.querySelector(".cat-home-pet-bubble");
       if (actorBubble) {
-        actorBubble.textContent = data.message;
+        setBubbleText(actorBubble, data.message);
       }
       if (targetBubble && !sameCat(actor, target)) {
-        targetBubble.textContent = `${data.friendship_emoji} ${data.friendship_label}!`;
+        setBubbleText(targetBubble, `${data.friendship_emoji} ${data.friendship_label}!`);
       }
       window.setTimeout(() => {
         if (actorBubble) {
-          actorBubble.textContent = defaultBubbleText(actor.element);
+          setBubbleText(actorBubble, defaultBubbleText(actor.element));
         }
         if (targetBubble) {
-          targetBubble.textContent = defaultBubbleText(target.element);
+          setBubbleText(targetBubble, defaultBubbleText(target.element));
         }
       }, 2000);
 

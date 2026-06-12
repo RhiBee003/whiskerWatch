@@ -166,8 +166,11 @@
 
       const name = catNode.dataset.petName?.trim() || "Cat";
       const bubble = catNode.querySelector(".cat-home-pet-bubble");
+      const bubbleName = catNode.querySelector(".cat-home-pet-bubble-name");
       const roleChip = catNode.querySelector(".cat-home-pet-role-chip");
-      if (bubble) {
+      if (bubbleName instanceof HTMLElement) {
+        bubbleName.textContent = name;
+      } else if (bubble) {
         bubble.textContent = name;
       }
       if (roleChip) {
@@ -196,7 +199,17 @@
     const url = new URL(window.location.href);
     url.searchParams.set("pet", petId);
     window.history.replaceState({}, "", url);
-    window.fetch(url.toString(), { credentials: "same-origin" }).catch(() => {});
+    window
+      .fetch("/home/cat-home/play-as", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: new URLSearchParams({ pet_id: petId }).toString(),
+        credentials: "same-origin",
+      })
+      .catch(() => {});
   }
 
   function applyPlayAs(shared, petId, petName, options = {}) {
@@ -225,8 +238,6 @@
     if (typeof window.whiskerClosePlaydateMenu === "function") {
       window.whiskerClosePlaydateMenu();
     }
-
-    window.whiskerRemountPetShowcase?.(shared);
   }
 
   function setupCatHomePlaySwitcher() {

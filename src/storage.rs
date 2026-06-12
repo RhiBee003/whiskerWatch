@@ -1,4 +1,4 @@
-use crate::{ContactSubmission, FeedbackSubmission, ForumPost, ForumReply, User, UserProfile};
+use crate::{ContactSubmission, FeedbackComment, FeedbackSubmission, ForumPost, ForumReply, User, UserProfile};
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ pub struct FeedbackForumEntry {
     pub user_vote: Option<i8>,
     #[allow(dead_code)]
     pub reward_granted: bool,
+    pub comments: Vec<FeedbackComment>,
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +371,7 @@ impl Storage {
         storage.migrate_forum_tables()?;
         storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
+        storage.migrate_feedback_comments_table()?;
         storage.migrate_push_subscriptions_table()?;
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
@@ -413,6 +415,7 @@ impl Storage {
         storage.migrate_forum_tables()?;
         storage.migrate_forum_breed_slug()?;
         storage.migrate_submission_tables()?;
+        storage.migrate_feedback_comments_table()?;
         storage.migrate_push_subscriptions_table()?;
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
@@ -583,6 +586,28 @@ impl Storage {
                  PRIMARY KEY (feedback_id, user_id),
                  FOREIGN KEY (feedback_id) REFERENCES feedback(id)
              );",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_feedback_comments_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS feedback_comments (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 feedback_id INTEGER NOT NULL,
+                 parent_id INTEGER,
+                 user_id TEXT NOT NULL,
+                 author_username TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 FOREIGN KEY (feedback_id) REFERENCES feedback(id),
+                 FOREIGN KEY (parent_id) REFERENCES feedback_comments(id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_feedback_comments_feedback_id
+                 ON feedback_comments(feedback_id);
+             CREATE INDEX IF NOT EXISTS idx_feedback_comments_parent_id
+                 ON feedback_comments(parent_id);",
         )?;
         Ok(())
     }
@@ -1267,6 +1292,7 @@ impl Storage {
                     downvotes: 0,
                     user_vote: None,
                     reward_granted: reward_granted != 0,
+                    comments: Vec::new(),
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1278,6 +1304,7 @@ impl Storage {
             if let Some(email) = viewer_email {
                 entry.user_vote = Self::feedback_user_vote(&conn, entry.submission.id, email)?;
             }
+            entry.comments = Self::list_feedback_comments_on_conn(&conn, entry.submission.id)?;
         }
 
         entries.sort_by(|left, right| {
@@ -1463,7 +1490,198 @@ impl Storage {
             "DELETE FROM feedback_votes WHERE feedback_id = ?1",
             params![feedback_id],
         )?;
+        conn.execute(
+            "DELETE FROM feedback_comments WHERE feedback_id = ?1",
+            params![feedback_id],
+        )?;
         conn.execute("DELETE FROM feedback WHERE id = ?1", params![feedback_id])?;
+        Ok(ForumDeleteOutcome::Deleted)
+    }
+
+    fn list_feedback_comments_on_conn(
+        conn: &rusqlite::Connection,
+        feedback_id: i64,
+    ) -> Result<Vec<FeedbackComment>, StorageError> {
+        let mut stmt = conn.prepare(
+            "SELECT id, feedback_id, parent_id, user_id, author_username, body, created_at
+             FROM feedback_comments
+             WHERE feedback_id = ?1
+             ORDER BY created_at ASC",
+        )?;
+        let comments = stmt
+            .query_map(params![feedback_id], |row| {
+                Ok(FeedbackComment {
+                    id: row.get(0)?,
+                    feedback_id: row.get(1)?,
+                    parent_id: row.get(2)?,
+                    user_id: row.get(3)?,
+                    author_username: row.get(4)?,
+                    body: row.get(5)?,
+                    created_at: row.get::<_, i64>(6)? as u64,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(comments)
+    }
+
+    pub fn list_feedback_comments(
+        &self,
+        feedback_id: i64,
+    ) -> Result<Vec<FeedbackComment>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        Self::list_feedback_comments_on_conn(&conn, feedback_id)
+    }
+
+    pub fn get_feedback_comment(
+        &self,
+        comment_id: i64,
+    ) -> Result<Option<FeedbackComment>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let row = conn.query_row(
+            "SELECT id, feedback_id, parent_id, user_id, author_username, body, created_at
+             FROM feedback_comments WHERE id = ?1",
+            params![comment_id],
+            |row| {
+                Ok(FeedbackComment {
+                    id: row.get(0)?,
+                    feedback_id: row.get(1)?,
+                    parent_id: row.get(2)?,
+                    user_id: row.get(3)?,
+                    author_username: row.get(4)?,
+                    body: row.get(5)?,
+                    created_at: row.get::<_, i64>(6)? as u64,
+                })
+            },
+        );
+        match row {
+            Ok(comment) => Ok(Some(comment)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn create_feedback_comment(
+        &self,
+        feedback_id: i64,
+        parent_id: Option<i64>,
+        user_id: &str,
+        author_username: &str,
+        body: &str,
+        created_at: u64,
+    ) -> Result<i64, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let feedback_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM feedback WHERE id = ?1",
+            params![feedback_id],
+            |row| row.get(0),
+        )?;
+        if feedback_exists == 0 {
+            return Err(StorageError::InvalidInput(
+                "feedback post not found".to_string(),
+            ));
+        }
+
+        if let Some(parent_id) = parent_id {
+            let parent = Self::get_feedback_comment_on_conn(&conn, parent_id)?;
+            let Some(parent) = parent else {
+                return Err(StorageError::InvalidInput(
+                    "parent comment not found".to_string(),
+                ));
+            };
+            if parent.feedback_id != feedback_id {
+                return Err(StorageError::InvalidInput(
+                    "parent comment belongs to another post".to_string(),
+                ));
+            }
+        }
+
+        conn.execute(
+            "INSERT INTO feedback_comments
+             (feedback_id, parent_id, user_id, author_username, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                feedback_id,
+                parent_id,
+                user_id,
+                author_username,
+                body,
+                created_at as i64,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    fn get_feedback_comment_on_conn(
+        conn: &rusqlite::Connection,
+        comment_id: i64,
+    ) -> Result<Option<FeedbackComment>, StorageError> {
+        let row = conn.query_row(
+            "SELECT id, feedback_id, parent_id, user_id, author_username, body, created_at
+             FROM feedback_comments WHERE id = ?1",
+            params![comment_id],
+            |row| {
+                Ok(FeedbackComment {
+                    id: row.get(0)?,
+                    feedback_id: row.get(1)?,
+                    parent_id: row.get(2)?,
+                    user_id: row.get(3)?,
+                    author_username: row.get(4)?,
+                    body: row.get(5)?,
+                    created_at: row.get::<_, i64>(6)? as u64,
+                })
+            },
+        );
+        match row {
+            Ok(comment) => Ok(Some(comment)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn delete_feedback_comment_branch_on_conn(
+        conn: &rusqlite::Connection,
+        comment_id: i64,
+    ) -> Result<(), StorageError> {
+        let mut child_ids = Vec::new();
+        let mut stmt = conn.prepare(
+            "SELECT id FROM feedback_comments WHERE parent_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![comment_id], |row| row.get(0))?;
+        for child_id in rows {
+            child_ids.push(child_id?);
+        }
+        for child_id in child_ids {
+            Self::delete_feedback_comment_branch_on_conn(conn, child_id)?;
+        }
+        conn.execute(
+            "DELETE FROM feedback_comments WHERE id = ?1",
+            params![comment_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_feedback_comment_owned(
+        &self,
+        comment_id: i64,
+        user_email: &str,
+    ) -> Result<ForumDeleteOutcome, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let owner: Result<String, rusqlite::Error> = conn.query_row(
+            "SELECT user_id FROM feedback_comments WHERE id = ?1",
+            params![comment_id],
+            |row| row.get(0),
+        );
+        let owner = match owner {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Ok(ForumDeleteOutcome::NotFound);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !owner.eq_ignore_ascii_case(user_email) {
+            return Ok(ForumDeleteOutcome::NotAuthorized);
+        }
+        Self::delete_feedback_comment_branch_on_conn(&conn, comment_id)?;
         Ok(ForumDeleteOutcome::Deleted)
     }
 
@@ -3145,5 +3363,66 @@ mod tests {
             .get_feedback_submission(feedback_id)
             .expect("lookup")
             .is_none());
+    }
+
+    #[test]
+    fn feedback_comments_support_nested_replies_and_delete() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let feedback_id = storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Owner".to_string(),
+                email: "owner@test.local".to_string(),
+                category: "idea".to_string(),
+                message: "More treats".to_string(),
+                submitted_at: 1,
+                user_id: Some("owner@test.local".to_string()),
+                author_username: "owner".to_string(),
+            })
+            .expect("save feedback");
+
+        let top_id = storage
+            .create_feedback_comment(
+                feedback_id,
+                None,
+                "owner@test.local",
+                "owner",
+                "Top level",
+                2,
+            )
+            .expect("top comment");
+        let reply_id = storage
+            .create_feedback_comment(
+                feedback_id,
+                Some(top_id),
+                "friend@test.local",
+                "friend",
+                "Nested reply",
+                3,
+            )
+            .expect("reply");
+
+        let comments = storage
+            .list_feedback_comments(feedback_id)
+            .expect("list comments");
+        assert_eq!(comments.len(), 2);
+
+        assert_eq!(
+            storage
+                .delete_feedback_comment_owned(reply_id, "owner@test.local")
+                .expect("delete reply as non-owner"),
+            ForumDeleteOutcome::NotAuthorized
+        );
+        assert_eq!(
+            storage
+                .delete_feedback_comment_owned(top_id, "owner@test.local")
+                .expect("delete top comment"),
+            ForumDeleteOutcome::Deleted
+        );
+        assert!(storage
+            .list_feedback_comments(feedback_id)
+            .expect("list after delete")
+            .is_empty());
     }
 }

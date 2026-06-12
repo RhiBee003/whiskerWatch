@@ -1,0 +1,224 @@
+/* Color scheme tokens — loaded after styles.css; overrides :root when data-color-scheme is set. */
+
+html[data-color-scheme="blue"] {
+  color-scheme: light;
+  --bg-rgb: 200, 223, 245;
+  --accent-rgb: 72, 120, 180;
+  --accent-dark-rgb: 58, 100, 152;
+  --pink-bg: #c8dff5;
+  --pink-card: #b8cfe8;
+  --pink-surface: rgba(255, 255, 255, 0.48);
+  --pink-surface-soft: rgba(255, 255, 255, 0.36);
+  --pink-input: #d4e4f7;
+  --pink-accent: #4878b4;
+  --pink-dark: #3a6498;
+  --ink: #1a2230;
+  --muted: #3a4555;
+  --footer: #2a3a50;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #c8dff5;
+  --topbar-border: rgba(40, 60, 90, 0.12);
+  --dashboard-bg-color: #dce9f7;
+  --dashboard-bg-image: url("/images/dashboard-background.png");
+  --theme-color: #c8dff5;
+}
+
+html[data-color-scheme="neutral"] {
+  color-scheme: light;
+  --bg-rgb: 232, 228, 223;
+  --accent-rgb: 107, 101, 96;
+  --accent-dark-rgb: 82, 78, 74;
+  --pink-bg: #e8e4df;
+  --pink-card: #dcd6cf;
+  --pink-surface: rgba(255, 255, 255, 0.5);
+  --pink-surface-soft: rgba(255, 255, 255, 0.38);
+  --pink-input: #ece8e3;
+  --pink-accent: #6b6560;
+  --pink-dark: #524e4a;
+  --ink: #1f1d1b;
+  --muted: #4a4642;
+  --footer: #3a3632;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #e8e4df;
+  --topbar-border: rgba(50, 45, 40, 0.12);
+  --dashboard-bg-color: #ece8e3;
+  --dashboard-bg-image: none;
+  --theme-color: #e8e4df;
+}
+
+html[data-color-scheme="lavender"] {
+  color-scheme: light;
+  --bg-rgb: 221, 212, 240;
+  --accent-rgb: 128, 104, 184;
+  --accent-dark-rgb: 104, 88, 160;
+  --pink-bg: #ddd4f0;
+  --pink-card: #cfc4e8;
+  --pink-surface: rgba(255, 255, 255, 0.48);
+  --pink-surface-soft: rgba(255, 255, 255, 0.36);
+  --pink-input: #e6dff5;
+  --pink-accent: #8068b8;
+  --pink-dark: #6858a0;
+  --ink: #201a2c;
+  --muted: #443a58;
+  --footer: #342848;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #ddd4f0;
+  --topbar-border: rgba(60, 45, 90, 0.12);
+  --dashboard-bg-color: #e8e0f5;
+  --dashboard-bg-image: none;
+  --theme-color: #ddd4f0;
+}
+
+html[data-color-scheme="green"] {
+  color-scheme: light;
+  --bg-rgb: 204, 232, 212;
+  --accent-rgb: 72, 136, 96;
+  --accent-dark-rgb: 56, 112, 80;
+  --pink-bg: #cce8d4;
+  --pink-card: #b8dcc4;
+  --pink-surface: rgba(255, 255, 255, 0.48);
+  --pink-surface-soft: rgba(255, 255, 255, 0.36);
+  --pink-input: #d8eede;
+  --pink-accent: #488860;
+  --pink-dark: #387050;
+  --ink: #152018;
+  --muted: #334a3a;
+  --footer: #284030;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #cce8d4;
+  --topbar-border: rgba(40, 70, 50, 0.12);
+  --dashboard-bg-color: #d8eede;
+  --dashboard-bg-image: none;
+  --theme-color: #cce8d4;
+}
+
+html[data-color-scheme="yellow"] {
+  color-scheme: light;
+  --bg-rgb: 255, 239, 176;
+  --accent-rgb: 232, 168, 0;
+  --accent-dark-rgb: 200, 136, 0;
+  --pink-bg: #ffefb0;
+  --pink-card: #ffe68a;
+  --pink-surface: rgba(255, 255, 255, 0.5);
+  --pink-surface-soft: rgba(255, 255, 255, 0.38);
+  --pink-input: #fff6d0;
+  --pink-accent: #e8a800;
+  --pink-dark: #c88800;
+  --ink: #2a2208;
+  --muted: #5c5028;
+  --footer: #403818;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #ffefb0;
+  --topbar-border: rgba(120, 90, 20, 0.12);
+  --dashboard-bg-color: #fff3c4;
+  --dashboard-bg-image: none;
+  --theme-color: #ffefb0;
+}
+
+html[data-color-scheme="dark-pink"] {
+  color-scheme: dark;
+  --bg-rgb: 26, 20, 24;
+  --accent-rgb: 232, 144, 176;
+  --accent-dark-rgb: 200, 110, 148;
+  --pink-bg: #1a1418;
+  --pink-card: #2a2028;
+  --pink-surface: rgba(60, 44, 54, 0.72);
+  --pink-surface-soft: rgba(50, 38, 48, 0.62);
+  --pink-input: #342830;
+  --pink-accent: #e890b0;
+  --pink-dark: #c86e94;
+  --ink: #f5eef2;
+  --muted: #c8b8c0;
+  --footer: #d8c8d0;
+  --topbar-bg: rgba(var(--bg-rgb), 0.96);
+  --topbar-solid: #1a1418;
+  --topbar-border: rgba(255, 255, 255, 0.08);
+  --dashboard-bg-color: #1a1418;
+  --dashboard-bg-image: none;
+  --theme-color: #1a1418;
+  --brand-logo-url: url("/images/logo-pink.png");
+}
+
+html[data-color-scheme="dark-pink"] .brand-logo,
+html[data-color-scheme="dark-pink"] .share-win-brand-logo {
+  content: var(--brand-logo-url);
+}
+
+html[data-color-scheme="dark-blue"] {
+  color-scheme: dark;
+  --bg-rgb: 20, 26, 36;
+  --accent-rgb: 104, 160, 220;
+  --accent-dark-rgb: 80, 130, 190;
+  --pink-bg: #141a24;
+  --pink-card: #1e2838;
+  --pink-surface: rgba(40, 56, 80, 0.72);
+  --pink-surface-soft: rgba(34, 48, 68, 0.62);
+  --pink-input: #243040;
+  --pink-accent: #68a0dc;
+  --pink-dark: #5082be;
+  --ink: #eef3fa;
+  --muted: #b8c4d4;
+  --footer: #a8b8cc;
+  --topbar-bg: rgba(var(--bg-rgb), 0.96);
+  --topbar-solid: #141a24;
+  --topbar-border: rgba(255, 255, 255, 0.08);
+  --dashboard-bg-color: #141a24;
+  --dashboard-bg-image: none;
+  --theme-color: #141a24;
+}
+
+html[data-color-scheme="dark-white"] {
+  color-scheme: dark;
+  --bg-rgb: 20, 20, 20;
+  --accent-rgb: 240, 240, 240;
+  --accent-dark-rgb: 200, 200, 200;
+  --pink-bg: #141414;
+  --pink-card: #222222;
+  --pink-surface: rgba(48, 48, 48, 0.78);
+  --pink-surface-soft: rgba(40, 40, 40, 0.68);
+  --pink-input: #2a2a2a;
+  --pink-accent: #f0f0f0;
+  --pink-dark: #c8c8c8;
+  --ink: #f5f5f5;
+  --muted: #b0b0b0;
+  --footer: #d0d0d0;
+  --topbar-bg: rgba(var(--bg-rgb), 0.96);
+  --topbar-solid: #141414;
+  --topbar-border: rgba(255, 255, 255, 0.1);
+  --dashboard-bg-color: #141414;
+  --dashboard-bg-image: none;
+  --theme-color: #141414;
+}
+
+html[data-color-scheme="dark-lavender"] {
+  color-scheme: dark;
+  --bg-rgb: 24, 22, 31;
+  --accent-rgb: 168, 144, 216;
+  --accent-dark-rgb: 140, 118, 188;
+  --pink-bg: #18161f;
+  --pink-card: #242030;
+  --pink-surface: rgba(52, 46, 68, 0.72);
+  --pink-surface-soft: rgba(44, 40, 58, 0.62);
+  --pink-input: #2c2838;
+  --pink-accent: #a890d8;
+  --pink-dark: #8c76bc;
+  --ink: #eeeaf8;
+  --muted: #c0b8d8;
+  --footer: #b8b0d0;
+  --topbar-bg: rgba(var(--bg-rgb), 0.96);
+  --topbar-solid: #18161f;
+  --topbar-border: rgba(255, 255, 255, 0.08);
+  --dashboard-bg-color: #18161f;
+  --dashboard-bg-image: none;
+  --theme-color: #18161f;
+}
+
+html[data-color-scheme^="dark-"] .dashboard-card,
+html[data-color-scheme^="dark-"] .login-card,
+html[data-color-scheme^="dark-"] .stat-chip {
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+html[data-color-scheme^="dark-"] .cat-home-scene--immersive {
+  filter: saturate(0.92) brightness(0.88);
+}

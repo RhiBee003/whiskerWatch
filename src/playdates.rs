@@ -492,7 +492,7 @@ fn render_scene_cat(
     format!(
         r#"<div class="cat-home-pet-stage cat-home-playdate-cat cat-home-pet-slot-{slot}{guest_class}{play_as_class}{housemate_class}" data-pet-id="{pet_id}" data-pet-owner="{owner}" data-pet-name="{pet_name}" data-owner-label="{owner_label}" data-is-owned="{is_owned}" data-is-housemate="{is_housemate}" data-friendship-score="{friendship_score}" tabindex="0" role="button" aria-label="{display_name}, {role_label}. Friendship {friendship_label}">
   <div class="cat-home-pet-stack">
-    <p class="cat-home-pet-bubble" role="note">{display_name}</p>
+    <p class="cat-home-pet-bubble" role="note"><span class="cat-home-pet-bubble-name">{display_name}</span><span class="cat-home-pet-bubble-heart" aria-hidden="true">💗</span></p>
     <p class="cat-home-pet-role-chip">{role_label}</p>
     <p class="cat-home-friendship-badge" aria-hidden="true">{friendship_emoji} {friendship_label} · {friendship_level}</p>
     {avatar}

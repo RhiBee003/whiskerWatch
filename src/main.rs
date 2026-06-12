@@ -24,6 +24,7 @@ use tokio::{fs, net::TcpListener};
 use tower_http::services::ServeDir;
 use uuid::Uuid;
 
+mod appearance;
 mod breed_guides;
 mod breed_seo;
 mod breed_health;
@@ -495,6 +496,8 @@ struct UserProfile {
     onboarding_emails_sent: Vec<String>,
     #[serde(default)]
     cat_friendships: HashMap<String, i32>,
+    #[serde(default = "appearance::default_color_scheme")]
+    color_scheme: String,
 }
 
 fn default_onboarding_emails_enabled() -> bool {
@@ -1715,7 +1718,26 @@ struct FeedbackDeleteForm {
     feedback_id: String,
 }
 
+#[derive(Deserialize)]
+struct FeedbackCommentForm {
+    feedback_id: String,
+    body: String,
+    #[serde(default)]
+    parent_id: String,
+    #[serde(default)]
+    return_to: String,
+}
+
+#[derive(Deserialize)]
+struct FeedbackCommentDeleteForm {
+    comment_id: String,
+    feedback_id: String,
+    #[serde(default)]
+    return_to: String,
+}
+
 const DELETE_CONFIRM_MESSAGE: &str = "Are you sure?";
+const MAX_FEEDBACK_COMMENT_LEN: usize = 2000;
 
 #[derive(Serialize)]
 struct FeedbackVoteResponse {
@@ -1741,6 +1763,17 @@ struct FeedbackSubmission {
     user_id: Option<String>,
     #[serde(default)]
     author_username: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) struct FeedbackComment {
+    id: i64,
+    feedback_id: i64,
+    parent_id: Option<i64>,
+    user_id: String,
+    author_username: String,
+    body: String,
+    created_at: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -2867,11 +2900,16 @@ pub(crate) fn default_profile(email: &str) -> UserProfile {
         onboarding_emails_enabled: true,
         onboarding_emails_sent: Vec::new(),
         cat_friendships: HashMap::new(),
+        color_scheme: appearance::default_color_scheme(),
     }
 }
 
 fn user_has_premium(profile: &UserProfile) -> bool {
     entitlements::has_premium(profile.premium_unlocked, &profile.email)
+}
+
+fn page_html(html: String, color_scheme: Option<&str>) -> Html<String> {
+    Html(appearance::enhance_html_document(&html, color_scheme))
 }
 
 fn admin_profile(email: &str) -> UserProfile {
@@ -6118,7 +6156,11 @@ async fn share_card_page(Path(token): Path<String>) -> impl IntoResponse {
 
     let base = stripe_payments::public_app_url();
     let signup_url = format!("{base}/signup");
-    Html(share_cards::render_share_page_html(&payload, &signup_url)).into_response()
+    page_html(
+        share_cards::render_share_page_html(&payload, &signup_url),
+        None,
+    )
+    .into_response()
 }
 
 #[derive(Deserialize, Default)]
@@ -6159,7 +6201,7 @@ async fn streak_keep_going_page(
     .replace("{{USER_NAME}}", &escape_html(&username))
     .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar));
 
-    (jar, Html(html)).into_response()
+    (jar, page_html(html, Some(&profile.color_scheme))).into_response()
 }
 
 async fn streak_reward_claim_submit(
@@ -6202,7 +6244,7 @@ async fn index_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
     }
 
     let html = apply_auth_nav_link(MARKETING_HOME_HTML, &state, &jar);
-    Html(html).into_response()
+    page_html(html, None).into_response()
 }
 
 fn dashboard_status_block(status: Option<&str>) -> String {
@@ -6376,6 +6418,9 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         Some("onboarding_emails_saved") => {
             r#"<p class="auth-success status-flash" role="status">Onboarding email preferences saved.</p>"#
         }
+        Some("appearance_saved") => {
+            r#"<p class="auth-success status-flash" role="status">Color scheme saved.</p>"#
+        }
         Some("onboarding_invalid") => {
             r#"<p class="auth-error status-flash" role="alert">Please enter your cat's name, breed, a profile photo, a valid age, and whether they are indoor or outdoor.</p>"#
         }
@@ -6453,6 +6498,21 @@ fn dashboard_status_block(status: Option<&str>) -> String {
         }
         Some("feedback_delete_denied") => {
             r#"<p class="auth-error status-flash" role="alert">You can only delete your own feedback.</p>"#
+        }
+        Some("feedback_comment_sent") => {
+            r#"<p class="auth-success status-flash" role="status">Your comment was posted.</p>"#
+        }
+        Some("feedback_comment_missing") => {
+            r#"<p class="auth-error status-flash" role="alert">Please enter a comment before posting.</p>"#
+        }
+        Some("feedback_comment_invalid") => {
+            r#"<p class="auth-error status-flash" role="alert">That feedback post or comment could not be found.</p>"#
+        }
+        Some("feedback_comment_deleted") => {
+            r#"<p class="auth-success status-flash" role="status">Your comment was deleted.</p>"#
+        }
+        Some("feedback_comment_delete_denied") => {
+            r#"<p class="auth-error status-flash" role="alert">You can only delete your own comments.</p>"#
         }
         Some("feedback_idea_purrfect") => {
             r#"<p class="auth-success status-flash" role="status">Your idea is purrfect! +200 paw points.</p>"#
@@ -6672,14 +6732,227 @@ fn render_feedback_vote_controls(
     )
 }
 
+fn feedback_comment_count_label(count: usize) -> String {
+    match count {
+        0 => String::new(),
+        1 => " · 1 comment".to_string(),
+        n => format!(" · {n} comments"),
+    }
+}
+
+fn feedback_comment_user_owns(comment: &FeedbackComment, current_user_email: &str) -> bool {
+    comment.user_id.eq_ignore_ascii_case(current_user_email)
+}
+
+fn feedback_comment_redirect(feedback_id: i64, return_to: &str, status: &str) -> String {
+    if return_to.trim() == "dashboard" {
+        if feedback_id > 0 {
+            format!("/home?tab=feedback&feedback={feedback_id}&status={status}")
+        } else {
+            format!("/home?tab=feedback&status={status}")
+        }
+    } else {
+        let public_status = status.strip_prefix("feedback_").unwrap_or(status);
+        if feedback_id > 0 {
+            format!("/feedback?feedback={feedback_id}&status={public_status}")
+        } else {
+            format!("/feedback?status={public_status}")
+        }
+    }
+}
+
+fn render_feedback_comment_reply_form(
+    feedback_id: i64,
+    parent_id: Option<i64>,
+    return_to: &str,
+    field_id: &str,
+    label: &str,
+    button_label: &str,
+) -> String {
+    let parent_field = if let Some(parent_id) = parent_id {
+        format!(
+            r#"<input type="hidden" name="parent_id" value="{parent_id}" />"#,
+            parent_id = parent_id
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        r#"<form class="login-form feedback-comment-form" action="/feedback/comment" method="post">
+          <input type="hidden" name="feedback_id" value="{feedback_id}" />
+          <input type="hidden" name="return_to" value="{return_to}" />
+          {parent_field}
+          <label for="{field_id}">{label}</label>
+          <textarea id="{field_id}" name="body" rows="3" placeholder="Share your thoughts..." required></textarea>
+          <button type="submit" class="download-btn login-submit">{button_label}</button>
+        </form>"#,
+        feedback_id = feedback_id,
+        return_to = escape_html_attr(return_to),
+        parent_field = parent_field,
+        field_id = escape_html_attr(field_id),
+        label = escape_html(label),
+        button_label = escape_html(button_label),
+    )
+}
+
+fn render_feedback_comment_item(
+    comment: &FeedbackComment,
+    comments: &[FeedbackComment],
+    viewer_email: Option<&str>,
+    return_to: &str,
+    depth: u32,
+) -> String {
+    let delete_form = viewer_email
+        .filter(|email| feedback_comment_user_owns(comment, email))
+        .map(|_| {
+            format!(
+                r#"<form class="feedback-comment-delete-form" action="/feedback/comment/delete" method="post" data-confirm="{confirm}">
+          <input type="hidden" name="comment_id" value="{comment_id}" />
+          <input type="hidden" name="feedback_id" value="{feedback_id}" />
+          <input type="hidden" name="return_to" value="{return_to}" />
+          <button type="submit" class="feedback-comment-delete-btn">Delete</button>
+        </form>"#,
+                confirm = escape_html_attr(DELETE_CONFIRM_MESSAGE),
+                comment_id = comment.id,
+                feedback_id = comment.feedback_id,
+                return_to = escape_html_attr(return_to),
+            )
+        })
+        .unwrap_or_default();
+
+    let children = render_feedback_comment_branch(
+        comments,
+        Some(comment.id),
+        viewer_email,
+        return_to,
+        depth + 1,
+    );
+
+    let reply_toggle = if viewer_email.is_some() {
+        format!(
+            r#"<details class="feedback-comment-reply-toggle">
+          <summary>Reply</summary>
+          {reply_form}
+        </details>"#,
+            reply_form = render_feedback_comment_reply_form(
+                comment.feedback_id,
+                Some(comment.id),
+                return_to,
+                &format!("feedback-reply-{}", comment.id),
+                "Your reply",
+                "Post reply",
+            ),
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        r#"<li class="feedback-comment" data-comment-id="{id}">
+          <div class="feedback-comment-header">
+            <p class="feedback-comment-meta">{author} · {when}</p>
+            {delete_form}
+          </div>
+          <p class="feedback-comment-body">{body}</p>
+          {reply_toggle}
+          {children}
+        </li>"#,
+        id = comment.id,
+        author = escape_html(&comment.author_username),
+        when = escape_html(&format_timestamp(comment.created_at)),
+        delete_form = delete_form,
+        body = escape_html(&comment.body),
+        reply_toggle = reply_toggle,
+        children = children,
+    )
+}
+
+fn render_feedback_comment_branch(
+    comments: &[FeedbackComment],
+    parent_id: Option<i64>,
+    viewer_email: Option<&str>,
+    return_to: &str,
+    depth: u32,
+) -> String {
+    let items: String = comments
+        .iter()
+        .filter(|comment| comment.parent_id == parent_id)
+        .map(|comment| {
+            render_feedback_comment_item(comment, comments, viewer_email, return_to, depth)
+        })
+        .collect();
+
+    if items.is_empty() {
+        return String::new();
+    }
+
+    let nested_class = if depth > 0 {
+        " feedback-comment-list--nested"
+    } else {
+        ""
+    };
+
+    format!(
+        r#"<ul class="feedback-comment-list{nested_class}">{items}</ul>"#,
+        nested_class = nested_class,
+        items = items,
+    )
+}
+
+fn render_feedback_comments_section(
+    entry: &storage::FeedbackForumEntry,
+    viewer_email: Option<&str>,
+    return_to: &str,
+) -> String {
+    let feedback_id = entry.submission.id;
+    let comments_block = if entry.comments.is_empty() {
+        r#"<p class="feedback-comments-empty">No comments yet — start the conversation below.</p>"#.to_string()
+    } else {
+        render_feedback_comment_branch(
+            &entry.comments,
+            None,
+            viewer_email,
+            return_to,
+            0,
+        )
+    };
+
+    let compose = if viewer_email.is_some() {
+        render_feedback_comment_reply_form(
+            feedback_id,
+            None,
+            return_to,
+            &format!("feedback-comment-{feedback_id}"),
+            "Add a comment",
+            "Post comment",
+        )
+    } else {
+        r#"<p class="feedback-comment-login-hint"><a href="/login">Log in</a> to comment on feedback posts.</p>"#.to_string()
+    };
+
+    format!(
+        r#"<section class="feedback-comments" aria-label="Comments">
+          <h3 class="feedback-comments-title">Comments</h3>
+          {comments_block}
+          {compose}
+        </section>"#,
+        comments_block = comments_block,
+        compose = compose,
+    )
+}
+
 fn render_feedback_post(
     entry: &storage::FeedbackForumEntry,
     open: bool,
     voter_email: Option<&str>,
+    return_to: &str,
 ) -> String {
     let item = &entry.submission;
     let open_attr = if open { " open" } else { "" };
     let votes = render_feedback_vote_controls(entry, voter_email);
+    let comment_label = feedback_comment_count_label(entry.comments.len());
+    let comments_section = render_feedback_comments_section(entry, voter_email, return_to);
     let delete_form = voter_email
         .filter(|email| feedback_user_owns(item, email))
         .map(|_| {
@@ -6700,11 +6973,12 @@ fn render_feedback_post(
               <summary class="feedback-forum-summary">
                 <span class="feedback-forum-category">{category}</span>
                 <span class="feedback-forum-preview">{preview}</span>
-                <span class="feedback-forum-meta">by {author} · {when}</span>
+                <span class="feedback-forum-meta">by {author} · {when}{comment_label}</span>
               </summary>
               <div class="feedback-forum-body">
                 <p>{message}</p>
                 {delete_form}
+                {comments_section}
               </div>
             </details>
             {votes}
@@ -6717,8 +6991,10 @@ fn render_feedback_post(
         votes = votes,
         author = escape_html(&item.author_username),
         when = escape_html(&format_timestamp(item.submitted_at)),
+        comment_label = escape_html(&comment_label),
         message = escape_html(&item.message),
         delete_form = delete_form,
+        comments_section = comments_section,
     )
 }
 
@@ -6728,6 +7004,7 @@ fn render_feedback_forum(
     form_email: &str,
     open_post: Option<i64>,
     voter_email: Option<&str>,
+    return_to: &str,
 ) -> String {
     let posts = state
         .storage
@@ -6742,7 +7019,7 @@ fn render_feedback_forum(
     } else {
         for post in &posts {
             let open = open_post.is_some_and(|id| id == post.submission.id);
-            list.push_str(&render_feedback_post(post, open, voter_email));
+            list.push_str(&render_feedback_post(post, open, voter_email, return_to));
         }
     }
 
@@ -8600,7 +8877,11 @@ async fn breed_guide_checkout(
 }
 
 async fn public_breeds_index_page() -> impl IntoResponse {
-    Html(breed_seo::render_public_breeds_index(&public_base_url()))
+    page_html(
+        breed_seo::render_public_breeds_index(&public_base_url()),
+        None,
+    )
+    .into_response()
 }
 
 async fn public_breed_guide_page(Path(slug): Path<String>) -> impl IntoResponse {
@@ -8608,10 +8889,10 @@ async fn public_breed_guide_page(Path(slug): Path<String>) -> impl IntoResponse 
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    Html(breed_seo::render_public_breed_page(
-        &guide,
-        &public_base_url(),
-    ))
+    page_html(
+        breed_seo::render_public_breed_page(&guide, &public_base_url()),
+        None,
+    )
     .into_response()
 }
 
@@ -8693,7 +8974,7 @@ async fn breed_guide_page(
                     &breed_guide_status_block(query.status.as_deref()),
                 )
                 .replace("{{BREED_GUIDE_CONTENT}}", &content);
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -8737,7 +9018,7 @@ async fn breed_guides_shop_page(
                 .replace("{{ADMIN_NAV_LINK}}", admin_dashboard_nav_link(&state, &jar))
                 .replace("{{STATUS_BLOCK}}", "")
                 .replace("{{BREED_GUIDE_CONTENT}}", &content);
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -8760,6 +9041,7 @@ async fn breed_select_page(
         Err(redirect) => return redirect.into_response(),
     };
 
+    let profile = get_or_create_profile(&state, &email).await;
     let user = user_for_email(&state, &email);
     let username = user
         .as_ref()
@@ -8802,7 +9084,7 @@ async fn breed_select_page(
                     "{{BREED_CATALOG}}",
                     &breeds::render_catalog_html(return_params),
                 );
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -8978,6 +9260,10 @@ async fn dashboard_page(
             &onboarding_emails::render_account_onboarding_emails_section(&profile),
         )
         .replace(
+            "{{ACCOUNT_APPEARANCE_SECTION}}",
+            &appearance::render_account_appearance_section(&profile),
+        )
+        .replace(
             "{{ACCOUNT_PET_NAME_FIELD}}",
             &render_account_pet_name_field(&account_view),
         )
@@ -9120,6 +9406,7 @@ async fn dashboard_page(
                     .as_deref()
                     .and_then(|value| value.parse::<i64>().ok()),
                 Some(email.as_str()),
+                "dashboard",
             ),
         );
     let open_thread = query
@@ -9164,7 +9451,7 @@ async fn dashboard_page(
         );
     let body = replace_admin_nav_link(&body, &state, &jar);
 
-    (jar, Html(body)).into_response()
+    (jar, page_html(body, Some(&profile.color_scheme))).into_response()
 }
 
 fn pet_media_return_tab(value: &str) -> &'static str {
@@ -10327,6 +10614,67 @@ async fn playdate_interact(
     }
 }
 
+#[derive(Deserialize)]
+struct CatHomePlayAsForm {
+    pet_id: String,
+}
+
+async fn cat_home_play_as(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<CatHomePlayAsForm>,
+) -> impl IntoResponse {
+    let (jar, email) = match ensure_dashboard_session(&state, jar) {
+        Ok(pair) => pair,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    if !profile_has_pet(&profile) {
+        return (
+            jar,
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            ),
+        )
+            .into_response();
+    }
+
+    let pet_id = form.pet_id.trim();
+    if !pet_id_exists(&profile, pet_id) {
+        return (
+            jar,
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "status": "invalid" })),
+            ),
+        )
+            .into_response();
+    }
+
+    set_active_pet(&mut profile, pet_id);
+    match save_profile(&state, &profile).await {
+        Ok(()) => (
+            jar,
+            Json(serde_json::json!({
+                "ok": true,
+                "status": "play_as",
+                "pet_id": pet_id,
+            })),
+        )
+            .into_response(),
+        Err(_) => (
+            jar,
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "status": "error" })),
+            ),
+        )
+            .into_response(),
+    }
+}
+
 async fn cat_home_page(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -10381,7 +10729,7 @@ async fn cat_home_page(
                             .as_ref(),
                     ),
                 );
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -11433,6 +11781,7 @@ async fn calendar_event_form_page(
         return Redirect::to("/home?tab=calendar&status=calendar_event_invalid").into_response();
     };
 
+    let profile = get_or_create_profile(&state, &email).await;
     let user = user_for_email(&state, &email);
     let username = user
         .as_ref()
@@ -11451,7 +11800,7 @@ async fn calendar_event_form_page(
                 .replace("{{EVENT_MONTH}}", &month.to_string())
                 .replace("{{EVENT_YEAR}}", &year.to_string())
                 .replace("{{BACK_URL}}", &escape_html(&back_url));
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -11774,7 +12123,7 @@ async fn paw_points_needed_page(
                     &stripe_payments::render_buy_points_section(),
                 )
                 .replace("{{RETURN_URL}}", return_url);
-            (jar, Html(html)).into_response()
+            (jar, page_html(html, Some(&profile.color_scheme))).into_response()
         }
         Err(_) => (
             jar,
@@ -11909,7 +12258,7 @@ async fn login_page(
                 .replace("{{ACCOUNT_EXISTS_BLOCK}}", account_exists_block)
                 .replace("{{LOGIN_EMAIL}}", &escape_html_attr(&prefill_email))
                 .replace("{{LOGIN_PASSWORD}}", &escape_html_attr(&prefill_password));
-            (jar, Html(body)).into_response()
+            (jar, page_html(body, None)).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -11949,7 +12298,7 @@ async fn forgot_password_page(
                 .replace("{{FORGOT_ERROR_BLOCK}}", forgot_error_block)
                 .replace("{{FORGOT_SUCCESS_BLOCK}}", forgot_success_block)
                 .replace("{{DEV_RESET_LINK_BLOCK}}", "");
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -11969,7 +12318,7 @@ fn render_forgot_password_sent(dev_reset_link_block: &str) -> Response {
                     r#"<p class="auth-success status-flash" role="status">If an account exists for that email, password reset instructions have been sent.</p>"#,
                 )
                 .replace("{{DEV_RESET_LINK_BLOCK}}", dev_reset_link_block);
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -12070,7 +12419,7 @@ async fn reset_password_page(
             let body = contents
                 .replace("{{RESET_ERROR_BLOCK}}", reset_error_block)
                 .replace("{{RESET_TOKEN}}", &escaped_token);
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -12172,7 +12521,7 @@ async fn signup_page(
                 .replace("{{SIGNUP_USERNAME}}", &signup_username)
                 .replace("{{SIGNUP_FIRST_NAME}}", &signup_first_name)
                 .replace("{{SIGNUP_LAST_NAME}}", &signup_last_name);
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -12213,7 +12562,7 @@ async fn contact_page(
                 .replace("{{FORM_NAME}}", &form_name)
                 .replace("{{FORM_EMAIL}}", &form_email);
             let body = apply_auth_nav_link(&body, &state, &jar);
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -12250,6 +12599,21 @@ async fn feedback_page(
                 Some("delete_denied") => {
                     r#"<p class="auth-error status-flash" role="alert">You can only delete your own feedback.</p>"#
                 }
+                Some("comment_sent") => {
+                    r#"<p class="auth-success status-flash" role="status">Your comment was posted.</p>"#
+                }
+                Some("comment_missing") => {
+                    r#"<p class="auth-error status-flash" role="alert">Please enter a comment before posting.</p>"#
+                }
+                Some("comment_invalid") => {
+                    r#"<p class="auth-error status-flash" role="alert">That feedback post or comment could not be found.</p>"#
+                }
+                Some("comment_deleted") => {
+                    r#"<p class="auth-success status-flash" role="status">Your comment was deleted.</p>"#
+                }
+                Some("comment_delete_denied") => {
+                    r#"<p class="auth-error status-flash" role="alert">You can only delete your own comments.</p>"#
+                }
                 _ => "",
             };
             let open_post = query
@@ -12268,10 +12632,11 @@ async fn feedback_page(
                         &form_email,
                         open_post,
                         voter_email.as_deref(),
+                        "feedback",
                     ),
                 );
             let body = apply_auth_nav_link(&body, &state, &jar);
-            Html(body).into_response()
+            page_html(body, None).into_response()
         }
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -12734,6 +13099,141 @@ async fn feedback_delete(
     }
 }
 
+async fn feedback_comment_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<FeedbackCommentForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let feedback_id = match form.feedback_id.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return Redirect::to(&feedback_comment_redirect(
+                0,
+                &form.return_to,
+                "feedback_comment_invalid",
+            ));
+        }
+    };
+
+    let body = form.body.trim();
+    if body.is_empty() || body.chars().count() > MAX_FEEDBACK_COMMENT_LEN {
+        return Redirect::to(&feedback_comment_redirect(
+            feedback_id,
+            &form.return_to,
+            "feedback_comment_missing",
+        ));
+    }
+
+    let parent_id = if form.parent_id.trim().is_empty() {
+        None
+    } else {
+        match form.parent_id.trim().parse::<i64>() {
+            Ok(id) if id > 0 => Some(id),
+            _ => {
+                return Redirect::to(&feedback_comment_redirect(
+                    feedback_id,
+                    &form.return_to,
+                    "feedback_comment_invalid",
+                ));
+            }
+        }
+    };
+
+    let username = user_for_email(&state, &email)
+        .map(|user| user.username)
+        .unwrap_or_else(|| "Parent".to_string());
+
+    match state.storage.create_feedback_comment(
+        feedback_id,
+        parent_id,
+        &email,
+        &username,
+        body,
+        timestamp_now(),
+    ) {
+        Ok(_) => Redirect::to(&feedback_comment_redirect(
+            feedback_id,
+            &form.return_to,
+            "feedback_comment_sent",
+        )),
+        Err(error) => {
+            eprintln!("feedback comment failed for {email}: {error}");
+            Redirect::to(&feedback_comment_redirect(
+                feedback_id,
+                &form.return_to,
+                "feedback_comment_invalid",
+            ))
+        }
+    }
+}
+
+async fn feedback_comment_delete(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<FeedbackCommentDeleteForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let comment_id = match form.comment_id.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return Redirect::to(&feedback_comment_redirect(
+                0,
+                &form.return_to,
+                "feedback_comment_delete_denied",
+            ));
+        }
+    };
+
+    let feedback_id = match form.feedback_id.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            return Redirect::to(&feedback_comment_redirect(
+                0,
+                &form.return_to,
+                "feedback_comment_delete_denied",
+            ));
+        }
+    };
+
+    match state
+        .storage
+        .delete_feedback_comment_owned(comment_id, &email)
+    {
+        Ok(storage::ForumDeleteOutcome::Deleted) => Redirect::to(&feedback_comment_redirect(
+            feedback_id,
+            &form.return_to,
+            "feedback_comment_deleted",
+        )),
+        Ok(storage::ForumDeleteOutcome::NotAuthorized) => Redirect::to(&feedback_comment_redirect(
+            feedback_id,
+            &form.return_to,
+            "feedback_comment_delete_denied",
+        )),
+        Ok(storage::ForumDeleteOutcome::NotFound) => Redirect::to(&feedback_comment_redirect(
+            feedback_id,
+            &form.return_to,
+            "feedback_comment_delete_denied",
+        )),
+        Err(error) => {
+            eprintln!("feedback comment delete failed for {email}: {error}");
+            Redirect::to(&feedback_comment_redirect(
+                feedback_id,
+                &form.return_to,
+                "feedback_comment_delete_denied",
+            ))
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct SocialPostDeleteForm {
     post_id: String,
@@ -13027,6 +13527,26 @@ async fn onboarding_email_prefs_submit(
 
     match save_profile(&state, &profile).await {
         Ok(()) => Redirect::to("/home?tab=account&status=onboarding_emails_saved"),
+        Err(_) => Redirect::to("/home?tab=account&status=error"),
+    }
+}
+
+async fn appearance_prefs_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<appearance::AppearancePrefsForm>,
+) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect,
+    };
+
+    let mut profile = get_or_create_profile(&state, &email).await;
+    appearance::apply_appearance_form(&mut profile, &form);
+    push_activity(&mut profile, "Color scheme updated.");
+
+    match save_profile(&state, &profile).await {
+        Ok(()) => Redirect::to("/home?tab=account&status=appearance_saved"),
         Err(_) => Redirect::to("/home?tab=account&status=error"),
     }
 }
@@ -13380,7 +13900,7 @@ async fn admin_page(State(state): State<AppState>, jar: CookieJar) -> impl IntoR
         contact_rows = render_submission_rows(&contact_rows, "No contact messages yet."),
     );
 
-    Html(body).into_response()
+    page_html(body, None).into_response()
 }
 
 async fn admin_logout(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
@@ -13461,6 +13981,7 @@ mod tests {
             onboarding_emails_enabled: true,
             onboarding_emails_sent: Vec::new(),
             cat_friendships: HashMap::new(),
+            color_scheme: appearance::default_color_scheme(),
         }
     }
 
@@ -17047,6 +17568,7 @@ mod tests {
             "catmom@example.com",
             None,
             Some("catmom@example.com"),
+            "dashboard",
         );
         assert!(html.contains("Feedback Forum"));
         assert!(html.contains("Community feedback"));
@@ -17056,6 +17578,7 @@ mod tests {
         assert!(html.contains("feedback-vote-btn"));
         assert!(html.contains("feedback-vote-up"));
         assert!(html.contains("feedback-delete-btn"));
+        assert!(html.contains("feedback-comments"));
         assert!(html.contains(r#"data-confirm="Are you sure?""#));
 
         let other_view = render_feedback_forum(
@@ -17064,8 +17587,69 @@ mod tests {
             "other@example.com",
             None,
             Some("other@example.com"),
+            "dashboard",
         );
         assert!(!other_view.contains("feedback-delete-btn"));
+    }
+
+    #[test]
+    fn feedback_forum_renders_nested_comments() {
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-feedback-comments-{}", Uuid::new_v4())),
+        )
+        .expect("storage");
+        let state = AppState { storage };
+        let feedback_id = state
+            .storage
+            .save_feedback(&FeedbackSubmission {
+                id: 0,
+                name: "Cat Mom".to_string(),
+                email: "catmom@example.com".to_string(),
+                category: "idea".to_string(),
+                message: "Add a treat counter".to_string(),
+                submitted_at: 1_700_000_000,
+                user_id: Some("catmom@example.com".to_string()),
+                author_username: "catmom".to_string(),
+            })
+            .expect("save feedback");
+
+        let top_id = state
+            .storage
+            .create_feedback_comment(
+                feedback_id,
+                None,
+                "catmom@example.com",
+                "catmom",
+                "Love this idea!",
+                1_700_000_100,
+            )
+            .expect("top comment");
+        state
+            .storage
+            .create_feedback_comment(
+                feedback_id,
+                Some(top_id),
+                "other@example.com",
+                "other",
+                "Me too!",
+                1_700_000_200,
+            )
+            .expect("reply comment");
+
+        let html = render_feedback_forum(
+            &state,
+            "Cat Mom",
+            "catmom@example.com",
+            Some(feedback_id),
+            Some("catmom@example.com"),
+            "dashboard",
+        );
+        assert!(html.contains("Love this idea!"));
+        assert!(html.contains("Me too!"));
+        assert!(html.contains("feedback-comment-list--nested"));
+        assert!(html.contains(" · 2 comments"));
+        assert!(html.contains("Post reply"));
+        assert!(html.contains("feedback-comment-delete-btn"));
     }
 
     #[test]
@@ -17827,6 +18411,7 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/calendar/event/new", get(calendar_event_form_page))
         .route("/home/calendar/event", post(calendar_event_add))
         .route("/home/cat-home", get(cat_home_page))
+        .route("/home/cat-home/play-as", post(cat_home_play_as))
         .route("/home/paw-points", get(paw_points_balance))
         .route("/home/cat-home/playdate", post(playdate_interact))
         .route("/home/decor/buy", post(decor_buy))
@@ -17846,6 +18431,10 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route(
             "/home/onboarding-emails/preferences",
             post(onboarding_email_prefs_submit),
+        )
+        .route(
+            "/home/appearance/preferences",
+            post(appearance_prefs_submit),
         )
         .route("/home/forum/post", post(forum_post_submit))
         .route("/home/forum/post/delete", post(forum_post_delete))
@@ -17872,6 +18461,8 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/feedback", get(feedback_page).post(feedback_submit))
         .route("/feedback/delete", post(feedback_delete))
         .route("/feedback/vote", post(feedback_vote_submit))
+        .route("/feedback/comment", post(feedback_comment_submit))
+        .route("/feedback/comment/delete", post(feedback_comment_delete))
         .route("/admin", get(admin_page))
         .route("/admin/logout", post(admin_logout))
         .route(
