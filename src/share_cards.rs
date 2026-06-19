@@ -86,6 +86,40 @@ pub fn update_care_streak(profile: &mut UserProfile, today: NaiveDate) -> Option
     streak_milestone_hit(profile.care_streak_days)
 }
 
+/// Returns the streak day count that should be shown today.
+/// A streak stays alive through today if the last qualifying task was yesterday or today.
+pub fn effective_care_streak_days(profile: &UserProfile, today: NaiveDate) -> u32 {
+    if profile.care_streak_days == 0 {
+        return 0;
+    }
+
+    let Some(last_date_str) = profile.care_streak_last_date.as_deref() else {
+        return 0;
+    };
+
+    let Ok(last_date) = NaiveDate::parse_from_str(last_date_str, "%Y-%m-%d") else {
+        return 0;
+    };
+
+    let yesterday = today - Duration::days(1);
+    if last_date >= yesterday {
+        profile.care_streak_days
+    } else {
+        0
+    }
+}
+
+/// Resets a stale streak when the user missed one or more days.
+pub fn reconcile_care_streak(profile: &mut UserProfile, today: NaiveDate) -> bool {
+    let effective = effective_care_streak_days(profile, today);
+    if effective == profile.care_streak_days {
+        return false;
+    }
+
+    profile.care_streak_days = effective;
+    true
+}
+
 fn streak_milestone_hit(days: u32) -> Option<u32> {
     STREAK_MILESTONES
         .iter()
@@ -499,5 +533,25 @@ mod tests {
         assert_eq!(kind, "level");
         assert_eq!(value, 10);
         assert_eq!(headline, "Mochi leveled up to 10! 🐾✨");
+    }
+
+    #[test]
+    fn effective_care_streak_resets_after_missed_days() {
+        let mut profile = crate::default_profile("streak@test.com");
+        let today = NaiveDate::from_ymd_opt(2026, 6, 5).expect("date");
+        let yesterday = NaiveDate::from_ymd_opt(2026, 6, 4).expect("date");
+        let two_days_ago = NaiveDate::from_ymd_opt(2026, 6, 3).expect("date");
+
+        profile.care_streak_days = 2;
+        profile.care_streak_last_date = Some(two_days_ago.format("%Y-%m-%d").to_string());
+        assert_eq!(effective_care_streak_days(&profile, today), 0);
+        assert!(reconcile_care_streak(&mut profile, today));
+        assert_eq!(profile.care_streak_days, 0);
+
+        profile.care_streak_days = 2;
+        profile.care_streak_last_date = Some(yesterday.format("%Y-%m-%d").to_string());
+        assert_eq!(effective_care_streak_days(&profile, today), 2);
+        assert!(!reconcile_care_streak(&mut profile, today));
+        assert_eq!(profile.care_streak_days, 2);
     }
 }

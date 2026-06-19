@@ -148,7 +148,7 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
 
     if senior {
         notes.push(format!(
-            "{} is in a senior age range — kidney disease, hyperthyroidism, arthritis, and heart disease are more common; subtle symptom changes deserve extra attention.",
+            "{} is in a senior age range — gradual appetite, thirst, or mobility changes are worth mentioning to your vet, but many are manageable once identified.",
             breed.name
         ));
     }
@@ -161,7 +161,7 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
             || text_contains(text, "eye"))
     {
         notes.push(format!(
-            "Brachycephalic breeds like {} have shortened airways and shallow eye sockets — respiratory effort, snoring, and eye discharge can worsen faster than in longer-nosed cats.",
+            "Brachycephalic breeds like {} have shorter noses — snoring and mild eye discharge are common, but worsening breathing effort or squinting should be checked.",
             breed.name
         ));
     }
@@ -173,7 +173,7 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
             || text_contains(text, "cough"))
     {
         notes.push(format!(
-            "Long-haired breeds such as {} swallow more fur daily — hairballs are common, but repeated vomiting still needs a vet workup to rule out obstruction or inflammation.",
+            "Long-haired breeds such as {} swallow more fur — occasional hairballs are normal, but repeated vomiting still deserves a vet look.",
             breed.name
         ));
     }
@@ -181,13 +181,13 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
     if breed.large_breed {
         if text_contains(text, "limp") || text_contains(text, "stiff") || text_contains(text, "jump") {
             notes.push(format!(
-                "Large breeds like {} are prone to hip dysplasia and arthritis — reluctance to jump or stiffness can be early joint disease, not just normal aging.",
+                "Large breeds like {} may develop joint stiffness — mention changes in jumping or stairs to your vet.",
                 breed.name
             ));
         }
         if text_contains(text, "breath") || text_contains(text, "cough") || text_contains(text, "letharg") {
             notes.push(format!(
-                "{} cats are at higher risk for hypertrophic cardiomyopathy (HCM) — breathing changes, hiding, or reduced activity should be discussed with your vet promptly.",
+                "Some large breeds, including {}, can develop heart conditions — tell your vet about breathing or activity changes so they can decide if screening is needed.",
                 breed.name
             ));
         }
@@ -247,7 +247,7 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
             || text_contains(text, "diarrhea"))
     {
         notes.push(format!(
-            "Siamese-related breeds have higher reported rates of asthma, inflammatory bowel signs, and dental disease — persistent GI or breathing symptoms are worth investigating sooner.",
+            "Siamese-related breeds can be prone to asthma and sensitive stomachs — persistent coughing or GI signs are worth mentioning, but many cases are manageable.",
         ));
     }
 
@@ -288,7 +288,7 @@ fn slug_specific_links(slug: &str) -> Vec<BreedConditionLink> {
         "maine-coon" => vec![
             link(
                 "Heart disease or congestive failure",
-                "Maine Coons are predisposed to hypertrophic cardiomyopathy (HCM) — fast breathing, reduced stamina, or hiding can be early heart failure.",
+                "Maine Coons can inherit heart muscle changes — mention resting breathing rate or stamina changes so your vet can decide on screening.",
                 &["breath", "cough", "letharg", "collapse", "hiding"],
             ),
             link(
@@ -541,7 +541,7 @@ mod tests {
             "Mochi",
         );
         assert!(summary.contains("Mochi"));
-        assert!(summary.contains("HCM"));
+        assert!(summary.contains("heart") || summary.contains("screening"));
     }
 
     #[test]

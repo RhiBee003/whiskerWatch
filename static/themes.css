@@ -1,5 +1,9 @@
 /* Color scheme tokens — loaded after styles.css; overrides :root when data-color-scheme is set. */
 
+html[data-color-scheme="pink"] {
+  --dashboard-bg-image: url("/images/dashboard-background.png");
+}
+
 html[data-color-scheme="blue"] {
   color-scheme: light;
   --bg-rgb: 200, 223, 245;
@@ -19,7 +23,10 @@ html[data-color-scheme="blue"] {
   --topbar-solid: #c8dff5;
   --topbar-border: rgba(40, 60, 90, 0.12);
   --dashboard-bg-color: #dce9f7;
-  --dashboard-bg-image: url("/images/dashboard-background.png");
+  --dashboard-bg-image:
+    radial-gradient(circle at 14% 10%, rgba(255, 255, 255, 0.72) 0%, transparent 46%),
+    radial-gradient(circle at 88% 14%, rgba(72, 120, 180, 0.2) 0%, transparent 42%),
+    linear-gradient(180deg, #e8f2fb 0%, #c8dff5 48%, #aac8e8 100%);
   --theme-color: #c8dff5;
 }
 
@@ -42,7 +49,10 @@ html[data-color-scheme="neutral"] {
   --topbar-solid: #e8e4df;
   --topbar-border: rgba(50, 45, 40, 0.12);
   --dashboard-bg-color: #ece8e3;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.55) 0%, transparent 44%),
+    radial-gradient(circle at 82% 18%, rgba(107, 101, 96, 0.1) 0%, transparent 40%),
+    linear-gradient(180deg, #f2efeb 0%, #e8e4df 52%, #dcd6cf 100%);
   --theme-color: #e8e4df;
 }
 
@@ -65,7 +75,10 @@ html[data-color-scheme="lavender"] {
   --topbar-solid: #ddd4f0;
   --topbar-border: rgba(60, 45, 90, 0.12);
   --dashboard-bg-color: #e8e0f5;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.62) 0%, transparent 45%),
+    radial-gradient(circle at 84% 16%, rgba(128, 104, 184, 0.18) 0%, transparent 42%),
+    linear-gradient(180deg, #efe8f8 0%, #ddd4f0 50%, #c8b8e4 100%);
   --theme-color: #ddd4f0;
 }
 
@@ -88,7 +101,10 @@ html[data-color-scheme="green"] {
   --topbar-solid: #cce8d4;
   --topbar-border: rgba(40, 70, 50, 0.12);
   --dashboard-bg-color: #d8eede;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 15% 12%, rgba(255, 255, 255, 0.58) 0%, transparent 44%),
+    radial-gradient(circle at 86% 14%, rgba(72, 136, 96, 0.16) 0%, transparent 40%),
+    linear-gradient(180deg, #e2f5e8 0%, #cce8d4 50%, #b0d8be 100%);
   --theme-color: #cce8d4;
 }
 
@@ -111,8 +127,71 @@ html[data-color-scheme="yellow"] {
   --topbar-solid: #ffefb0;
   --topbar-border: rgba(120, 90, 20, 0.12);
   --dashboard-bg-color: #fff3c4;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 18% 10%, rgba(255, 255, 255, 0.72) 0%, transparent 44%),
+    radial-gradient(circle at 84% 18%, rgba(232, 168, 0, 0.14) 0%, transparent 40%),
+    linear-gradient(180deg, #fff8dc 0%, #ffefb0 48%, #ffe082 100%);
   --theme-color: #ffefb0;
+}
+
+html[data-color-scheme="coral"] {
+  color-scheme: light;
+  --bg-rgb: 255, 214, 196;
+  --accent-rgb: 224, 96, 72;
+  --accent-dark-rgb: 184, 72, 52;
+  --pink-bg: #ffd6c4;
+  --pink-card: #ffc4aa;
+  --pink-surface: rgba(255, 255, 255, 0.48);
+  --pink-surface-soft: rgba(255, 255, 255, 0.36);
+  --pink-input: #ffe2d4;
+  --pink-accent: #e06048;
+  --pink-dark: #b84834;
+  --ink: #2a1810;
+  --muted: #5c4034;
+  --footer: #402820;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #ffd6c4;
+  --topbar-border: rgba(100, 50, 30, 0.12);
+  --dashboard-bg-color: #ffe8dc;
+  --dashboard-bg-image:
+    radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.68) 0%, transparent 44%),
+    radial-gradient(circle at 84% 16%, rgba(224, 96, 72, 0.16) 0%, transparent 40%),
+    linear-gradient(180deg, #fff0e8 0%, #ffd6c4 50%, #ffb898 100%);
+  --theme-color: #ffd6c4;
+  --default-profile-photo-bg: #ffe8dc;
+  --accent-bright: #e06048;
+  --accent-border-strong: #b84834;
+  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
+}
+
+html[data-color-scheme="mint"] {
+  color-scheme: light;
+  --bg-rgb: 196, 232, 224;
+  --accent-rgb: 56, 152, 136;
+  --accent-dark-rgb: 40, 120, 108;
+  --pink-bg: #c4e8e0;
+  --pink-card: #aad8cc;
+  --pink-surface: rgba(255, 255, 255, 0.48);
+  --pink-surface-soft: rgba(255, 255, 255, 0.36);
+  --pink-input: #d4eee8;
+  --pink-accent: #389888;
+  --pink-dark: #28786c;
+  --ink: #102018;
+  --muted: #2a4840;
+  --footer: #203830;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #c4e8e0;
+  --topbar-border: rgba(30, 70, 60, 0.12);
+  --dashboard-bg-color: #d8f0ea;
+  --dashboard-bg-image:
+    radial-gradient(circle at 15% 12%, rgba(255, 255, 255, 0.58) 0%, transparent 44%),
+    radial-gradient(circle at 86% 14%, rgba(56, 152, 136, 0.16) 0%, transparent 40%),
+    linear-gradient(180deg, #e4f5f0 0%, #c4e8e0 50%, #a0d4c8 100%);
+  --theme-color: #c4e8e0;
+  --default-profile-photo-bg: #d8f0ea;
+  --accent-bright: #389888;
+  --accent-border-strong: #28786c;
+  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
 }
 
 html[data-color-scheme="dark-pink"] {
@@ -134,14 +213,11 @@ html[data-color-scheme="dark-pink"] {
   --topbar-solid: #1a1418;
   --topbar-border: rgba(255, 255, 255, 0.08);
   --dashboard-bg-color: #1a1418;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 18% 8%, rgba(232, 144, 176, 0.16) 0%, transparent 48%),
+    radial-gradient(circle at 82% 88%, rgba(200, 110, 148, 0.1) 0%, transparent 42%),
+    linear-gradient(180deg, #221820 0%, #1a1418 55%, #120e12 100%);
   --theme-color: #1a1418;
-  --brand-logo-url: url("/images/logo-pink.png");
-}
-
-html[data-color-scheme="dark-pink"] .brand-logo,
-html[data-color-scheme="dark-pink"] .share-win-brand-logo {
-  content: var(--brand-logo-url);
 }
 
 html[data-color-scheme="dark-blue"] {
@@ -163,7 +239,10 @@ html[data-color-scheme="dark-blue"] {
   --topbar-solid: #141a24;
   --topbar-border: rgba(255, 255, 255, 0.08);
   --dashboard-bg-color: #141a24;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 16% 10%, rgba(104, 160, 220, 0.16) 0%, transparent 48%),
+    radial-gradient(circle at 84% 86%, rgba(80, 130, 190, 0.1) 0%, transparent 42%),
+    linear-gradient(180deg, #1a2434 0%, #141a24 55%, #0e121a 100%);
   --theme-color: #141a24;
 }
 
@@ -186,7 +265,10 @@ html[data-color-scheme="dark-white"] {
   --topbar-solid: #141414;
   --topbar-border: rgba(255, 255, 255, 0.1);
   --dashboard-bg-color: #141414;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 18% 10%, rgba(255, 255, 255, 0.08) 0%, transparent 46%),
+    radial-gradient(circle at 82% 88%, rgba(200, 200, 200, 0.05) 0%, transparent 42%),
+    linear-gradient(180deg, #1c1c1c 0%, #141414 55%, #0c0c0c 100%);
   --theme-color: #141414;
 }
 
@@ -209,8 +291,97 @@ html[data-color-scheme="dark-lavender"] {
   --topbar-solid: #18161f;
   --topbar-border: rgba(255, 255, 255, 0.08);
   --dashboard-bg-color: #18161f;
-  --dashboard-bg-image: none;
+  --dashboard-bg-image:
+    radial-gradient(circle at 16% 10%, rgba(168, 144, 216, 0.15) 0%, transparent 48%),
+    radial-gradient(circle at 84% 86%, rgba(140, 118, 188, 0.1) 0%, transparent 42%),
+    linear-gradient(180deg, #201c2a 0%, #18161f 55%, #100e16 100%);
   --theme-color: #18161f;
+}
+
+html[data-color-scheme="blue"],
+html[data-color-scheme="neutral"],
+html[data-color-scheme="lavender"],
+html[data-color-scheme="green"],
+html[data-color-scheme="yellow"],
+html[data-color-scheme="coral"],
+html[data-color-scheme="mint"] {
+  --default-profile-photo-bg: var(--dashboard-bg-color);
+  --accent-bright: var(--pink-accent);
+  --accent-border-strong: var(--pink-dark);
+  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
+  --stat-chip-bg: rgba(var(--accent-rgb), 0.22);
+  --stat-chip-border: rgba(var(--accent-rgb), 0.18);
+  --stat-chip-hover-bg: rgba(var(--accent-rgb), 0.34);
+  --streak-bubble-bg: linear-gradient(
+    145deg,
+    rgba(var(--accent-rgb), 0.32) 0%,
+    rgba(var(--accent-rgb), 0.52) 100%
+  );
+  --streak-bubble-hover-bg: linear-gradient(
+    145deg,
+    rgba(var(--accent-rgb), 0.42) 0%,
+    rgba(var(--accent-rgb), 0.62) 100%
+  );
+  --streak-bubble-color: var(--pink-dark);
+  --streak-bubble-border: rgba(var(--accent-rgb), 0.22);
+  --streak-bubble-shadow: rgba(var(--accent-rgb), 0.22);
+  --pet-showcase-bg: rgba(var(--accent-rgb), 0.28);
+  --pet-showcase-border: rgba(var(--accent-rgb), 0.14);
+  --pet-id-card-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(var(--accent-rgb), 0.14) 100%
+  );
+  --pet-id-card-inset: rgba(255, 255, 255, 0.92);
+  --pet-id-card-ring: rgba(var(--accent-rgb), 0.35);
+  --pet-id-card-divider: rgba(var(--accent-rgb), 0.28);
+  --pet-id-photo-toggle-bg: rgba(255, 255, 255, 0.92);
+  --pet-id-photo-toggle-hover-bg: #fff;
+}
+
+html[data-color-scheme^="dark-"] {
+  --accent-bright: var(--pink-accent);
+  --accent-border-strong: var(--pink-dark);
+  --surface-elevated: var(--pink-surface);
+  --surface-elevated-strong: var(--pink-surface-soft);
+  --surface-hover: color-mix(in srgb, var(--pink-surface) 80%, white 20%);
+  --surface-tint: var(--pink-surface-soft);
+  --surface-tint-strong: var(--pink-surface);
+  --surface-blush: var(--pink-surface-soft);
+  --toast-bg: var(--pink-surface);
+  --ink-soft: color-mix(in srgb, var(--ink) 72%, transparent);
+  --ink-faint: color-mix(in srgb, var(--muted) 55%, transparent);
+  --ink-muted-soft: color-mix(in srgb, var(--muted) 88%, transparent);
+  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 28%, var(--pink-card));
+  --default-profile-photo-bg: var(--pink-input);
+  --stat-chip-bg: rgba(var(--accent-rgb), 0.14);
+  --stat-chip-border: rgba(var(--accent-rgb), 0.24);
+  --stat-chip-hover-bg: rgba(var(--accent-rgb), 0.22);
+  --streak-bubble-bg: linear-gradient(
+    145deg,
+    rgba(var(--accent-rgb), 0.24) 0%,
+    rgba(var(--accent-dark-rgb), 0.38) 100%
+  );
+  --streak-bubble-hover-bg: linear-gradient(
+    145deg,
+    rgba(var(--accent-rgb), 0.32) 0%,
+    rgba(var(--accent-dark-rgb), 0.48) 100%
+  );
+  --streak-bubble-color: var(--pink-accent);
+  --streak-bubble-border: rgba(var(--accent-rgb), 0.28);
+  --streak-bubble-shadow: rgba(var(--accent-rgb), 0.18);
+  --pet-showcase-bg: rgba(var(--accent-rgb), 0.12);
+  --pet-showcase-border: rgba(var(--accent-rgb), 0.22);
+  --pet-id-card-bg: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.1) 0%,
+    rgba(var(--accent-dark-rgb), 0.22) 100%
+  );
+  --pet-id-card-inset: rgba(255, 255, 255, 0.08);
+  --pet-id-card-ring: rgba(var(--accent-rgb), 0.38);
+  --pet-id-card-divider: rgba(var(--accent-rgb), 0.32);
+  --pet-id-photo-toggle-bg: rgba(var(--accent-rgb), 0.08);
+  --pet-id-photo-toggle-hover-bg: rgba(var(--accent-rgb), 0.14);
 }
 
 html[data-color-scheme^="dark-"] .dashboard-card,
@@ -221,4 +392,18 @@ html[data-color-scheme^="dark-"] .stat-chip {
 
 html[data-color-scheme^="dark-"] .cat-home-scene--immersive {
   filter: saturate(0.92) brightness(0.88);
+}
+
+html[data-color-scheme^="dark-"] .dashboard-greeting {
+  color: var(--ink);
+}
+
+html[data-color-scheme^="dark-"] .dashboard-greeting-link {
+  color: var(--ink);
+  text-decoration-color: rgba(255, 255, 255, 0.38);
+}
+
+html[data-color-scheme^="dark-"] .dashboard-greeting-link:hover,
+html[data-color-scheme^="dark-"] .dashboard-greeting-link:focus-visible {
+  text-decoration-color: var(--ink);
 }

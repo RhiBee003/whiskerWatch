@@ -760,16 +760,23 @@ pub async fn unlock_breed_guide_if_new(
     };
 
     let mut profile = crate::get_or_create_profile(state, email).await;
-    if !crate::breed_guides::user_owns_guide(&profile.owned_breed_guides, &guide.slug) {
+    let newly_owned =
+        !crate::breed_guides::user_owns_guide(&profile.owned_breed_guides, &guide.slug);
+    if newly_owned {
         profile.owned_breed_guides.push(guide.slug.clone());
-        let today = chrono::Local::now().date_naive();
-        let _ = crate::ensure_breed_guide_tasks(&mut profile);
-        profile.calendar_events = crate::merge_calendar_events(&profile, today);
         crate::push_activity(
             &mut profile,
             &format!("Unlocked the {} premium care guide.", guide.breed_name),
         );
-        if crate::pet_ids_for_breed_name(&profile, &guide.breed_name).is_empty() {
+    }
+
+    let _ = crate::ensure_breed_guide_tasks(&mut profile);
+    let _ = crate::refresh_profile_tasks(&mut profile);
+    let today = chrono::Local::now().date_naive();
+    profile.calendar_events = crate::merge_calendar_events(&profile, today);
+
+    if newly_owned {
+        if crate::pet_ids_for_guide(&profile, &guide).is_empty() {
             crate::push_activity(
                 &mut profile,
                 &format!(
@@ -786,11 +793,12 @@ pub async fn unlock_breed_guide_if_new(
                 ),
             );
         }
-        state
-            .storage
-            .save_profile(&profile)
-            .map_err(|e| format!("{e:?}"))?;
     }
+
+    state
+        .storage
+        .save_profile(&profile)
+        .map_err(|e| format!("{e:?}"))?;
 
     Ok(true)
 }

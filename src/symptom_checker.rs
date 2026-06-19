@@ -55,10 +55,10 @@ impl ConcernLevel {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Mild => "Usually mild",
-            Self::Moderate => "Worth a vet check",
-            Self::Serious => "Needs prompt attention",
-            Self::Severe => "Potentially urgent",
+            Self::Mild => "Often mild",
+            Self::Moderate => "Worth discussing with your vet",
+            Self::Serious => "Should be checked soon",
+            Self::Severe => "May need urgent care",
         }
     }
 }
@@ -445,7 +445,7 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "appetite",
             "pee",
         ],
-        summary: "Chronic kidney disease and diabetes both commonly cause increased thirst, larger litter clumps, and weight or appetite changes. Cats may seem hungrier with diabetes but still lose weight, while kidney disease often brings gradual decline.",
+        summary: "Chronic kidney disease and diabetes can cause increased thirst, larger litter clumps, and gradual weight or appetite changes. Many other conditions can look similar early on, so simple blood and urine tests are usually the next step.",
         home_care: &[
             "Track water intake and litter box clumps for 24–48 hours.",
             "Do not restrict water unless your vet tells you to.",
@@ -483,7 +483,7 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "hacking",
             "gasp",
         ],
-        summary: "Feline asthma causes inflamed, narrowed airways — cats may wheeze, cough with a neck-stretched posture, or breathe faster at rest. Attacks can be triggered by dust, smoke, litter dust, or stress and may overlap with heart disease in older cats.",
+        summary: "Feline asthma can cause wheezing, coughing, or faster breathing. Dust, smoke, litter dust, and stress are common triggers. Heart disease can look similar in older cats, so describe what you see to your vet.",
         home_care: &[
             "Reduce dust, smoke, and strong fragrances at home.",
             "Keep your cat in a calm, well-ventilated room.",
@@ -631,17 +631,11 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "rodenticide",
             "cleaning product",
             "essential oil",
-            "medication",
-            "pill",
-            "ate",
-            "swallowed",
             "houseplant",
-            "plant",
-            "drool",
-            "vomit",
+            "medication overdose",
             "collapse",
         ],
-        summary: "Cats can be poisoned by lilies, antifreeze, human medications, essential oils, rodent bait, onions, grapes, and many household chemicals. Some toxins damage kidneys or red blood cells within hours.",
+        summary: "If your cat may have eaten lilies, antifreeze, human medications, rodent bait, onions, grapes, or other known toxins, treat it as urgent. Early treatment makes a big difference for many exposures.",
         home_care: &[
             "Treat this as urgent — call your vet, emergency clinic, or pet poison helpline immediately.",
             "Bring the package, plant photo, or medication label if you know what was ingested.",
@@ -665,7 +659,7 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "not eating",
             "shiver",
         ],
-        summary: "Bacterial infections can start in a wound, mouth, bladder, skin, or elsewhere and spread systemically. Fever, lethargy, poor appetite, and painful swellings are common warning signs.",
+        summary: "Localized infections often start in a wound, tooth, bladder, or patch of skin. Fever, painful swellings, and low energy are common signs — most respond well once the source is found and treated.",
         home_care: &[
             "Keep your cat warm and comfortable while you arrange veterinary care.",
             "Do not squeeze or lance swellings at home.",
@@ -822,7 +816,7 @@ const CONDITION_RULES: &[ConditionRule] = &[
             "hiding",
             "gasp",
         ],
-        summary: "Heart disease can lead to fluid in or around the lungs, making breathing faster or harder. Coughing, hiding, reduced activity, and open-mouth breathing can appear, especially in older cats.",
+        summary: "Heart disease can make breathing faster or harder, especially during rest. Reduced activity, hiding, or coughing may appear gradually. Many cats do well once the condition is identified and managed.",
         home_care: &[
             "Keep your cat calm and in a cool, quiet space.",
             "Avoid stress and exertion while getting veterinary care.",
@@ -1048,27 +1042,23 @@ const CONDITION_RULES: &[ConditionRule] = &[
         concern_level: ConcernLevel::Serious,
     },
     ConditionRule {
-        name: "Cancer or chronic internal disease",
+        name: "Unexplained weight loss or new lump",
         patterns: &[
             "weight loss",
             "lump",
             "mass",
+            "swelling",
             "not eating",
             "letharg",
-            "senior",
-            "older",
-            "night",
-            "vomit",
-            "decline",
         ],
-        summary: "Persistent weight loss, lethargy, poor appetite, new lumps, or gradual decline can reflect cancer or other chronic internal disease. Early changes are easy to miss in cats that hide illness.",
+        summary: "Ongoing weight loss, a new lump, or weeks of poor appetite can have many causes — dental pain, thyroid disease, kidney disease, and infection are all common and often treatable. A vet exam helps sort out what is going on.",
         home_care: &[
-            "Track weight, appetite, and energy weekly if you can.",
-            "Photograph or measure any new lumps and note growth speed.",
-            "Older cats with ongoing decline usually need bloodwork and imaging.",
+            "Track appetite, weight, and energy for a few days if you can.",
+            "Photograph or measure any new lump and note whether it is growing.",
+            "Bring your observations to the appointment — you do not need to guess the cause first.",
         ],
         min_hits: 3,
-        concern_level: ConcernLevel::Serious,
+        concern_level: ConcernLevel::Moderate,
     },
 ];
 
@@ -1249,7 +1239,7 @@ fn context_bonus(condition_name: &str, context: &PetContext) -> usize {
             "Kidney disease or diabetes"
                 | "Hyperthyroidism"
                 | "Arthritis or joint pain"
-                | "Cancer or chronic internal disease"
+                | "Unexplained weight loss or new lump"
                 | "Heart disease or congestive failure"
         ));
     }
@@ -1280,13 +1270,80 @@ fn context_bonus(condition_name: &str, context: &PetContext) -> usize {
 
 fn match_strength_label(weighted_score: usize, min_hits: usize, less_likely: bool) -> &'static str {
     if less_likely {
-        "Possible"
+        "Also possible"
     } else if weighted_score >= min_hits.saturating_mul(3) {
-        "Strong match"
+        "Best fit"
     } else if weighted_score >= min_hits.saturating_mul(2) {
         "Good fit"
     } else {
-        "Likely"
+        "Possible fit"
+    }
+}
+
+fn is_high_stakes_condition(name: &str) -> bool {
+    matches!(
+        name,
+        "Poisoning or toxin exposure"
+            | "Foreign body or intestinal obstruction"
+            | "Urinary blockage or FLUTD"
+            | "Heart disease or congestive failure"
+            | "Heat stress or heatstroke"
+            | "Unexplained weight loss or new lump"
+    )
+}
+
+fn condition_meets_specificity(rule: &ConditionRule, matched: &[String]) -> bool {
+    let has = |needle: &str| matched.iter().any(|pattern| pattern.as_str() == needle);
+    match rule.name {
+        "Poisoning or toxin exposure" => matched.iter().any(|pattern| {
+            matches!(
+                pattern.as_str(),
+                "poison"
+                    | "toxin"
+                    | "toxic"
+                    | "antifreeze"
+                    | "lily"
+                    | "lilies"
+                    | "chocolate"
+                    | "onion"
+                    | "grape"
+                    | "rat poison"
+                    | "rodenticide"
+                    | "cleaning product"
+                    | "essential oil"
+                    | "houseplant"
+                    | "medication overdose"
+            )
+        }),
+        "Foreign body or intestinal obstruction" => {
+            has("string")
+                || has("toy")
+                || has("hair tie")
+                || has("rubber")
+                || has("swallowed")
+                || has("ate")
+        }
+        "Unexplained weight loss or new lump" => {
+            has("lump") || has("mass") || has("swelling") || (has("weight loss") && matched.len() >= 3)
+        }
+        "Bacterial or systemic infection" => {
+            has("fever")
+                || has("infect")
+                || has("pus")
+                || has("abscess")
+                || has("wound")
+                || has("bite")
+                || has("swollen")
+        }
+        "Dehydration" => {
+            matched.len() >= 3
+                || has("not drinking")
+                || has("dry gum")
+                || has("tacky")
+                || has("sunken")
+        }
+        "Food allergy or adverse food reaction" => has("new food") || has("diet") || matched.len() >= 3,
+        _ => true,
     }
 }
 
@@ -1351,7 +1408,7 @@ fn possibility_from_rule(
 
     let mut summary = if less_likely {
         format!(
-            "A weaker symptom match, but still possible: {}",
+            "Less likely based on what you described, but your vet may still consider it: {}",
             rule.summary
         )
     } else if matched_symptoms.is_empty() {
@@ -1397,13 +1454,46 @@ fn sort_scored_conditions(matches: &mut [ScoredCondition<'_>]) {
         a.less_likely
             .cmp(&b.less_likely)
             .then_with(|| b.weighted_score.cmp(&a.weighted_score))
-            .then_with(|| {
-                a.rule
-                    .concern_level
-                    .rank()
-                    .cmp(&b.rule.concern_level.rank())
-            })
+            .then_with(|| a.rule.concern_level.rank().cmp(&b.rule.concern_level.rank()))
     });
+}
+
+fn promote_weak_matches(matches: &mut [ScoredCondition<'_>]) {
+    let max_score = matches
+        .iter()
+        .map(|item| item.weighted_score)
+        .max()
+        .unwrap_or(0);
+    let promote_limit = if max_score >= 2 {
+        MAX_PROMOTED_WEAK_MATCHES
+    } else {
+        2
+    };
+
+    let mut candidate_indexes = matches
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            item.less_likely
+                && item.weighted_score == max_score
+                && (!is_high_stakes_condition(item.rule.name)
+                    || item.weighted_score >= item.rule.min_hits.saturating_mul(2))
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+
+    candidate_indexes.sort_by(|left, right| {
+        matches[*left]
+            .rule
+            .concern_level
+            .rank()
+            .cmp(&matches[*right].rule.concern_level.rank())
+            .then_with(|| matches[*right].weighted_score.cmp(&matches[*left].weighted_score))
+    });
+
+    for index in candidate_indexes.into_iter().take(promote_limit) {
+        matches[index].less_likely = false;
+    }
 }
 
 fn truncate_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<ScoredCondition<'_>> {
@@ -1415,7 +1505,7 @@ fn truncate_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<Scor
     matches.sort_by(|a, b| {
         b.weighted_score
             .cmp(&a.weighted_score)
-            .then_with(|| b.rule.concern_level.rank().cmp(&a.rule.concern_level.rank()))
+            .then_with(|| a.rule.concern_level.rank().cmp(&b.rule.concern_level.rank()))
     });
     matches.truncate(MAX_POSSIBILITY_RESULTS);
     sort_scored_conditions(&mut matches);
@@ -1435,18 +1525,7 @@ fn finalize_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<Scor
         return truncate_scored_conditions(matches);
     }
 
-    let max_score = matches
-        .iter()
-        .map(|item| item.weighted_score)
-        .max()
-        .unwrap_or(0);
-    let mut promoted = 0usize;
-    for item in &mut matches {
-        if item.weighted_score == max_score && promoted < MAX_PROMOTED_WEAK_MATCHES {
-            item.less_likely = false;
-            promoted += 1;
-        }
-    }
+    promote_weak_matches(&mut matches);
 
     let mut finalized = matches
         .iter()
@@ -1460,6 +1539,10 @@ fn finalize_scored_conditions(mut matches: Vec<ScoredCondition<'_>>) -> Vec<Scor
         .cloned()
         .collect::<Vec<_>>();
     sort_scored_conditions(&mut extras);
+    extras.retain(|item| {
+        !is_high_stakes_condition(item.rule.name)
+            || item.weighted_score >= item.rule.min_hits.saturating_mul(2)
+    });
     extras.truncate(MAX_EXTRA_WEAK_MATCHES);
     finalized.extend(extras);
     truncate_scored_conditions(finalized)
@@ -1480,6 +1563,9 @@ fn score_conditions(
                 .map(|pattern| (*pattern).to_string())
                 .collect();
             if matched_patterns.is_empty() {
+                return None;
+            }
+            if !condition_meets_specificity(rule, &matched_patterns) {
                 return None;
             }
 
@@ -1514,6 +1600,11 @@ fn score_conditions(
 
     finalize_scored_conditions(scored)
         .into_iter()
+        .filter(|item| {
+            !item.less_likely
+                || !is_high_stakes_condition(item.rule.name)
+                || item.weighted_score >= item.rule.min_hits.saturating_mul(2)
+        })
         .map(|item| {
             possibility_from_rule(
                 item.rule,
@@ -1635,7 +1726,7 @@ fn context_notes(context: &PetContext, text: &str) -> Vec<String> {
     }
     if context.lifestyle.eq_ignore_ascii_case("outdoor") {
         notes.push(
-            "Outdoor cats have higher exposure to trauma, parasites, and infections.".to_string(),
+            "Outdoor cats can pick up minor scrapes, parasites, or infections more easily — mention lifestyle to your vet.".to_string(),
         );
     }
     if let Some(breed) = breed_health::resolve_breed(&context.breed) {
@@ -1685,21 +1776,21 @@ pub fn analyze_symptoms(symptoms: &str, quick_picks: &[String], context: &PetCon
     let mut possibilities = score_conditions(&normalized, context, breed.as_ref());
     let urgency = refine_urgency_from_possibilities(signal_urgency, &possibilities, &normalized);
     if possibilities.is_empty() && !signals.is_empty() {
-        let mut summary = "Infection, inflammation, pain, toxin exposure, organ disease, and stress can all overlap early on. Several common illnesses look similar at first, so a vet exam, history, and basic tests are the safest way to narrow the cause.".to_string();
+        let mut summary = "Several common cat illnesses can look similar at first — stomach upset, stress, dental pain, infection, and diet changes are all frequent causes. A vet exam and simple tests are the reliable way to narrow it down.".to_string();
         if let Some(ref breed) = breed {
             summary = format!(
-                "{summary} Because {} is a {}, share breed and age with your vet — some conditions are more common in certain breeds even when symptoms are vague.",
+                "{summary} Because {} is a {}, mention breed and age to your vet so they can factor in any breed-linked tendencies.",
                 pet_name, breed.name
             );
         }
         possibilities.push(Possibility {
-            name: "Non-specific illness signs".to_string(),
+            name: "Several common explanations".to_string(),
             summary,
             home_care: general_home_care(urgency),
             concern_label: ConcernLevel::Moderate.label().to_string(),
             concern_level: ConcernLevel::Moderate,
             less_likely: false,
-            match_strength: "Likely".to_string(),
+            match_strength: "Possible fit".to_string(),
             matched_symptoms: signals.clone(),
         });
     }
@@ -1929,7 +2020,7 @@ mod tests {
             top.name
         );
         assert!(!top.matched_symptoms.is_empty());
-        assert!(top.match_strength.contains("Strong") || top.match_strength.contains("Good"));
+        assert!(top.match_strength.contains("Best") || top.match_strength.contains("Good"));
     }
 
     #[test]
@@ -1997,7 +2088,7 @@ mod tests {
         };
         let analysis = analyze_symptoms("breathing fast hiding lethargy", &[], &context);
         assert!(analysis.possibilities.iter().any(|item| {
-            item.summary.contains("HCM") || item.summary.contains("cardiomyopathy")
+            item.summary.contains("heart") || item.summary.contains("screening")
         }));
     }
 
@@ -2012,6 +2103,33 @@ mod tests {
             .home_care
             .iter()
             .any(|note| note.contains("asthma") || note.contains("Siamese")));
+    }
+
+    #[test]
+    fn single_vomiting_avoids_scary_weak_matches() {
+        let analysis = analyze_symptoms("vomiting", &[], &test_context());
+        assert!(
+            !analysis
+                .possibilities
+                .iter()
+                .any(|item| item.name.contains("Poisoning")),
+            "vomiting alone should not suggest poisoning"
+        );
+        assert!(
+            !analysis
+                .possibilities
+                .iter()
+                .any(|item| item.name.contains("weight loss") || item.name.contains("lump")),
+            "vomiting alone should not suggest chronic disease workups"
+        );
+        let first = analysis.possibilities.first().expect("expected results");
+        assert!(
+            first.name.contains("Hairball")
+                || first.name.contains("Gastroenteritis")
+                || first.name.contains("stomach"),
+            "expected a common GI explanation first, got {}",
+            first.name
+        );
     }
 
     #[test]

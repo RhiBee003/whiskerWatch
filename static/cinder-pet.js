@@ -143,13 +143,63 @@
 
   function initPetMediaIn(root) {
     const scope = root instanceof HTMLElement ? root : document;
-    scope.querySelectorAll(".pet-user-video-player, .account-pet-video-player").forEach((video) => {
-      bindPetVideoClipLoop(video);
-      applyPetVideoFraming(video);
-      video.addEventListener("loadedmetadata", () => {
+    scope
+      .querySelectorAll(
+        ".pet-user-video-player, .account-pet-video-player, .community-cat-video-player"
+      )
+      .forEach((video) => {
+        bindPetVideoClipLoop(video);
         applyPetVideoFraming(video);
+        video.addEventListener("loadedmetadata", () => {
+          applyPetVideoFraming(video);
+        });
+        watchPetVideoFraming(video);
       });
-      watchPetVideoFraming(video);
+  }
+
+  function initCommunityCatCards(root) {
+    const scope = root instanceof HTMLElement ? root : document;
+    scope.querySelectorAll(".community-cat-card").forEach((card) => {
+      if (card.dataset.communityMediaBound === "true") {
+        return;
+      }
+      const media = card.querySelector(".community-cat-media");
+      const toggle = card.querySelector(".community-cat-media-toggle");
+      if (!(media instanceof HTMLElement) || !(toggle instanceof HTMLElement)) {
+        return;
+      }
+      const videoWrap = media.querySelector(".community-cat-video-optional");
+      const videoPlayer = media.querySelector(".community-cat-video-player");
+      if (!(videoWrap instanceof HTMLElement)) {
+        return;
+      }
+
+      card.dataset.communityMediaBound = "true";
+      const petName = media.dataset.petName?.trim() || "this kitty";
+
+      if (videoPlayer instanceof HTMLVideoElement) {
+        bindPetVideoClipLoop(videoPlayer);
+      }
+
+      bindToggleControl(toggle, () => {
+        const showVideo = !videoWrap.classList.contains("is-visible");
+        videoWrap.classList.toggle("is-visible", showVideo);
+        videoWrap.hidden = !showVideo;
+        toggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
+        toggle.textContent = showVideo
+          ? `Back to ${petName} 🐾`
+          : `Watch ${petName} play! 🎬`;
+        media.classList.toggle("video-mode", showVideo);
+
+        if (showVideo) {
+          window.requestAnimationFrame(() => {
+            applyPetVideoFraming(videoPlayer);
+            playPetVideoClip(videoPlayer);
+          });
+        } else {
+          pausePetVideoClip(videoPlayer);
+        }
+      });
     });
   }
 
@@ -206,11 +256,13 @@
 
   initPetMediaIn(document);
   mountPetCinderStages(document);
+  initCommunityCatCards(document);
 
   window.whiskerRemountPetShowcase = function whiskerRemountPetShowcase(root) {
     const scope = root instanceof HTMLElement ? root : document;
     initPetMediaIn(scope);
     mountPetCinderStages(scope);
+    initCommunityCatCards(scope);
   };
 
   const accountStage = document.getElementById("account-pet-photo-stage");
@@ -279,48 +331,5 @@
       event.preventDefault();
       toggleAccountPhotoMode();
     }
-  });
-
-  document.querySelectorAll(".community-cat-card").forEach((card) => {
-    const media = card.querySelector(".community-cat-media");
-    const toggle = card.querySelector(".community-cat-media-toggle");
-    if (!(media instanceof HTMLElement) || !(toggle instanceof HTMLElement)) {
-      return;
-    }
-    const videoWrap = media.querySelector(".community-cat-video-optional");
-    const videoPlayer = media.querySelector(".community-cat-video-player");
-    if (!(videoWrap instanceof HTMLElement)) {
-      return;
-    }
-
-    const petName = media.dataset.petName?.trim() || "this kitty";
-
-    if (videoPlayer instanceof HTMLVideoElement) {
-      bindPetVideoClipLoop(videoPlayer);
-    }
-
-    toggle.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    });
-
-    bindToggleControl(toggle, () => {
-      const showVideo = !videoWrap.classList.contains("is-visible");
-      videoWrap.classList.toggle("is-visible", showVideo);
-      videoWrap.hidden = !showVideo;
-      toggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
-      toggle.textContent = showVideo
-        ? `Back to ${petName} 🐾`
-        : `Watch ${petName} play! 🎬`;
-      media.classList.toggle("video-mode", showVideo);
-
-      if (showVideo) {
-        window.requestAnimationFrame(() => {
-          playPetVideoClip(videoPlayer);
-        });
-      } else {
-        pausePetVideoClip(videoPlayer);
-      }
-    });
   });
 })();

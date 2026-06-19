@@ -29,18 +29,6 @@ pub fn can_add_pet(
     has_premium(premium_unlocked, email) && has_primary_pet
 }
 
-fn escape_js_string(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "")
-}
-
-fn delete_pet_confirm_message(pet_name: &str) -> String {
-    format!("Are you sure? This will delete all of {pet_name}'s info.")
-}
-
 fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -228,7 +216,7 @@ pub fn render_household_pet_cards(pets: &[(String, String, String, String)]) -> 
                 .find(|ch| ch.is_alphanumeric())
                 .map(|ch| ch.to_uppercase().to_string())
                 .unwrap_or_else(|| "🐱".to_string());
-            let confirm = escape_js_string(&delete_pet_confirm_message(name));
+            let confirm_name = escape_html(name);
             format!(
                 r#"<div class="additional-pet-card your-cat-chip">
   <span class="your-cat-avatar" aria-hidden="true">{}</span>
@@ -236,7 +224,7 @@ pub fn render_household_pet_cards(pets: &[(String, String, String, String)]) -> 
     <strong class="your-cat-name">{}</strong>
     <span class="your-cat-meta">{} · {}</span>
   </div>
-  <form class="your-cat-delete-form" action="/home/pets/delete" method="post" onsubmit="return confirm('{confirm}');">
+  <form class="your-cat-delete-form" action="/home/pets/delete" method="post" data-confirm-kind="delete-pet" data-confirm-pet-name="{}">
     <input type="hidden" name="pet_id" value="{}" />
     <button type="submit" class="your-cat-delete-btn" aria-label="Delete {}">Remove</button>
   </form>
@@ -245,6 +233,7 @@ pub fn render_household_pet_cards(pets: &[(String, String, String, String)]) -> 
                 escape_html(name),
                 escape_html(breed),
                 escape_html(color),
+                confirm_name,
                 escape_html(id),
                 escape_html(name),
             )

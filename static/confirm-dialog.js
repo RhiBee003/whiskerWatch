@@ -1,5 +1,8 @@
 (() => {
   const DEFAULT_MESSAGE = "Are you sure?";
+  const DEFAULT_TITLE = "Are you sure?";
+  const DEFAULT_YES = "Yes";
+  const DEFAULT_NO = "No";
 
   function ensureConfirmDialog() {
     if (document.getElementById("whisker-confirm-dialog")) {
@@ -10,11 +13,12 @@
       "beforeend",
       `<div class="onboarding-backdrop confirm-dialog-backdrop" id="whisker-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="whisker-confirm-title" hidden>
   <div class="onboarding-modal confirm-dialog-modal">
-    <h2 id="whisker-confirm-title" class="confirm-dialog-title">Are you sure?</h2>
+    <span class="confirm-dialog-emoji" id="whisker-confirm-emoji" aria-hidden="true">🐾</span>
+    <h2 id="whisker-confirm-title" class="confirm-dialog-title">${DEFAULT_TITLE}</h2>
     <p class="confirm-dialog-message" id="whisker-confirm-message">${DEFAULT_MESSAGE}</p>
     <div class="confirm-dialog-actions onboarding-actions">
-      <button type="button" class="download-btn login-submit" data-confirm-yes>Yes</button>
-      <button type="button" class="onboarding-skip-btn" data-confirm-no>No</button>
+      <button type="button" class="download-btn login-submit" data-confirm-yes>${DEFAULT_YES}</button>
+      <button type="button" class="onboarding-skip-btn" data-confirm-no>${DEFAULT_NO}</button>
     </div>
   </div>
 </div>`
@@ -25,12 +29,107 @@
 
   let pendingResolve = null;
 
+  function dialogElements() {
+    return {
+      dialog: document.getElementById("whisker-confirm-dialog"),
+      modal: document.querySelector("#whisker-confirm-dialog .confirm-dialog-modal"),
+      emoji: document.getElementById("whisker-confirm-emoji"),
+      title: document.getElementById("whisker-confirm-title"),
+      message: document.getElementById("whisker-confirm-message"),
+      yesButton: document.querySelector("#whisker-confirm-dialog [data-confirm-yes]"),
+      noButton: document.querySelector("#whisker-confirm-dialog [data-confirm-no]"),
+    };
+  }
+
+  function resetConfirmDialog() {
+    const { dialog, modal, emoji, title, message, yesButton, noButton } = dialogElements();
+    if (dialog instanceof HTMLElement) {
+      dialog.classList.remove("confirm-dialog--delete-pet");
+    }
+    if (modal instanceof HTMLElement) {
+      modal.classList.remove("confirm-dialog-modal--delete-pet");
+    }
+    if (emoji instanceof HTMLElement) {
+      emoji.hidden = true;
+      emoji.textContent = "🐾";
+    }
+    if (title instanceof HTMLElement) {
+      title.textContent = DEFAULT_TITLE;
+    }
+    if (message instanceof HTMLElement) {
+      message.textContent = DEFAULT_MESSAGE;
+    }
+    if (yesButton instanceof HTMLButtonElement) {
+      yesButton.textContent = DEFAULT_YES;
+      yesButton.className = "download-btn login-submit";
+    }
+    if (noButton instanceof HTMLButtonElement) {
+      noButton.textContent = DEFAULT_NO;
+      noButton.className = "onboarding-skip-btn";
+    }
+  }
+
+  function openConfirmDialog(config) {
+    bindConfirmDialog();
+    resetConfirmDialog();
+
+    const { dialog, modal, emoji, title, message, yesButton, noButton } = dialogElements();
+    if (!(dialog instanceof HTMLElement)) {
+      return Promise.resolve(window.confirm(config.message || DEFAULT_MESSAGE));
+    }
+
+    if (config.kind === "delete-pet") {
+      dialog.classList.add("confirm-dialog--delete-pet");
+      if (modal instanceof HTMLElement) {
+        modal.classList.add("confirm-dialog-modal--delete-pet");
+      }
+      if (emoji instanceof HTMLElement) {
+        emoji.hidden = false;
+        emoji.textContent = "🥺🐾";
+      }
+    } else if (emoji instanceof HTMLElement && config.emoji) {
+      emoji.hidden = false;
+      emoji.textContent = config.emoji;
+    }
+
+    if (title instanceof HTMLElement && config.title) {
+      title.textContent = config.title;
+    }
+    if (message instanceof HTMLElement && config.message) {
+      message.textContent = config.message;
+    }
+    if (yesButton instanceof HTMLButtonElement) {
+      yesButton.textContent = config.yesLabel || DEFAULT_YES;
+      if (config.yesClass) {
+        yesButton.className = config.yesClass;
+      }
+    }
+    if (noButton instanceof HTMLButtonElement) {
+      noButton.textContent = config.noLabel || DEFAULT_NO;
+      if (config.noClass) {
+        noButton.className = config.noClass;
+      }
+    }
+
+    return new Promise((resolve) => {
+      pendingResolve = resolve;
+      dialog.hidden = false;
+      document.body.classList.add("modal-open");
+      if (noButton instanceof HTMLButtonElement) {
+        noButton.focus();
+      } else if (yesButton instanceof HTMLButtonElement) {
+        yesButton.focus();
+      }
+    });
+  }
+
   function closeConfirmDialog(result) {
     const dialog = document.getElementById("whisker-confirm-dialog");
     if (dialog instanceof HTMLElement) {
       dialog.hidden = true;
     }
     document.body.classList.remove("modal-open");
+    resetConfirmDialog();
     const resolve = pendingResolve;
     pendingResolve = null;
     resolve?.(result);
@@ -62,24 +161,19 @@
   }
 
   function whiskerConfirm(message = DEFAULT_MESSAGE) {
-    bindConfirmDialog();
-    const dialog = ensureConfirmDialog();
-    const messageEl = document.getElementById("whisker-confirm-message");
-    if (messageEl instanceof HTMLElement) {
-      messageEl.textContent = message;
-    }
-    if (!(dialog instanceof HTMLElement)) {
-      return Promise.resolve(window.confirm(message));
-    }
+    return openConfirmDialog({ message });
+  }
 
-    return new Promise((resolve) => {
-      pendingResolve = resolve;
-      dialog.hidden = false;
-      document.body.classList.add("modal-open");
-      const yesButton = dialog.querySelector("[data-confirm-yes]");
-      if (yesButton instanceof HTMLButtonElement) {
-        yesButton.focus();
-      }
+  function whiskerConfirmDeletePet(petName) {
+    const name = petName.trim() || "this cat";
+    return openConfirmDialog({
+      kind: "delete-pet",
+      title: `Say goodbye to ${name}?`,
+      message: `This will gently remove ${name} from your household — their tasks, photos, GIFs, and friend shares will be deleted forever. There is no undo, so make sure your heart is ready. 💗`,
+      yesLabel: `Yes, remove ${name}`,
+      noLabel: `Keep ${name} safe`,
+      yesClass: "download-btn confirm-dialog-delete-yes",
+      noClass: "download-btn confirm-dialog-delete-no",
     });
   }
 
@@ -91,20 +185,26 @@
         return;
       }
 
-      const message = form.dataset.confirm;
-      if (!message) {
+      if (form.dataset.confirming === "1") {
+        form.dataset.confirming = "0";
         return;
       }
 
-      if (form.dataset.confirming === "1") {
-        form.dataset.confirming = "0";
+      const confirmKind = form.dataset.confirmKind;
+      const message = form.dataset.confirm;
+      if (!confirmKind && !message) {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
 
-      void whiskerConfirm(message).then((confirmed) => {
+      const confirmPromise =
+        confirmKind === "delete-pet"
+          ? whiskerConfirmDeletePet(form.dataset.confirmPetName || "this cat")
+          : whiskerConfirm(message || DEFAULT_MESSAGE);
+
+      void confirmPromise.then((confirmed) => {
         if (!confirmed) {
           return;
         }
@@ -116,5 +216,6 @@
   );
 
   window.whiskerConfirm = whiskerConfirm;
+  window.whiskerConfirmDeletePet = whiskerConfirmDeletePet;
   bindConfirmDialog();
 })();

@@ -24,7 +24,9 @@ use tokio::{fs, net::TcpListener};
 use tower_http::services::ServeDir;
 use uuid::Uuid;
 
+mod achievements;
 mod appearance;
+mod birthday_party;
 mod breed_guides;
 mod breed_seo;
 mod breed_health;
@@ -304,6 +306,7 @@ fn feeding_specs_for_plan(
 }
 
 pub(crate) const PRIMARY_PET_ID: &str = "primary";
+pub(crate) const CALENDAR_PREVIEW_HORIZON_DAYS: i64 = 180;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct UserTask {
@@ -1017,7 +1020,7 @@ fn reset_active_pet_on_sign_in(state: &AppState, email: &str) {
     }
 }
 
-fn pet_birth_date_for_snapshot(snapshot: &PetSnapshot, reference: NaiveDate) -> Option<NaiveDate> {
+pub(crate) fn pet_birth_date_for_snapshot(snapshot: &PetSnapshot, reference: NaiveDate) -> Option<NaiveDate> {
     if let Some(stored) = snapshot
         .pet_birth_date
         .as_deref()
@@ -2012,10 +2015,6 @@ fn escape_js_string(value: &str) -> String {
         .replace('\'', "\\'")
         .replace('\n', "\\n")
         .replace('\r', "")
-}
-
-fn delete_pet_confirm_message(pet_name: &str) -> String {
-    format!("Are you sure? This will delete all of {pet_name}'s info.")
 }
 
 fn paw_points_icon_html() -> &'static str {
@@ -3380,6 +3379,11 @@ pub(crate) async fn get_or_create_profile(state: &AppState, email: &str) -> User
         let _ = save_profile(state, &profile).await;
     }
 
+    let today = chrono::Local::now().date_naive();
+    if share_cards::reconcile_care_streak(&mut profile, today) {
+        let _ = save_profile(state, &profile).await;
+    }
+
     profile
 }
 
@@ -3711,6 +3715,10 @@ fn ensure_starter_care_tasks(profile: &mut UserProfile) -> bool {
 }
 
 pub(crate) fn pet_ids_for_breed_name(profile: &UserProfile, breed_name: &str) -> Vec<String> {
+    if let Some(guide) = breed_guides::guide_for_breed_name(breed_name) {
+        return pet_ids_for_guide(profile, &guide);
+    }
+
     list_pet_summaries(profile)
         .into_iter()
         .filter_map(|(pet_id, _)| {
@@ -3729,17 +3737,43 @@ pub(crate) fn pet_ids_for_breed_name(profile: &UserProfile, breed_name: &str) ->
         .collect()
 }
 
+pub(crate) fn pet_ids_for_guide(
+    profile: &UserProfile,
+    guide: &breed_guides::BreedGuide,
+) -> Vec<String> {
+    list_pet_summaries(profile)
+        .into_iter()
+        .filter_map(|(pet_id, _)| {
+            pet_snapshot(profile, &pet_id).and_then(|snapshot| {
+                if breed_guides::pet_breed_matches_guide(&snapshot.pet_breed, guide) {
+                    Some(pet_id)
+                } else {
+                    None
+                }
+            })
+        })
+        .collect()
+}
+
 fn build_breed_guide_task(
     template: &breed_guides::BreedGuideTaskTemplate,
     slug: &str,
     pet_id: &str,
+    pet_name: &str,
+    guide_breed_name: &str,
     today: NaiveDate,
 ) -> UserTask {
     let id = breed_guides::breed_guide_task_id(slug, template.key);
     let due_label = task_due_label_for(&id, template.time_minutes);
+    let pet_name = pet_name.trim();
+    let title = if pet_name.is_empty() {
+        template.title.clone()
+    } else {
+        template.title.replace(guide_breed_name, pet_name)
+    };
     scheduled_task(
         &id,
-        &template.title,
+        &title,
         &due_label,
         template.time_minutes,
         template.reward,
@@ -3794,9 +3828,7 @@ pub(crate) fn ensure_breed_guide_tasks(profile: &mut UserProfile) -> bool {
             return false;
         };
         pet_breeds.get(&task.pet_id).is_some_and(|breed| {
-            breed
-                .trim()
-                .eq_ignore_ascii_case(guide.breed_name.trim())
+            breed_guides::pet_breed_matches_guide(breed, &guide)
         })
     });
     if profile.tasks.len() != before_len {
@@ -3808,22 +3840,30 @@ pub(crate) fn ensure_breed_guide_tasks(profile: &mut UserProfile) -> bool {
             continue;
         };
         let templates = breed_guides::task_templates_for_guide(&guide);
-        for pet_id in pet_ids_for_breed_name(profile, &guide.breed_name) {
+        for pet_id in pet_ids_for_guide(profile, &guide) {
             if memorial::pet_is_deceased(profile, &pet_id) {
                 continue;
             }
+            let pet_name = pet_snapshot(profile, &pet_id)
+                .map(|snapshot| snapshot.pet_name)
+                .unwrap_or_default();
             for template in &templates {
                 let task_id = breed_guides::breed_guide_task_id(&guide.slug, template.key);
                 if is_task_dismissed(profile, &pet_id, &task_id) {
                     continue;
                 }
+                let expected_title = if pet_name.trim().is_empty() {
+                    template.title.clone()
+                } else {
+                    template.title.replace(&guide.breed_name, pet_name.trim())
+                };
                 if let Some(task) = profile
                     .tasks
                     .iter_mut()
                     .find(|task| task.id == task_id && task.pet_id == pet_id)
                 {
-                    if task.title != template.title {
-                        task.title = template.title.clone();
+                    if task.title != expected_title {
+                        task.title = expected_title;
                         changed = true;
                     }
                     if task.reward != template.reward {
@@ -3836,6 +3876,8 @@ pub(crate) fn ensure_breed_guide_tasks(profile: &mut UserProfile) -> bool {
                     template,
                     &guide.slug,
                     &pet_id,
+                    &pet_name,
+                    &guide.breed_name,
                     today,
                 ));
                 changed = true;
@@ -3885,7 +3927,7 @@ fn generate_breed_guide_calendar_events(
         let Some(guide) = breed_guides::guide_for_slug(&slug) else {
             continue;
         };
-        if pet_ids_for_breed_name(profile, &guide.breed_name).is_empty() {
+        if pet_ids_for_guide(profile, &guide).is_empty() {
             continue;
         }
 
@@ -4305,7 +4347,7 @@ pub(crate) fn visible_calendar_events(
     reference_date: NaiveDate,
 ) -> Vec<CalendarEvent> {
     let today = Local::now().date_naive();
-    let horizon = today + Duration::days(730);
+    let horizon = today + Duration::days(CALENDAR_PREVIEW_HORIZON_DAYS);
     let mut events = merge_calendar_events(profile, reference_date);
     events.extend(generate_daily_care_calendar_events(profile, today, horizon));
     events.extend(generate_breed_guide_calendar_events(profile, today, horizon));
@@ -4714,7 +4756,7 @@ pub(crate) fn generate_vet_calendar_events_for_snapshot(
         ));
     }
 
-    let horizon = today + Duration::days(730);
+    let horizon = today + Duration::days(CALENDAR_PREVIEW_HORIZON_DAYS);
 
     if snapshot.never_been_to_vet {
         let asap_title = format!("Make vet appointment ASAP — {pet_name}");
@@ -4760,7 +4802,7 @@ pub(crate) fn generate_vaccine_calendar_events_for_snapshot(
     };
 
     let today = reference_date;
-    let horizon = reference_date + Duration::days(730);
+    let horizon = reference_date + Duration::days(CALENDAR_PREVIEW_HORIZON_DAYS);
     let mut events = Vec::new();
     let history = &snapshot.vaccine_history;
     let outdoor = is_outdoor_snapshot(snapshot);
@@ -5347,13 +5389,13 @@ fn render_account_delete_pet_section(state: &AppState, profile: &UserProfile) ->
         .unwrap_or_else(|| account_view.pet_name.clone());
     let pet_id = escape_html_attr(&account_view.active_pet_id);
     let pet_name_html = escape_html(&pet_name);
-    let confirm = escape_js_string(&delete_pet_confirm_message(&pet_name));
+    let pet_name_attr = escape_html_attr(&pet_name);
 
     format!(
         r#"<article class="dashboard-card account-delete-pet-card">
   <h2>Remove cat</h2>
   <p class="account-delete-pet-copy">Delete <strong>{pet_name_html}</strong> completely from your household. Their tasks, photos, GIFs, memory clips, and friend shares will be removed.</p>
-  <form class="account-delete-pet-form" action="/home/pets/delete" method="post" onsubmit="return confirm('{confirm}');">
+  <form class="account-delete-pet-form" action="/home/pets/delete" method="post" data-confirm-kind="delete-pet" data-confirm-pet-name="{pet_name_attr}">
     <input type="hidden" name="pet_id" value="{pet_id}" />
     <button type="submit" class="account-delete-pet-btn">Delete {pet_name_html} completely</button>
   </form>
@@ -6613,12 +6655,20 @@ fn render_vet_urgency_alert(profile: &UserProfile, extra_class: &str) -> String 
     )
 }
 
-fn render_dashboard_status_area(profile: &UserProfile, status: Option<&str>) -> String {
+fn render_dashboard_status_area(
+    state: &AppState,
+    profile: &UserProfile,
+    status: Option<&str>,
+) -> String {
     let mut html = dashboard_status_block(status);
     html.push_str(&render_vet_urgency_alert(
         profile,
         "dashboard-vaccine-alert",
     ));
+    let today = chrono::Local::now().date_naive();
+    if let Some(ctx) = birthday_party::party_context(state, profile, today) {
+        html.push_str(&birthday_party::render_dashboard_banner(&ctx));
+    }
     html
 }
 
@@ -7733,6 +7783,8 @@ fn render_decor_cards(profile: &UserProfile, slider_card: bool) -> String {
 }
 
 fn render_cat_home_scene(state: &AppState, viewer: &UserProfile, play_as_pet_id: &str) -> String {
+    let today = chrono::Local::now().date_naive();
+    let party = birthday_party::party_context(state, viewer, today);
     let room = equipped_decor_for_slot(viewer, "room")
         .map(|decor| decor.id)
         .unwrap_or("sunny_nook");
@@ -7777,6 +7829,7 @@ fn render_cat_home_scene(state: &AppState, viewer: &UserProfile, play_as_pet_id:
         &toy_layer,
         &plant_layer,
         &equipped_strip,
+        party.as_ref(),
     )
 }
 
@@ -7949,14 +8002,24 @@ fn render_cat_home_layout(state: &AppState, profile: &UserProfile) -> (String, S
         )
     };
 
-    let intro = if pets.len() > 1 {
+    let today = chrono::Local::now().date_naive();
+    let party = birthday_party::party_context(state, profile, today);
+    let intro = if let Some(ref ctx) = party {
+        birthday_party::cat_home_intro(ctx)
+    } else if pets.len() > 1 {
         "All your cats share one family home. Pick which cat you're playing as.".to_string()
     } else {
         "Your family's virtual cat home — host playdates with friends' cats and decorate with paw points.".to_string()
     };
 
+    let title = if let Some(ref ctx) = party {
+        birthday_party::cat_home_title(ctx)
+    } else {
+        "Family Cat Home".to_string()
+    };
+
     (
-        "Family Cat Home".to_string(),
+        title,
         intro,
         play_switcher,
         layout,
@@ -8683,6 +8746,75 @@ fn render_event_list(state: &AppState, viewer: &UserProfile) -> String {
         .collect()
 }
 
+fn collect_calendar_tasks_json(calendar_profile: &UserProfile) -> Vec<serde_json::Value> {
+    let mut calendar_tasks: Vec<_> = calendar_profile
+        .tasks
+        .iter()
+        .filter_map(|task| {
+            task_schedule_date(task).map(|date| {
+                (
+                    task.time_minutes,
+                    task.title.clone(),
+                    task.id.clone(),
+                    task.pet_id.clone(),
+                    date,
+                    task.due_label.clone(),
+                    task.reward,
+                    task.completed,
+                )
+            })
+        })
+        .collect();
+    calendar_tasks.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    calendar_tasks
+        .into_iter()
+        .map(
+            |(time_minutes, title, id, pet_id, date, due_label, reward, completed)| {
+                serde_json::json!({
+                    "day": date.day(),
+                    "month": date.month(),
+                    "year": date.year(),
+                    "id": id,
+                    "pet_id": pet_id,
+                    "title": title,
+                    "due_label": due_label,
+                    "reward": reward,
+                    "completed": completed,
+                    "time_minutes": time_minutes,
+                    "time_value": minutes_to_time_input_value(time_minutes),
+                    "adjustable_time": task_has_adjustable_time(&id),
+                    "deletable": task_is_deletable(&id),
+                })
+            },
+        )
+        .collect()
+}
+
+fn render_calendar_tasks_update_json(
+    calendar_profile: &UserProfile,
+    month: u32,
+    year: u32,
+) -> String {
+    let today = Local::now().date_naive();
+    let payload = serde_json::json!({
+        "viewMonth": month,
+        "viewYear": year,
+        "todayDay": if today.year() as u32 == year && today.month() == month {
+            today.day()
+        } else {
+            0
+        },
+        "tasks": collect_calendar_tasks_json(calendar_profile),
+    });
+
+    serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+}
+
 fn render_calendar_data_json(
     state: &AppState,
     viewer: &UserProfile,
@@ -8708,52 +8840,7 @@ fn render_calendar_data_json(
         })
         .collect();
 
-    let mut calendar_tasks: Vec<_> = calendar_profile
-        .tasks
-        .iter()
-        .filter_map(|task| {
-            task_schedule_date(task).map(|date| {
-                (
-                    task.time_minutes,
-                    task.title.clone(),
-                    task.id.clone(),
-                    task.pet_id.clone(),
-                    date,
-                    task.due_label.clone(),
-                    task.reward,
-                    task.completed,
-                )
-            })
-        })
-        .collect();
-    calendar_tasks.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-            .then_with(|| left.2.cmp(&right.2))
-    });
-    let tasks: Vec<_> = calendar_tasks
-        .into_iter()
-        .map(
-            |(time_minutes, title, id, pet_id, date, due_label, reward, completed)| {
-                serde_json::json!({
-                    "day": date.day(),
-                    "month": date.month(),
-                    "year": date.year(),
-                    "id": id,
-                    "pet_id": pet_id,
-                    "title": title,
-                    "due_label": due_label,
-                    "reward": reward,
-                    "completed": completed,
-                    "time_minutes": time_minutes,
-                    "time_value": minutes_to_time_input_value(time_minutes),
-                    "adjustable_time": task_has_adjustable_time(&id),
-                    "deletable": task_is_deletable(&id),
-                })
-            },
-        )
-        .collect();
+    let tasks = collect_calendar_tasks_json(calendar_profile);
 
     let payload = serde_json::json!({
         "viewMonth": month,
@@ -8845,9 +8932,6 @@ async fn breed_guide_checkout(
     };
 
     let profile = get_or_create_profile(&state, &email).await;
-    if !entitlements::can_access_health_records(profile.premium_unlocked, &profile.email) {
-        return Redirect::to("/home?tab=health&status=premium_required");
-    }
     if breed_guides::can_access_breed_guide(
         profile.premium_unlocked,
         &profile.email,
@@ -9354,7 +9438,7 @@ async fn dashboard_page(
         )
         .replace(
             "{{STATUS_BLOCK}}",
-            &render_dashboard_status_area(&profile, dashboard_status),
+            &render_dashboard_status_area(&state, &profile, dashboard_status),
         )
         .replace("{{ACTIVITY_LIST}}", &render_activity_list(&profile))
         .replace(
@@ -10760,9 +10844,7 @@ fn task_dashboard_json_response(
     let calendar_year = current_calendar_year();
     let calendar_profile = sharing::calendar_view_profile(state, profile);
     let tasks_profile = sharing::tasks_view_profile(state, profile);
-    let calendar_data = serde_json::from_str(&render_calendar_data_json(
-        state,
-        profile,
+    let calendar_data = serde_json::from_str(&render_calendar_tasks_update_json(
         &calendar_profile,
         calendar_month,
         calendar_year,
@@ -13253,6 +13335,7 @@ async fn social_post_submit(
 
     let mut body = String::new();
     let mut video_duration = String::new();
+    let mut is_private = false;
     let mut media_bytes: Option<(Vec<u8>, Option<String>)> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -13261,6 +13344,14 @@ async fn social_post_submit(
             "body" => {
                 if let Ok(value) = field.text().await {
                     body = value;
+                }
+            }
+            "private" => {
+                if let Ok(value) = field.text().await {
+                    is_private = matches!(
+                        value.trim(),
+                        "1" | "true" | "on" | "yes"
+                    );
                 }
             }
             "video_duration" => {
@@ -13334,6 +13425,7 @@ async fn social_post_submit(
         media_type,
         media_url.as_deref(),
         duration,
+        is_private,
         timestamp_now(),
     ) {
         Ok(_) => {
@@ -14081,6 +14173,72 @@ mod tests {
             feeding_plan_for_profile(&senior, today),
             FeedingPlan::TwoMeals
         );
+    }
+
+    #[test]
+    fn owned_breed_guide_adds_all_template_tasks_for_matching_pet() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Persian".to_string();
+        profile.pet_name = "Mochi".to_string();
+        profile.owned_breed_guides.push("persian".to_string());
+        let guide = breed_guides::guide_for_slug("persian").expect("persian guide");
+        let templates = breed_guides::task_templates_for_guide(&guide);
+
+        assert!(ensure_breed_guide_tasks(&mut profile));
+        for template in templates {
+            let task_id = breed_guides::breed_guide_task_id("persian", template.key);
+            let task = profile
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id && task.pet_id == PRIMARY_PET_ID)
+                .unwrap_or_else(|| panic!("missing task {task_id}"));
+            assert!(task.title.contains("Mochi"));
+        }
+    }
+
+    #[test]
+    fn owned_breed_guide_adds_tasks_only_for_matching_household_cats() {
+        let mut profile = test_profile_weeks(52, "indoor");
+        profile.pet_breed = "Siamese".to_string();
+        profile.pet_name = "Luna".to_string();
+        profile.additional_pets.push(HouseholdPet {
+            id: "pet_persian".to_string(),
+            pet_name: "Cleo".to_string(),
+            pet_breed: "Persian".to_string(),
+            pet_color: "White".to_string(),
+            pet_mood: "calm".to_string(),
+            pet_age_weeks: Some(104),
+            pet_age_years: None,
+            pet_birth_date: Some("2024-06-01".to_string()),
+            last_vet_date: None,
+            never_been_to_vet: false,
+            pet_conditions: String::new(),
+            pet_medications: String::new(),
+            pet_indoor_outdoor: Some("indoor".to_string()),
+            vaccine_history: Vec::new(),
+            pet_vaccines_unknown: false,
+            care_schedule: default_care_schedule(),
+            pet_photo_url: None,
+            pet_video_url: None,
+            pet_video_clip_start: None,
+            pet_video_clip_duration: None,
+            pet_video_zoom: None,
+            pet_video_offset_x: None,
+            pet_video_offset_y: None,
+            deceased: false,
+            deceased_at: None,
+            memorial_videos: Vec::new(),
+            memorial_comfort_seen: false,
+        });
+        profile.owned_breed_guides.push("persian".to_string());
+
+        assert!(ensure_breed_guide_tasks(&mut profile));
+        assert!(!profile.tasks.iter().any(|task| {
+            task.id.starts_with("breed_guide_persian_") && task.pet_id == PRIMARY_PET_ID
+        }));
+        assert!(profile.tasks.iter().any(|task| {
+            task.id.starts_with("breed_guide_persian_") && task.pet_id == "pet_persian"
+        }));
     }
 
     #[test]
@@ -15987,9 +16145,8 @@ mod tests {
         let profile = test_profile_weeks(52, "indoor");
         let state = routing_test_state();
         let html = render_account_delete_pet_section(&state, &profile);
-        assert!(html.contains("onsubmit=\"return confirm("));
-        assert!(html.contains("Are you sure? This will delete all of"));
-        assert!(html.contains("Mochi"));
+        assert!(html.contains(r#"data-confirm-kind="delete-pet""#));
+        assert!(html.contains(r#"data-confirm-pet-name="Mochi""#));
     }
 
     #[test]
@@ -16292,6 +16449,8 @@ mod tests {
         let mut profile = test_profile_weeks(52, "indoor");
         profile.email = "streak-chip@example.com".to_string();
         profile.care_streak_days = 5;
+        profile.care_streak_last_date =
+            Some(chrono::Local::now().date_naive().format("%Y-%m-%d").to_string());
         state.storage.save_profile(&profile).expect("save profile");
 
         let jar = create_user_session(&state, CookieJar::new(), &profile.email);
@@ -17300,6 +17459,7 @@ mod tests {
         let mut friend_profile = test_profile_weeks(52, "indoor");
         friend_profile.email = friend.email.clone();
         friend_profile.community_visible = true;
+        friend_profile.best_care_streak = 7;
         state
             .storage
             .save_profile(&friend_profile)
@@ -17335,6 +17495,7 @@ mod tests {
                 "photo",
                 Some("/uploads/friend-nap.jpg"),
                 None,
+                false,
                 100,
             )
             .expect("friend post");
@@ -17347,6 +17508,7 @@ mod tests {
                 "video",
                 Some("/uploads/stranger-zoom.mp4"),
                 Some(8.0),
+                false,
                 101,
             )
             .expect("stranger post");
@@ -17388,6 +17550,8 @@ mod tests {
         assert!(friend_profile_html.contains("parent-profile-posts"));
         assert!(friend_profile_html.contains("Caring for"));
         assert!(!friend_profile_html.contains("Parent level"));
+        assert!(friend_profile_html.contains("parent-profile-achievements"));
+        assert!(friend_profile_html.contains("Week warrior"));
 
         let stranger_profile_html =
             social_posts::render_parent_profile_page(&state, &owner.email, "stranger", true);
@@ -17414,6 +17578,118 @@ mod tests {
         let hidden_html =
             social_posts::render_parent_profile_page(&state, &owner.email, "stranger", true);
         assert!(hidden_html.contains("profile is private"));
+    }
+
+    #[test]
+    fn private_social_posts_visible_only_to_author() {
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-private-posts-{}", Uuid::new_v4())),
+        )
+        .expect("storage");
+        let state = AppState { storage };
+
+        let owner = User {
+            username: "owner".to_string(),
+            first_name: "Own".to_string(),
+            last_name: "Er".to_string(),
+            email: "owner@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        let friend = User {
+            username: "friend".to_string(),
+            first_name: "Friend".to_string(),
+            last_name: "One".to_string(),
+            email: "friend@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        state.storage.save_user(&owner).expect("save owner");
+        state.storage.save_user(&friend).expect("save friend");
+
+        let mut owner_profile = test_profile_weeks(52, "indoor");
+        owner_profile.email = owner.email.clone();
+        owner_profile.community_visible = true;
+        state
+            .storage
+            .save_profile(&owner_profile)
+            .expect("save owner profile");
+
+        let mut friend_profile = test_profile_weeks(52, "indoor");
+        friend_profile.email = friend.email.clone();
+        friend_profile.community_visible = true;
+        state
+            .storage
+            .save_profile(&friend_profile)
+            .expect("save friend profile");
+
+        state
+            .storage
+            .create_friend_request("owner@test.local", "friend@test.local", 1)
+            .expect("friend request");
+        let incoming = state
+            .storage
+            .list_incoming_friend_requests("friend@test.local")
+            .expect("incoming");
+        state
+            .storage
+            .respond_friend_request(&incoming[0].id, "friend@test.local", true)
+            .expect("accept friend");
+
+        state
+            .storage
+            .create_social_post(
+                "friend@test.local",
+                "friend",
+                "Secret nap",
+                "photo",
+                Some("/uploads/secret.jpg"),
+                None,
+                true,
+                100,
+            )
+            .expect("private post");
+        state
+            .storage
+            .create_social_post(
+                "friend@test.local",
+                "friend",
+                "Public zoomies",
+                "photo",
+                Some("/uploads/public.jpg"),
+                None,
+                false,
+                101,
+            )
+            .expect("public post");
+
+        let owner_feed = social_posts::collect_social_posts(
+            &state,
+            "owner@test.local",
+            social_posts::SocialPostsView::Friends,
+        );
+        assert!(owner_feed.iter().any(|post| post.body == "Public zoomies"));
+        assert!(!owner_feed.iter().any(|post| post.body == "Secret nap"));
+
+        let friend_profile_posts = social_posts::collect_parent_profile_posts(
+            &state,
+            "friend@test.local",
+            "friend@test.local",
+        );
+        assert!(friend_profile_posts.iter().any(|post| post.body == "Secret nap"));
+        assert!(friend_profile_posts.iter().any(|post| post.body == "Public zoomies"));
+
+        let owner_view_friend_profile = social_posts::collect_parent_profile_posts(
+            &state,
+            "friend@test.local",
+            "owner@test.local",
+        );
+        assert!(owner_view_friend_profile
+            .iter()
+            .any(|post| post.body == "Public zoomies"));
+        assert!(!owner_view_friend_profile
+            .iter()
+            .any(|post| post.body == "Secret nap"));
     }
 
     #[test]

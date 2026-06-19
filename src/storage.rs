@@ -70,6 +70,7 @@ pub struct StoredSocialPost {
     pub media_type: String,
     pub media_url: Option<String>,
     pub video_duration: Option<f32>,
+    pub is_private: bool,
     pub created_at: u64,
 }
 
@@ -159,7 +160,8 @@ fn map_social_post_row(row: &rusqlite::Row<'_>) -> Result<StoredSocialPost, rusq
         media_type: row.get(4)?,
         media_url: row.get(5)?,
         video_duration: row.get::<_, Option<f64>>(6)?.map(|value| value as f32),
-        created_at: row.get::<_, i64>(7)? as u64,
+        is_private: row.get::<_, i64>(7)? != 0,
+        created_at: row.get::<_, i64>(8)? as u64,
     })
 }
 
@@ -473,6 +475,12 @@ impl Storage {
              CREATE INDEX IF NOT EXISTS idx_social_posts_user
                  ON social_posts(user_id);",
         )?;
+        if !Self::table_has_column(&conn, "social_posts", "is_private")? {
+            conn.execute(
+                "ALTER TABLE social_posts ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -2365,6 +2373,7 @@ impl Storage {
         media_type: &str,
         media_url: Option<&str>,
         video_duration: Option<f32>,
+        is_private: bool,
         created_at: u64,
     ) -> Result<StoredSocialPost, StorageError> {
         let user_id = Self::normalize_social_email(user_id);
@@ -2395,8 +2404,8 @@ impl Storage {
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
-            "INSERT INTO social_posts (id, user_id, author_username, body, media_type, media_url, video_duration, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO social_posts (id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 user_id,
@@ -2405,6 +2414,7 @@ impl Storage {
                 media_type,
                 media_url,
                 video_duration,
+                if is_private { 1_i64 } else { 0_i64 },
                 created_at as i64
             ],
         )?;
@@ -2416,6 +2426,7 @@ impl Storage {
             media_type,
             media_url: media_url.map(str::to_string),
             video_duration,
+            is_private,
             created_at,
         })
     }
@@ -2424,7 +2435,7 @@ impl Storage {
         let limit = limit.min(100) as i64;
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, created_at
+            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
              FROM social_posts
              ORDER BY created_at DESC
              LIMIT ?1",
@@ -2447,7 +2458,7 @@ impl Storage {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, created_at
+            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
              FROM social_posts
              WHERE LOWER(user_id) IN ({placeholders})
              ORDER BY created_at DESC

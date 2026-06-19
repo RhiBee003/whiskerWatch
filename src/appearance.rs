@@ -10,6 +10,8 @@ const SCHEMES: &[(&str, &str, &str)] = &[
     ("lavender", "Lavender", "light"),
     ("green", "Green", "light"),
     ("yellow", "Yellow", "light"),
+    ("coral", "Coral", "light"),
+    ("mint", "Mint", "light"),
     ("dark-pink", "Dark — pink accents", "dark"),
     ("dark-blue", "Dark — blue accents", "dark"),
     ("dark-white", "Dark — white accents", "dark"),
@@ -102,7 +104,7 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
 
     out = out.replace(
         "<link rel=\"stylesheet\" href=\"/styles.css",
-        r#"<script src="/appearance-init.js"></script>
+        r#"<script src="/appearance-init.js?v=20260620a"></script>
     <link rel="stylesheet" href="/styles.css"#,
     );
 
@@ -112,7 +114,7 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
             out.insert_str(
                 insert_at,
                 r#"
-    <link rel="stylesheet" href="/themes.css?v=20260619c" />"#,
+    <link rel="stylesheet" href="/themes.css?v=20260620a" />"#,
             );
         }
     }

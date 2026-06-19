@@ -37,6 +37,15 @@ pub fn guide_for_breed_name(name: &str) -> Option<BreedGuide> {
     breeds::find_breed(name).map(|(category, breed)| build_guide(category, breed))
 }
 
+pub fn pet_breed_matches_guide(pet_breed: &str, guide: &BreedGuide) -> bool {
+    if pet_breed.trim().eq_ignore_ascii_case(guide.breed_name.trim()) {
+        return true;
+    }
+
+    guide_for_breed_name(pet_breed)
+        .is_some_and(|pet_guide| pet_guide.slug.eq_ignore_ascii_case(&guide.slug))
+}
+
 pub fn breed_slug(name: &str) -> String {
     breeds::breed_slug(name)
 }
@@ -84,6 +93,7 @@ const BREED_GUIDE_TASK_KEYS: &[&str] = &[
     "enrichment",
     "climb",
     "groom",
+    "social",
 ];
 
 pub fn breed_guide_task_key(task_id: &str) -> Option<&'static str> {
@@ -1518,6 +1528,14 @@ mod tests {
         assert_eq!(wellness_exam_interval_months(&guide), 6);
         let siamese = guide_for_breed_name("Siamese").expect("siamese");
         assert_eq!(wellness_exam_interval_months(&siamese), 12);
+    }
+
+    #[test]
+    fn pet_breed_matches_guide_uses_catalog_slug() {
+        let guide = guide_for_breed_name("Persian").expect("persian guide");
+        assert!(pet_breed_matches_guide("Persian", &guide));
+        assert!(pet_breed_matches_guide("persian", &guide));
+        assert!(!pet_breed_matches_guide("Siamese", &guide));
     }
 
     #[test]

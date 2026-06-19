@@ -26,28 +26,23 @@
     if (!tabList) {
       return;
     }
-    if (tabId === "pet") {
-      const petTab = tabList.querySelector('.dashboard-tab[data-tab="pet"]');
-      if (petTab instanceof HTMLElement) {
-        petTab.scrollIntoView({ inline: "start", block: "nearest" });
-      } else {
-        tabList.scrollLeft = 0;
-      }
+    const activeTab = Array.from(tabs).find((tab) => tab.dataset.tab === tabId);
+    if (!(activeTab instanceof HTMLElement)) {
       return;
     }
-    const activeTab = Array.from(tabs).find((tab) => tab.dataset.tab === tabId);
-    if (!activeTab) {
+    if (tabId === "account") {
+      tabList.scrollLeft = 0;
+      updateDashboardTabsEdgeFade();
       return;
     }
     const listRect = tabList.getBoundingClientRect();
     const tabRect = activeTab.getBoundingClientRect();
-    const inset = 4;
+    const inset = 6;
     if (tabRect.left < listRect.left + inset) {
       tabList.scrollLeft -= listRect.left - tabRect.left + inset;
     } else if (tabRect.right > listRect.right - inset) {
       tabList.scrollLeft += tabRect.right - listRect.right + inset;
     }
-
     updateDashboardTabsEdgeFade();
   }
 
@@ -175,6 +170,11 @@
     scrollActiveTabIntoView(tabId);
     rememberDashboardTab(tabId);
     syncDashboardUrl(tabId);
+    if (tabId === "calendar") {
+      window.requestAnimationFrame(() => {
+        scrollCalendarTasksIntoView({ smooth: false });
+      });
+    }
   }
 
   tabs.forEach((tab) => {
@@ -499,7 +499,8 @@
     }
   }
 
-  const CAT_CARD_FLIP_MS = 440;
+  const CAT_CARD_FLIP_OUT_MS = 440;
+  const CAT_CARD_FLIP_IN_MS = 420;
   let catCardFlipInProgress = false;
   const catCardFlipReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -542,10 +543,26 @@
     }
     viewport.classList.remove(
       "is-flipping",
+      "is-flip-out",
       "flip-dir-prev",
       "flip-dir-next",
       "is-flip-in"
     );
+  }
+
+  function waitFlipFrames(count = 2) {
+    return new Promise((resolve) => {
+      let remaining = count;
+      const step = () => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          resolve();
+          return;
+        }
+        window.requestAnimationFrame(step);
+      };
+      window.requestAnimationFrame(step);
+    });
   }
 
   async function runCatCardFlip(viewport, swapContent, direction) {
@@ -563,12 +580,16 @@
     catCardFlipInProgress = true;
     const face = flipTransitionTarget(viewport);
     const dirClass = direction === "prev" ? "flip-dir-prev" : "flip-dir-next";
+    const lockedHeight = viewport.offsetHeight;
+    if (lockedHeight > 0) {
+      viewport.style.minHeight = `${lockedHeight}px`;
+    }
     try {
-      viewport.classList.add("is-flipping", dirClass);
+      viewport.classList.add("is-flipping", "is-flip-out", dirClass);
       if (face instanceof HTMLElement) {
-        await waitFlipTransition(face, CAT_CARD_FLIP_MS * 0.45);
+        await waitFlipTransition(face, CAT_CARD_FLIP_OUT_MS + 40);
       } else {
-        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_MS * 0.45));
+        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_OUT_MS));
       }
 
       const swapResult = swapContent();
@@ -576,14 +597,17 @@
         await swapResult;
       }
 
+      await waitFlipFrames(2);
       viewport.classList.add("is-flip-in");
+      viewport.classList.remove("is-flip-out");
       if (face instanceof HTMLElement) {
-        await waitFlipTransition(face, CAT_CARD_FLIP_MS * 0.55);
+        await waitFlipTransition(face, CAT_CARD_FLIP_IN_MS + 40);
       } else {
-        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_MS * 0.55));
+        await new Promise((resolve) => window.setTimeout(resolve, CAT_CARD_FLIP_IN_MS));
       }
     } finally {
       clearCatCardFlipState(viewport);
+      viewport.style.minHeight = "";
       catCardFlipInProgress = false;
     }
   }
@@ -798,15 +822,30 @@
     }
 
     if (data.calendar_data) {
-      calendarPayload = {
-        viewMonth: data.calendar_data.viewMonth || 0,
-        viewYear: data.calendar_data.viewYear || 0,
-        todayDay: data.calendar_data.todayDay || 0,
-        events: data.calendar_data.events || [],
-        tasks: data.calendar_data.tasks || [],
-      };
+      const update = data.calendar_data;
+      if (typeof update.viewMonth === "number" && update.viewMonth > 0) {
+        calendarPayload.viewMonth = update.viewMonth;
+      }
+      if (typeof update.viewYear === "number" && update.viewYear > 0) {
+        calendarPayload.viewYear = update.viewYear;
+      }
+      if (typeof update.todayDay === "number") {
+        calendarPayload.todayDay = update.todayDay;
+      }
+      if (Array.isArray(update.tasks)) {
+        calendarPayload.tasks = update.tasks;
+      }
+      if (Array.isArray(update.events)) {
+        calendarPayload.events = update.events;
+      }
       if (calendarDataEl) {
-        calendarDataEl.textContent = JSON.stringify(data.calendar_data);
+        calendarDataEl.textContent = JSON.stringify({
+          viewMonth: calendarPayload.viewMonth,
+          viewYear: calendarPayload.viewYear,
+          todayDay: calendarPayload.todayDay,
+          events: calendarPayload.events,
+          tasks: calendarPayload.tasks,
+        });
       }
       refreshCalendarView();
     }
@@ -1123,6 +1162,7 @@
   const calendarNextMonth = document.getElementById("calendar-next-month");
   const calendarAddEvent = document.getElementById("calendar-add-event");
   const calendarAddEventBtn = document.getElementById("calendar-add-event-btn");
+  const calendarEventsPanel = document.getElementById("calendar-events-panel");
   let selectedCalendarDay = null;
 
   const now = new Date();
@@ -1388,6 +1428,19 @@
     return new Date(year, month, 0).getDate();
   }
 
+  function scrollCalendarTasksIntoView(options = {}) {
+    if (!(calendarEventsPanel instanceof HTMLElement)) {
+      return;
+    }
+    if (!window.matchMedia("(max-width: 900px)").matches) {
+      return;
+    }
+    calendarEventsPanel.scrollIntoView({
+      behavior: options.smooth === false ? "auto" : "smooth",
+      block: "start",
+    });
+  }
+
   function firstWeekday(month, year) {
     return new Date(year, month - 1, 1).getDay();
   }
@@ -1578,6 +1631,7 @@
     }
 
     updateCalendarAddEventPanel(day, month, year);
+    scrollCalendarTasksIntoView();
   }
 
   if (calendarGrid) {
@@ -3488,15 +3542,18 @@
       }
       updatePetSwitcherUi(petId, owner);
       persistPetSelection(petId, owner);
-      window.whiskerRemountPetShowcase?.(targetPanel);
     };
 
     if (direction && viewport && !options.skipFlip) {
       await runCatCardFlip(viewport, applyPanelSwap, direction);
+      const targetPanel = viewport.querySelector(".pet-showcase-panel.is-active");
+      window.whiskerRemountPetShowcase?.(targetPanel);
       return;
     }
 
     applyPanelSwap();
+    const targetPanel = viewport?.querySelector(".pet-showcase-panel.is-active");
+    window.whiskerRemountPetShowcase?.(targetPanel || viewport);
   }
 
   function setupPetShowcaseCarousel() {
@@ -4002,7 +4059,7 @@
         const tips = Array.isArray(item.home_care) ? item.home_care : [];
         const concernClass = concernClassFor(item.concern_level);
         const lessLikelyNote = item.less_likely
-          ? '<p class="symptom-less-likely-note">Weaker symptom match — still worth knowing about.</p>'
+          ? '<p class="symptom-less-likely-note">Lower on the list based on your description — mention it to your vet if it still fits.</p>'
           : "";
         const matchStrength = item.match_strength
           ? `<span class="symptom-match-badge">${escapeSymptomHtml(item.match_strength)}</span>`
@@ -4044,7 +4101,7 @@
       }
       ${
         possibilities.length
-          ? `<section class="symptom-results-section"><h4>Possible explanations (most to least likely)</h4><p class="symptom-possibilities-intro">Ranked by how well your symptoms match — strongest fits first, weaker possibilities last. Discuss any that fit with your vet.</p>${possibilityHtml}</section>`
+          ? `<section class="symptom-results-section"><h4>Possible explanations (most to least likely)</h4><p class="symptom-possibilities-intro">These are common patterns that fit what you described — not a diagnosis. Stronger fits appear first; your vet can confirm what applies to your cat.</p>${possibilityHtml}</section>`
           : ""
       }
       ${

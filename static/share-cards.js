@@ -163,9 +163,23 @@
     });
   }
 
+  async function themeColor(name, fallback) {
+    const value = getComputedStyle(document.documentElement)
+      .getPropertyValue(name)
+      .trim();
+    return value || fallback;
+  }
+
   async function buildShareCardImageBlob(card) {
     const { kind, value, petName, headline, subline } = shareCardDefaults(card);
     const logo = await loadShareLogo();
+    const accentBright = await themeColor("--accent-bright", "#e8357a");
+    const accentMain = await themeColor("--pink-accent", "#d07098");
+    const accentDark = await themeColor("--pink-dark", "#a04870");
+    const ink = await themeColor("--ink", "#1f1c22");
+    const muted = await themeColor("--muted", "#453842");
+    const cardBg = await themeColor("--pink-card", "#f2b8d4");
+    const pageBg = await themeColor("--pink-bg", "#fac8dd");
     const canvas = document.createElement("canvas");
     canvas.width = 1080;
     canvas.height = 1350;
@@ -175,9 +189,9 @@
     }
 
     const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, "#ffe8f3");
-    gradient.addColorStop(0.45, "#ffd4ea");
-    gradient.addColorStop(1, "#fff8fc");
+    gradient.addColorStop(0, pageBg);
+    gradient.addColorStop(0.45, cardBg);
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0.96)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -185,46 +199,50 @@
     roundRect(ctx, 90, 120, 900, 1110, 48);
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(208, 112, 152, 0.45)";
+    ctx.strokeStyle = accentMain;
+    ctx.globalAlpha = 0.45;
     ctx.lineWidth = 4;
     roundRect(ctx, 90, 120, 900, 1110, 48);
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
     ctx.textAlign = "center";
-    ctx.fillStyle = "#b85a82";
+    ctx.fillStyle = accentDark;
     ctx.font = "700 42px system-ui, sans-serif";
     ctx.fillText(kind === "streak" ? "CARE STREAK MILESTONE" : "PARENT LEVEL UP", 540, 220);
 
     ctx.font = "72px system-ui, sans-serif";
     ctx.fillText(kind === "streak" ? "🔥" : "⭐", 540, 380);
 
-    ctx.fillStyle = kind === "streak" ? "#e8357a" : "#d07098";
+    ctx.fillStyle = kind === "streak" ? accentBright : accentMain;
     ctx.font = "800 220px system-ui, sans-serif";
     ctx.fillText(String(value), 540, 500);
 
-    ctx.fillStyle = "#8f4f6d";
+    ctx.fillStyle = muted;
     ctx.font = "700 52px system-ui, sans-serif";
     ctx.fillText(kind === "streak" ? (value === 1 ? "DAY" : "DAYS") : "LEVEL", 540, 580);
 
-    ctx.fillStyle = "#3a1f2f";
+    ctx.fillStyle = ink;
     ctx.font = "700 54px system-ui, sans-serif";
     wrapText(ctx, headline, 540, 700, 820, 64);
 
-    ctx.fillStyle = "#6d4a5d";
+    ctx.fillStyle = muted;
     ctx.font = "500 40px system-ui, sans-serif";
     ctx.fillText(`Celebrating ${petName}`, 540, 840);
 
-    ctx.fillStyle = "#8f6278";
+    ctx.fillStyle = accentDark;
     ctx.font = "500 34px system-ui, sans-serif";
     wrapText(ctx, subline, 540, 930, 780, 46);
 
     const brandTop = 1020;
-    ctx.strokeStyle = "rgba(208, 112, 152, 0.28)";
+    ctx.strokeStyle = accentMain;
+    ctx.globalAlpha = 0.28;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(220, brandTop);
     ctx.lineTo(860, brandTop);
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
     if (logo) {
       const logoSize = 88;

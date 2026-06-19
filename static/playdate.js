@@ -80,10 +80,13 @@
     if (!playAsId) {
       return null;
     }
+    const cats = readCats(scene);
     return (
-      readCats(scene).find(
+      cats.find(
         (cat) => cat.petId === playAsId && cat.element.classList.contains("cat-home-play-as")
-      ) || null
+      ) ||
+      cats.find((cat) => cat.petId === playAsId && cat.isOwned) ||
+      null
     );
   }
 
@@ -136,26 +139,12 @@
     return friendshipScore(playAs, cat, friendships);
   }
 
-  function friendshipTierFloor(score) {
-    if (score <= -20) {
-      return -50;
-    }
-    if (score < 0) {
-      return -19;
-    }
-    if (score < 10) {
-      return 0;
-    }
-    if (score < 30) {
-      return 10;
-    }
-    if (score < 55) {
-      return 30;
-    }
-    if (score < 80) {
-      return 55;
-    }
-    return 80;
+  const FRIENDSHIP_SCORE_MIN = -50;
+  const FRIENDSHIP_SCORE_MAX = 100;
+
+  function friendshipProgressPercent(score) {
+    const clamped = Math.min(FRIENDSHIP_SCORE_MAX, Math.max(FRIENDSHIP_SCORE_MIN, score));
+    return Math.round(((clamped - FRIENDSHIP_SCORE_MIN) * 100) / (FRIENDSHIP_SCORE_MAX - FRIENDSHIP_SCORE_MIN));
   }
 
   function friendshipNextLevelTarget(score) {
@@ -178,20 +167,6 @@
       return 80;
     }
     return 100;
-  }
-
-  function friendshipProgressWithinTier(score, floor, ceiling) {
-    if (ceiling <= floor) {
-      return 100;
-    }
-    const clamped = Math.min(ceiling, Math.max(floor, score));
-    return Math.round(((clamped - floor) * 100) / (ceiling - floor));
-  }
-
-  function friendshipTierProgressPercent(score) {
-    const floor = friendshipTierFloor(score);
-    const target = friendshipNextLevelTarget(score);
-    return friendshipProgressWithinTier(score, floor, target);
   }
 
   function formatFriendshipLevelDisplay(score) {
@@ -218,9 +193,7 @@
   function renderFriendshipRow(playAs, other, friendships) {
     const score = friendshipScore(playAs, other, friendships);
     const tier = friendshipTier(score);
-    const tierFloor = friendshipTierFloor(score);
-    const nextTarget = friendshipNextLevelTarget(score);
-    const percent = friendshipTierProgressPercent(score);
+    const percent = friendshipProgressPercent(score);
     const levelDisplay = formatFriendshipLevelDisplay(score);
     const row = document.createElement("li");
     row.className = "cat-home-friendship-row";
@@ -234,7 +207,7 @@
         <span class="cat-home-friendship-name">${other.name}</span>
         <span class="cat-home-friendship-role">${friendshipTargetRole(other)}</span>
       </div>
-      <div class="cat-home-friendship-meter" role="meter" aria-valuenow="${score}" aria-valuemin="${tierFloor}" aria-valuemax="${nextTarget}" aria-label="Friendship with ${other.name}: ${tier.label} (${levelDisplay})">
+      <div class="cat-home-friendship-meter" role="meter" aria-valuenow="${score}" aria-valuemin="${FRIENDSHIP_SCORE_MIN}" aria-valuemax="${FRIENDSHIP_SCORE_MAX}" aria-label="Friendship with ${other.name}: ${tier.label} (${levelDisplay})">
         <div class="cat-home-friendship-meter-fill" style="width: ${percent}%"></div>
       </div>
       <p class="cat-home-friendship-tier">${tier.emoji} ${tier.label} · ${levelDisplay}</p>
@@ -271,7 +244,7 @@
       panel.innerHTML = `
         <div class="cat-home-friendships-header">
           <h3 id="cat-home-friendships-title"></h3>
-          <p class="field-hint cat-home-friendships-lead">Points show progress toward the next friendship level (current / goal).</p>
+          <p class="field-hint cat-home-friendships-lead">Bars show overall friendship; points below are progress toward the next level.</p>
         </div>
         <ul class="cat-home-friendships-list"></ul>
       `;

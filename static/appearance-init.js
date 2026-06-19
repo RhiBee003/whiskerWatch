@@ -15,11 +15,16 @@
   };
 
   function brandLogoSrc(scheme) {
-    return scheme === "dark-pink" ? "/images/logo-pink.png" : "/images/logo.png";
+    if (scheme && scheme.indexOf("dark-") === 0) {
+      return "/images/logo-pink.png";
+    }
+    return "/images/logo.png";
   }
 
   function updateBrandLogos(scheme) {
-    var src = brandLogoSrc(scheme);
+    var active =
+      scheme || document.documentElement.getAttribute("data-color-scheme") || DEFAULT;
+    var src = brandLogoSrc(active);
     document.querySelectorAll(".brand-logo, .share-win-brand-logo").forEach(function (img) {
       if (img.getAttribute("src") !== src) {
         img.setAttribute("src", src);

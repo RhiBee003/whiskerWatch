@@ -1,7 +1,7 @@
 use crate::{
     escape_html, escape_html_attr, household_pet_is_complete, memorial, pet_snapshot,
-    profile_has_pet, user_for_email, visible_calendar_events, AppState, CalendarEvent, UserProfile,
-    PRIMARY_PET_ID,
+    profile_has_pet, user_for_email, visible_calendar_events, AppState, CalendarEvent,
+    UserProfile, CALENDAR_PREVIEW_HORIZON_DAYS, PRIMARY_PET_ID,
 };
 use chrono::{Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
@@ -990,7 +990,7 @@ pub fn visible_calendar_events_for_viewer(
 ) -> Vec<CalendarEvent> {
     let mut events = visible_calendar_events(viewer, reference_date);
     let today = Local::now().date_naive();
-    let horizon = today + Duration::days(730);
+    let horizon = today + Duration::days(CALENDAR_PREVIEW_HORIZON_DAYS);
 
     if let Ok(shares) = state
         .storage

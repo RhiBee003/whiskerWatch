@@ -19,6 +19,10 @@ pub fn normalize_posts_view(value: Option<&str>) -> SocialPostsView {
     }
 }
 
+pub fn can_view_social_post(post: &StoredSocialPost, viewer_email: &str) -> bool {
+    !post.is_private || post.user_id.eq_ignore_ascii_case(viewer_email)
+}
+
 pub fn own_profile_tab_url() -> &'static str {
     "/home?tab=profile"
 }
@@ -112,15 +116,19 @@ pub fn collect_social_posts(
                 .storage
                 .list_social_posts_from_users(&authors, MAX_SOCIAL_POSTS)
                 .unwrap_or_default()
+                .into_iter()
+                .filter(|post| can_view_social_post(post, viewer_email))
+                .collect()
         }
         SocialPostsView::All => {
             let visible = community_visible_emails(state);
             let all = state.storage.list_social_posts(MAX_SOCIAL_POSTS).unwrap_or_default();
             all.into_iter()
                 .filter(|post| {
-                    visible
-                        .iter()
-                        .any(|email| email.eq_ignore_ascii_case(&post.user_id))
+                    can_view_social_post(post, viewer_email)
+                        && visible
+                            .iter()
+                            .any(|email| email.eq_ignore_ascii_case(&post.user_id))
                 })
                 .collect()
         }
@@ -130,11 +138,15 @@ pub fn collect_social_posts(
 pub fn collect_parent_profile_posts(
     state: &AppState,
     subject_email: &str,
+    viewer_email: &str,
 ) -> Vec<StoredSocialPost> {
     state
         .storage
         .list_social_posts_from_users(&[subject_email.to_string()], MAX_SOCIAL_POSTS)
         .unwrap_or_default()
+        .into_iter()
+        .filter(|post| can_view_social_post(post, viewer_email))
+        .collect()
 }
 
 fn render_social_post_media(post: &StoredSocialPost) -> String {
@@ -204,6 +216,11 @@ pub fn render_social_post_card(
         format!(r#"<div class="social-post-media">{media}</div>"#, media = media)
     };
     let friend_action = sharing::render_friend_add_control(state, viewer_email, &post.user_id);
+    let private_badge = if post.is_private && post.user_id.eq_ignore_ascii_case(viewer_email) {
+        r#"<span class="social-post-private-badge">Private</span>"#
+    } else {
+        ""
+    };
     let delete_form = if post.user_id.eq_ignore_ascii_case(viewer_email) {
         format!(
             r#"<form class="social-post-delete-form" action="/home/social/post/delete" method="post" data-confirm="Are you sure?">
@@ -220,7 +237,7 @@ pub fn render_social_post_card(
     format!(
         r#"<article class="social-post-card" data-post-id="{id}">
   <header class="social-post-header">
-    <div class="social-post-author-block">{author_block}</div>
+    <div class="social-post-author-block">{author_block}{private_badge}</div>
     <div class="social-post-header-actions">{friend_action}{delete_form}</div>
   </header>
   {media_block}
@@ -228,6 +245,7 @@ pub fn render_social_post_card(
 </article>"#,
         id = escape_html_attr(&post.id),
         author_block = author_block,
+        private_badge = private_badge,
         friend_action = friend_action,
         delete_form = delete_form,
         media_block = media_block,
@@ -255,6 +273,10 @@ pub fn render_social_post_form(instance: &str) -> String {
     <form class="login-form social-post-form" id="{form_id}" data-social-compose="{instance}" action="/home/social/post" method="post" enctype="multipart/form-data">
       <label for="{body_id}">Caption (optional)</label>
       <textarea id="{body_id}" name="body" rows="3" maxlength="2000" placeholder="What is your kitty up to?"></textarea>
+      <label class="social-post-private-option">
+        <input type="checkbox" name="private" value="1" />
+        <span>Private post — only visible on your profile, not in friends or community feeds</span>
+      </label>
       <fieldset class="social-post-media-fieldset">
         <legend>Photo or video</legend>
         <div class="pet-photo-upload social-post-media-upload">
@@ -460,7 +482,12 @@ pub fn render_parent_profile_page(
         String::new()
     };
 
-    let posts = collect_parent_profile_posts(state, &subject_email);
+    let achievements_html = subject_profile
+        .as_ref()
+        .map(|profile| crate::achievements::render_parent_profile_achievements(profile, is_self))
+        .unwrap_or_default();
+
+    let posts = collect_parent_profile_posts(state, &subject_email, viewer_email);
     let posts_html = if posts.is_empty() {
         if is_self {
             format!(
@@ -512,6 +539,7 @@ pub fn render_parent_profile_page(
       <div class="parent-profile-actions">{friend_action}{message_link}</div>
     </div>
   </header>
+  {achievements_html}
   {compose}
   <section class="parent-profile-posts-section">
     <h2 class="parent-profile-posts-title">Posts</h2>
@@ -524,6 +552,7 @@ pub fn render_parent_profile_page(
         username = escape_html(&display_username),
         pet_line = pet_line,
         breed_line = breed_line,
+        achievements_html = achievements_html,
         friend_action = friend_action,
         message_link = message_link,
         compose = compose,
