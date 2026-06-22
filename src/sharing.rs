@@ -6,7 +6,8 @@ use crate::{
 use chrono::{Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use crate::storage::{
-    StorageError, StoredFriendMessage, StoredFriendRequest, StoredFriendSummary, StoredPetShare,
+    StorageError, StoredFriendMessage, StoredFriendRequest, StoredFriendSummary, StoredMessageThread,
+    StoredPetShare,
     StoredUserSearchHit,
 };
 
@@ -133,7 +134,11 @@ pub fn friends_tab_badge_count(state: &AppState, email: &str) -> usize {
         .storage
         .count_unread_friend_messages(email)
         .unwrap_or(0);
-    friends_pending_count(state, email) + unread
+    let message_requests = state
+        .storage
+        .count_pending_message_requests(email)
+        .unwrap_or(0);
+    friends_pending_count(state, email) + unread + message_requests
 }
 
 pub fn render_friends_tab_label(state: &AppState, email: &str) -> String {
@@ -147,11 +152,14 @@ pub fn render_friends_tab_label(state: &AppState, email: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FriendMessageItem {
     pub id: String,
     pub from_email: String,
     pub body: String,
+    pub media_type: String,
+    pub media_url: Option<String>,
+    pub video_duration: Option<f32>,
     pub created_at: u64,
     pub is_mine: bool,
 }
@@ -163,14 +171,16 @@ pub struct FriendMessagePartner {
     pub photo_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FriendMessagesResponse {
     pub ok: bool,
     pub friend: Option<FriendMessagePartner>,
     pub messages: Vec<FriendMessageItem>,
+    pub thread_status: Option<String>,
+    pub can_compose: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FriendMessageSendResponse {
     pub ok: bool,
     pub message: Option<FriendMessageItem>,
@@ -180,12 +190,25 @@ pub struct FriendMessageSendResponse {
 #[derive(Deserialize)]
 pub struct FriendMessageSendForm {
     pub friend_email: String,
+    #[serde(default)]
     pub body: String,
 }
 
 #[derive(Deserialize)]
 pub struct FriendMessageReadForm {
     pub friend_email: String,
+}
+
+#[derive(Deserialize)]
+pub struct MessageRequestRespondForm {
+    pub partner_email: String,
+    pub action: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessageRequestRespondResponse {
+    pub ok: bool,
+    pub status: Option<String>,
 }
 
 const FRIEND_MESSAGE_LIMIT: usize = 80;
@@ -196,8 +219,33 @@ fn stored_friend_message_item(message: &StoredFriendMessage, viewer_email: &str)
         id: message.id.clone(),
         from_email: message.from_email.clone(),
         body: message.body.clone(),
+        media_type: message.media_type.clone(),
+        media_url: message.media_url.clone(),
+        video_duration: message.video_duration,
         created_at: message.created_at,
         is_mine: message.from_email.eq_ignore_ascii_case(viewer_email),
+    }
+}
+
+fn message_thread_status_for_viewer(
+    thread: Option<&StoredMessageThread>,
+    viewer_email: &str,
+    are_friends: bool,
+) -> (Option<String>, bool) {
+    if are_friends {
+        return (Some("accepted".to_string()), true);
+    }
+    let Some(thread) = thread else {
+        return (None, false);
+    };
+    match thread.status.as_str() {
+        "accepted" => (Some("accepted".to_string()), true),
+        "declined" => (Some("declined".to_string()), false),
+        "pending" if thread.initiated_by.eq_ignore_ascii_case(viewer_email) => {
+            (Some("pending_outgoing".to_string()), true)
+        }
+        "pending" => (Some("pending_incoming".to_string()), false),
+        _ => (Some(thread.status.clone()), false),
     }
 }
 
@@ -208,16 +256,59 @@ pub fn friend_messages_for_conversation(
 ) -> Result<FriendMessagesResponse, StorageError> {
     let viewer_email = normalize_email(viewer_email);
     let friend_email = normalize_email(friend_email);
-    if !state.storage.are_friends(&viewer_email, &friend_email)? {
-        return Err(StorageError::InvalidInput("not friends".into()));
+    if viewer_email == friend_email {
+        return Err(StorageError::InvalidInput("cannot message yourself".into()));
+    }
+    if !state.storage.user_exists(&friend_email)? {
+        return Err(StorageError::InvalidInput("user not found".into()));
     }
 
-    let messages = state
+    let are_friends = state.storage.are_friends(&viewer_email, &friend_email)?;
+    let thread = state
         .storage
-        .list_friend_conversation(&viewer_email, &friend_email, FRIEND_MESSAGE_LIMIT)?
-        .iter()
-        .map(|message| stored_friend_message_item(message, &viewer_email))
-        .collect();
+        .get_message_thread(&viewer_email, &friend_email)?;
+    let (thread_status, can_compose) =
+        message_thread_status_for_viewer(thread.as_ref(), &viewer_email, are_friends);
+
+    if thread.as_ref().is_some_and(|value| value.status == "declined") {
+        let messages = state
+            .storage
+            .list_friend_conversation(&viewer_email, &friend_email, FRIEND_MESSAGE_LIMIT)?
+            .iter()
+            .map(|message| stored_friend_message_item(message, &viewer_email))
+            .collect();
+        return Ok(FriendMessagesResponse {
+            ok: true,
+            friend: Some(FriendMessagePartner {
+                email: friend_email.clone(),
+                username: user_label(state, &friend_email),
+                photo_url: user_profile_photo_src(state, &friend_email),
+            }),
+            messages,
+            thread_status,
+            can_compose: false,
+        });
+    }
+
+    let can_view = are_friends
+        || thread.is_some()
+        || thread_status.is_none();
+    if !can_view {
+        return Err(StorageError::InvalidInput("cannot view conversation".into()));
+    }
+
+    let messages = if are_friends || thread.is_some() {
+        state
+            .storage
+            .list_friend_conversation(&viewer_email, &friend_email, FRIEND_MESSAGE_LIMIT)?
+            .iter()
+            .map(|message| stored_friend_message_item(message, &viewer_email))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let can_compose = can_compose || (!are_friends && thread.is_none());
 
     Ok(FriendMessagesResponse {
         ok: true,
@@ -227,6 +318,8 @@ pub fn friend_messages_for_conversation(
             photo_url: user_profile_photo_src(state, &friend_email),
         }),
         messages,
+        thread_status,
+        can_compose,
     })
 }
 
@@ -235,16 +328,49 @@ pub fn send_friend_message(
     viewer_email: &str,
     friend_email: &str,
     body: &str,
+    media_type: &str,
+    media_url: Option<&str>,
+    video_duration: Option<f32>,
     created_at: u64,
 ) -> Result<FriendMessageSendResponse, StorageError> {
     let viewer_email = normalize_email(viewer_email);
-    let message = state
-        .storage
-        .send_friend_message(&viewer_email, friend_email, body, created_at)?;
+    let message = state.storage.send_friend_message(
+        &viewer_email,
+        friend_email,
+        body,
+        media_type,
+        media_url,
+        video_duration,
+        created_at,
+    )?;
     Ok(FriendMessageSendResponse {
         ok: true,
         message: Some(stored_friend_message_item(&message, &viewer_email)),
         status: None,
+    })
+}
+
+pub fn respond_message_request(
+    state: &AppState,
+    viewer_email: &str,
+    partner_email: &str,
+    accept: bool,
+    responded_at: u64,
+) -> Result<MessageRequestRespondResponse, StorageError> {
+    let viewer_email = normalize_email(viewer_email);
+    let partner_email = normalize_email(partner_email);
+    if accept {
+        state
+            .storage
+            .accept_message_thread_between(&viewer_email, &partner_email, responded_at)?;
+    } else {
+        state
+            .storage
+            .decline_message_thread_between(&viewer_email, &partner_email, responded_at)?;
+    }
+    Ok(MessageRequestRespondResponse {
+        ok: true,
+        status: Some(if accept { "accepted" } else { "declined" }.to_string()),
     })
 }
 
@@ -259,54 +385,138 @@ pub fn mark_friend_messages_read(
         .mark_friend_conversation_read(viewer_email, friend_email, read_at)
 }
 
-fn message_preview(body: &str) -> String {
-    let trimmed = body.trim();
-    if trimmed.is_empty() {
-        return "Say hi!".to_string();
+fn message_preview(message: &StoredFriendMessage) -> String {
+    if !message.body.trim().is_empty() {
+        let trimmed = message.body.trim();
+        if trimmed.chars().count() <= MESSAGE_PREVIEW_CHARS {
+            return trimmed.to_string();
+        }
+        let mut preview = String::new();
+        for ch in trimmed.chars().take(MESSAGE_PREVIEW_CHARS) {
+            preview.push(ch);
+        }
+        preview.push('…');
+        return preview;
     }
-    if trimmed.chars().count() <= MESSAGE_PREVIEW_CHARS {
-        return trimmed.to_string();
+    match message.media_type.as_str() {
+        "photo" => "📷 Photo".to_string(),
+        "video" => "🎬 Video".to_string(),
+        _ => "Say hi!".to_string(),
     }
-    let mut preview = String::new();
-    for ch in trimmed.chars().take(MESSAGE_PREVIEW_CHARS) {
-        preview.push(ch);
-    }
-    preview.push('…');
-    preview
 }
 
-pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> String {
-    let friends = state
+fn conversation_partner_emails(state: &AppState, viewer_email: &str) -> Vec<String> {
+    let mut partners = state
         .storage
         .list_friends(viewer_email)
         .unwrap_or_default()
         .into_iter()
-        .map(stored_friend_summary)
+        .map(|friend| friend.friend_email)
         .collect::<Vec<_>>();
-
-    if friends.is_empty() {
-        return r#"<article class="dashboard-card friend-messages-card" id="friend-messages-card">
-  <h3 class="friends-subhead">Messages</h3>
-  <p class="field-hint">Add friends first, then you can text them here about cat care, playdates, or anything whisker-related.</p>
-</article>"#
-            .to_string();
+    for email in state
+        .storage
+        .list_message_thread_partners(viewer_email)
+        .unwrap_or_default()
+    {
+        if !partners
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&email))
+        {
+            partners.push(email);
+        }
     }
+    partners
+}
 
-    let thread_buttons = friends
+pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> String {
+    let partners = conversation_partner_emails(state, viewer_email);
+    let incoming_requests = state
+        .storage
+        .count_pending_message_requests(viewer_email)
+        .unwrap_or(0);
+
+    let incoming_request_partners: Vec<String> = state
+        .storage
+        .list_message_thread_partners(viewer_email)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|partner| {
+            let thread = state.storage.get_message_thread(viewer_email, &partner).ok()??;
+            if thread.status == "pending"
+                && !thread.initiated_by.eq_ignore_ascii_case(viewer_email)
+            {
+                Some(partner)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let request_items: String = incoming_request_partners
         .iter()
-        .map(|friend| {
-            let label = user_label(state, &friend.friend_email);
-            let photo = user_profile_photo_src(state, &friend.friend_email);
+        .filter_map(|partner| {
+            let label = user_label(state, partner);
+            let photo = user_profile_photo_src(state, partner);
+            let preview = state
+                .storage
+                .last_friend_message_with(viewer_email, partner)
+                .ok()
+                .flatten()
+                .map(|message| message_preview(&message))
+                .unwrap_or_else(|| "Sent you a message".to_string());
+            Some(format!(
+                r#"<li><button type="button" class="friend-message-thread-btn friend-message-request-btn" data-friend-email="{email}" data-friend-label="{label}" data-thread-status="pending_incoming">
+  <img class="friend-message-thread-photo" src="{photo}" alt="" width="44" height="44" loading="lazy" />
+  <span class="friend-message-thread-meta">
+    <strong class="friend-message-thread-name">{label}</strong>
+    <span class="friend-message-thread-preview">{preview}</span>
+    <span class="friend-message-request-badge">Message request</span>
+  </span>
+</button></li>"#,
+                email = escape_html_attr(partner),
+                label = escape_html_attr(&label),
+                photo = escape_html_attr(&photo),
+                preview = escape_html(&preview),
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    let thread_buttons = partners
+        .iter()
+        .filter_map(|partner| {
+            if incoming_request_partners
+                .iter()
+                .any(|email| email.eq_ignore_ascii_case(partner))
+            {
+                return None;
+            }
+            let are_friends = state
+                .storage
+                .are_friends(viewer_email, partner)
+                .unwrap_or(false);
+            let thread = state
+                .storage
+                .get_message_thread(viewer_email, partner)
+                .ok()
+                .flatten();
+            if !are_friends {
+                if thread.as_ref().is_none_or(|value| value.status == "declined") {
+                    return None;
+                }
+            }
+            let label = user_label(state, partner);
+            let photo = user_profile_photo_src(state, partner);
             let unread = state
                 .storage
-                .count_unread_from_friend(viewer_email, &friend.friend_email)
+                .count_unread_from_friend(viewer_email, partner)
                 .unwrap_or(0);
             let preview = state
                 .storage
-                .last_friend_message_with(viewer_email, &friend.friend_email)
+                .last_friend_message_with(viewer_email, partner)
                 .ok()
                 .flatten()
-                .map(|message| message_preview(&message.body))
+                .map(|message| message_preview(&message))
                 .unwrap_or_else(|| "Say hi!".to_string());
             let unread_badge = if unread > 0 {
                 format!(
@@ -316,32 +526,66 @@ pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> Stri
             } else {
                 String::new()
             };
+            let thread_status = message_thread_status_for_viewer(
+                thread.as_ref(),
+                viewer_email,
+                are_friends,
+            )
+            .0
+            .unwrap_or_else(|| "accepted".to_string());
+            let request_badge = if thread_status == "pending_outgoing" {
+                r#"<span class="friend-message-request-badge friend-message-request-badge-outgoing">Request sent</span>"#
+            } else {
+                ""
+            };
 
-            format!(
-                r#"<li><button type="button" class="friend-message-thread-btn" data-friend-email="{email}" data-friend-label="{label}">
+            Some(format!(
+                r#"<li><button type="button" class="friend-message-thread-btn" data-friend-email="{email}" data-friend-label="{label}" data-thread-status="{thread_status}">
   <img class="friend-message-thread-photo" src="{photo}" alt="" width="44" height="44" loading="lazy" />
   <span class="friend-message-thread-meta">
     <strong class="friend-message-thread-name">{label}</strong>
     <span class="friend-message-thread-preview">{preview}</span>
+    {request_badge}
   </span>
   {unread_badge}
 </button></li>"#,
-                email = escape_html_attr(&friend.friend_email),
+                email = escape_html_attr(partner),
                 label = escape_html_attr(&label),
                 photo = escape_html_attr(&photo),
                 preview = escape_html(&preview),
+                thread_status = escape_html_attr(&thread_status),
+                request_badge = request_badge,
                 unread_badge = unread_badge,
-            )
+            ))
         })
         .collect::<Vec<_>>()
         .join("");
 
+    let requests_section = if request_items.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<section class="friend-message-requests" aria-label="Message requests">
+  <h4 class="friend-message-requests-title">Message requests ({count})</h4>
+  <ul class="friend-message-thread-list friend-message-request-list">{items}</ul>
+</section>"#,
+            count = incoming_requests,
+            items = request_items,
+        )
+    };
+
     format!(
         r#"<article class="dashboard-card friend-messages-card" id="friend-messages-card">
   <h3 class="friends-subhead">Messages</h3>
-  <p class="field-hint">Text your WhiskerWatch friends — great for care tips, playdates, or a quick cat check-in.</p>
+  <p class="field-hint">Text, photo, or video your friends — or send a message request to any WhiskerWatch parent.</p>
+  <div class="friend-message-new-search" data-friend-message-search>
+    <label class="visually-hidden" for="friend_message_search_query">Find someone to message</label>
+    <input id="friend_message_search_query" type="search" autocomplete="off" placeholder="Search username to message…" aria-controls="friend_message_search_results" aria-expanded="false" />
+    <div id="friend_message_search_results" class="friend-search-results friend-message-search-results" role="listbox" aria-label="Matching users" hidden></div>
+  </div>
+  {requests_section}
   <div class="friend-messages-shell">
-    <aside class="friend-messages-sidebar" aria-label="Friend conversations">
+    <aside class="friend-messages-sidebar" aria-label="Conversations">
       <ul class="friend-message-thread-list">{thread_buttons}</ul>
     </aside>
     <section class="friend-messages-panel" id="friend-messages-panel" hidden>
@@ -349,17 +593,36 @@ pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> Stri
         <img class="friend-messages-header-photo" id="friend-messages-header-photo" src="/cinderanimate.png" alt="" width="40" height="40" />
         <strong class="friend-messages-header-name" id="friend-messages-header-name"></strong>
       </header>
+      <div class="friend-message-request-actions" id="friend-message-request-actions" hidden>
+        <p class="friend-message-request-copy">Accept to reply, or decline this message request.</p>
+        <div class="friend-message-request-buttons">
+          <button type="button" class="download-btn" id="friend-message-request-accept">Accept</button>
+          <button type="button" class="onboarding-skip-btn" id="friend-message-request-decline">Decline</button>
+        </div>
+      </div>
       <div class="friend-messages-thread" id="friend-messages-thread" aria-live="polite"></div>
-      <form class="friend-messages-compose" id="friend-messages-compose">
-        <label class="visually-hidden" for="friend_message_body">Message</label>
-        <textarea id="friend_message_body" name="body" rows="2" maxlength="2000" placeholder="Type a message…" required></textarea>
-        <button type="submit" class="download-btn">Send</button>
+      <form class="friend-messages-compose" id="friend-messages-compose" enctype="multipart/form-data">
+        <div class="friend-messages-compose-row">
+          <label class="friend-messages-attach-btn" for="friend_message_media" title="Attach photo or video">📎</label>
+          <input id="friend_message_media" name="media" type="file" accept="image/*,video/*" hidden />
+          <div class="friend-messages-compose-fields">
+            <div class="friend-messages-media-preview" id="friend-message-media-preview" hidden></div>
+            <label class="visually-hidden" for="friend_message_body">Message</label>
+            <textarea id="friend_message_body" name="body" rows="2" maxlength="2000" placeholder="Type a message…" data-emoji-picker></textarea>
+          </div>
+          <button type="submit" class="download-btn">Send</button>
+        </div>
       </form>
     </section>
-    <p class="friend-messages-placeholder" id="friend-messages-placeholder">Pick a friend to start a conversation.</p>
+    <p class="friend-messages-placeholder" id="friend-messages-placeholder">Pick a conversation or search for someone to message.</p>
   </div>
 </article>"#,
-        thread_buttons = thread_buttons,
+        requests_section = requests_section,
+        thread_buttons = if thread_buttons.is_empty() {
+            r#"<li class="friend-message-thread-empty"><p class="field-hint">No conversations yet — search above to send a message request.</p></li>"#.to_string()
+        } else {
+            thread_buttons
+        },
     )
 }
 
@@ -478,7 +741,8 @@ pub fn render_friend_add_control(
                 .to_string()
         }
         FriendRelation::NotFriends => format!(
-            r#"<button type="button" class="friend-add-btn" data-friend-request-email="{email}" aria-label="Add {label} as friend">Add friend</button>"#,
+            r#"<button type="button" class="friend-add-btn" data-friend-request-email="{email}" aria-label="Add {label} as friend">Add friend</button>
+<a href="/home?tab=friends&amp;chat={email}" class="friend-add-status friend-add-status-message">Message</a>"#,
             email = escape_html_attr(&target_email),
             label = escape_html_attr(&label),
         ),

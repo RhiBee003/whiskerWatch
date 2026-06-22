@@ -2,9 +2,91 @@ use crate::sharing;
 use crate::user_for_email;
 use crate::{escape_html, escape_html_attr, profile_has_pet, AppState, UserProfile};
 use crate::storage::StoredSocialPost;
+use crate::storage::StoredSocialPostComment;
+use crate::storage::StoredSocialPostMedia;
+use crate::storage::{StorageError};
+use serde::{Deserialize, Serialize};
 
 pub const MAX_SOCIAL_POSTS: usize = 60;
 pub const MAX_SOCIAL_VIDEO_SECONDS: f32 = 10.0;
+pub const MAX_SOCIAL_PHOTOS_PER_POST: usize = 10;
+pub const MAX_SOCIAL_COMMENT_LEN: usize = 1000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialPostUpvoteResponse {
+    pub ok: bool,
+    pub post_id: String,
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialCommentUpvoteResponse {
+    pub ok: bool,
+    pub comment_id: String,
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialPostCommentResponse {
+    pub ok: bool,
+    pub post_id: String,
+    pub comment: Option<SocialPostCommentItem>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocialPostCommentItem {
+    pub id: String,
+    pub author_username: String,
+    pub body: String,
+    pub created_at: u64,
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SocialPostUpvoteForm {
+    pub post_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SocialCommentUpvoteForm {
+    pub comment_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SocialPostCommentForm {
+    pub post_id: String,
+    pub body: String,
+}
+
+fn sort_posts_by_upvotes(posts: &mut [StoredSocialPost]) {
+    posts.sort_by(|left, right| {
+        right
+            .upvotes
+            .cmp(&left.upvotes)
+            .then_with(|| right.created_at.cmp(&left.created_at))
+    });
+}
+
+fn sort_posts_by_recent(posts: &mut [StoredSocialPost]) {
+    posts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+}
+
+fn comment_to_item(comment: &StoredSocialPostComment) -> SocialPostCommentItem {
+    SocialPostCommentItem {
+        id: comment.id.clone(),
+        author_username: comment.author_username.clone(),
+        body: comment.body.clone(),
+        created_at: comment.created_at,
+        upvotes: comment.upvotes,
+        viewer_upvoted: comment.viewer_upvoted,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocialPostsView {
@@ -108,31 +190,41 @@ pub fn collect_social_posts(
     viewer_email: &str,
     view: SocialPostsView,
 ) -> Vec<StoredSocialPost> {
-    match view {
+    let viewer = Some(viewer_email);
+    let mut posts = match view {
         SocialPostsView::Friends => {
             let mut authors = sharing::accepted_friend_emails(state, viewer_email);
             authors.push(viewer_email.to_string());
             state
                 .storage
-                .list_social_posts_from_users(&authors, MAX_SOCIAL_POSTS)
+                .list_social_posts_from_users_with_engagement(&authors, MAX_SOCIAL_POSTS, viewer)
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|post| can_view_social_post(post, viewer_email))
-                .collect()
+                .collect::<Vec<_>>()
         }
         SocialPostsView::All => {
             let visible = community_visible_emails(state);
-            let all = state.storage.list_social_posts(MAX_SOCIAL_POSTS).unwrap_or_default();
-            all.into_iter()
+            state
+                .storage
+                .list_social_posts_with_engagement(MAX_SOCIAL_POSTS, viewer)
+                .unwrap_or_default()
+                .into_iter()
                 .filter(|post| {
                     can_view_social_post(post, viewer_email)
                         && visible
                             .iter()
                             .any(|email| email.eq_ignore_ascii_case(&post.user_id))
                 })
-                .collect()
+                .collect::<Vec<_>>()
         }
+    };
+
+    match view {
+        SocialPostsView::All => sort_posts_by_upvotes(&mut posts),
+        SocialPostsView::Friends => sort_posts_by_recent(&mut posts),
     }
+    posts
 }
 
 pub fn collect_parent_profile_posts(
@@ -140,27 +232,245 @@ pub fn collect_parent_profile_posts(
     subject_email: &str,
     viewer_email: &str,
 ) -> Vec<StoredSocialPost> {
-    state
+    let mut posts = state
         .storage
-        .list_social_posts_from_users(&[subject_email.to_string()], MAX_SOCIAL_POSTS)
+        .list_social_posts_from_users_with_engagement(
+            &[subject_email.to_string()],
+            MAX_SOCIAL_POSTS,
+            Some(viewer_email),
+        )
         .unwrap_or_default()
         .into_iter()
         .filter(|post| can_view_social_post(post, viewer_email))
-        .collect()
+        .collect::<Vec<_>>();
+    sort_posts_by_upvotes(&mut posts);
+    posts
+}
+
+pub fn toggle_post_upvote(
+    state: &AppState,
+    viewer_email: &str,
+    post_id: &str,
+    created_at: u64,
+) -> Result<SocialPostUpvoteResponse, StorageError> {
+    let Some(post) = state
+        .storage
+        .get_social_post_by_id(post_id, Some(viewer_email))?
+    else {
+        return Err(StorageError::InvalidInput("post not found".into()));
+    };
+    if !can_view_social_post(&post, viewer_email) {
+        return Err(StorageError::InvalidInput("post not found".into()));
+    }
+
+    let summary = state
+        .storage
+        .toggle_social_post_upvote(post_id, viewer_email, created_at)?;
+    Ok(SocialPostUpvoteResponse {
+        ok: true,
+        post_id: post_id.to_string(),
+        upvotes: summary.upvotes,
+        viewer_upvoted: summary.viewer_upvoted,
+        error: None,
+    })
+}
+
+pub fn toggle_comment_upvote(
+    state: &AppState,
+    viewer_email: &str,
+    comment_id: &str,
+    created_at: u64,
+) -> Result<SocialCommentUpvoteResponse, StorageError> {
+    let Some(post_id) = state
+        .storage
+        .get_social_post_id_for_comment(comment_id)?
+    else {
+        return Err(StorageError::InvalidInput("comment not found".into()));
+    };
+    let Some(post) = state
+        .storage
+        .get_social_post_by_id(&post_id, Some(viewer_email))?
+    else {
+        return Err(StorageError::InvalidInput("comment not found".into()));
+    };
+    if !can_view_social_post(&post, viewer_email) {
+        return Err(StorageError::InvalidInput("comment not found".into()));
+    }
+
+    let summary = state
+        .storage
+        .toggle_social_comment_upvote(comment_id, viewer_email, created_at)?;
+    Ok(SocialCommentUpvoteResponse {
+        ok: true,
+        comment_id: comment_id.to_string(),
+        upvotes: summary.upvotes,
+        viewer_upvoted: summary.viewer_upvoted,
+        error: None,
+    })
+}
+
+pub fn add_post_comment(
+    state: &AppState,
+    viewer_email: &str,
+    post_id: &str,
+    body: &str,
+    created_at: u64,
+) -> Result<SocialPostCommentResponse, StorageError> {
+    let Some(post) = state
+        .storage
+        .get_social_post_by_id(post_id, Some(viewer_email))?
+    else {
+        return Err(StorageError::InvalidInput("post not found".into()));
+    };
+    if !can_view_social_post(&post, viewer_email) {
+        return Err(StorageError::InvalidInput("post not found".into()));
+    }
+
+    let username = author_username_for_email(state, viewer_email);
+    let comment = state.storage.create_social_post_comment(
+        post_id,
+        viewer_email,
+        &username,
+        body,
+        created_at,
+    )?;
+    Ok(SocialPostCommentResponse {
+        ok: true,
+        post_id: post_id.to_string(),
+        comment: Some(comment_to_item(&comment)),
+        error: None,
+    })
+}
+
+fn render_social_post_upvote_controls(post: &StoredSocialPost) -> String {
+    let active_class = if post.viewer_upvoted {
+        " social-post-upvote-btn is-active"
+    } else {
+        " social-post-upvote-btn"
+    };
+    let pressed = if post.viewer_upvoted {
+        r#" aria-pressed="true""#
+    } else {
+        ""
+    };
+    format!(
+        r#"<button type="button" class="{class}" data-post-upvote="{id}"{pressed} aria-label="Upvote post">▲ {upvotes}</button>"#,
+        class = active_class.trim(),
+        id = escape_html_attr(&post.id),
+        pressed = pressed,
+        upvotes = post.upvotes,
+    )
+}
+
+fn render_social_post_comment_item(comment: &StoredSocialPostComment) -> String {
+    let active_class = if comment.viewer_upvoted {
+        " social-comment-upvote-btn is-active"
+    } else {
+        " social-comment-upvote-btn"
+    };
+    let pressed = if comment.viewer_upvoted {
+        r#" aria-pressed="true""#
+    } else {
+        ""
+    };
+    format!(
+        r#"<li class="social-post-comment" data-comment-id="{id}">
+  <div class="social-post-comment-main">
+    <p class="social-post-comment-meta"><strong>{author}</strong> · {when}</p>
+    <p class="social-post-comment-body">{body}</p>
+  </div>
+  <button type="button" class="{class}" data-comment-upvote="{id}"{pressed} aria-label="Upvote comment">▲ {upvotes}</button>
+</li>"#,
+        id = escape_html_attr(&comment.id),
+        author = escape_html(&comment.author_username),
+        when = escape_html(&format_timestamp(comment.created_at)),
+        body = escape_html(&comment.body),
+        class = active_class.trim(),
+        pressed = pressed,
+        upvotes = comment.upvotes,
+    )
+}
+
+fn render_social_post_comments(post: &StoredSocialPost) -> String {
+    if post.comments.is_empty() {
+        return String::new();
+    }
+    let items = post
+        .comments
+        .iter()
+        .map(render_social_post_comment_item)
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        r#"<ul class="social-post-comment-list" aria-label="Comments">{items}</ul>"#,
+        items = items,
+    )
+}
+
+fn render_social_post_comment_form(post_id: &str) -> String {
+    let field_id = format!("social-post-comment-{post_id}");
+    format!(
+        r#"<form class="social-post-comment-form login-form" data-post-comment-form="{post_id}">
+  <label class="visually-hidden" for="{field_id}">Add a comment</label>
+  <textarea id="{field_id}" name="body" rows="2" maxlength="{max_len}" placeholder="Add a comment…" data-emoji-picker required></textarea>
+  <button type="submit" class="download-btn">Comment</button>
+</form>"#,
+        post_id = escape_html_attr(post_id),
+        field_id = escape_html_attr(&field_id),
+        max_len = MAX_SOCIAL_COMMENT_LEN,
+    )
 }
 
 fn render_social_post_media(post: &StoredSocialPost) -> String {
+    if !post.media_items.is_empty() {
+        if post.media_items.len() == 1 {
+            return render_single_social_post_media(&post.media_items[0]);
+        }
+        let total = post.media_items.len();
+        let photos = post
+            .media_items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                format!(
+                    r#"<img class="social-post-photo" src="{url}" alt="Photo {num} of {total}" loading="lazy" />"#,
+                    url = escape_html_attr(&item.media_url),
+                    num = index + 1,
+                    total = total,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        return format!(
+            r#"<div class="social-post-photo-grid" data-photo-count="{count}">{photos}</div>"#,
+            count = total,
+            photos = photos,
+        );
+    }
+
     let Some(url) = post.media_url.as_deref().filter(|value| !value.is_empty()) else {
         return String::new();
     };
-    let url = escape_html_attr(url);
-    match post.media_type.as_str() {
+    if post.media_type == "none" {
+        return String::new();
+    }
+    render_single_social_post_media(&StoredSocialPostMedia {
+        media_type: post.media_type.clone(),
+        media_url: url.to_string(),
+        video_duration: post.video_duration,
+        sort_order: 0,
+    })
+}
+
+fn render_single_social_post_media(item: &StoredSocialPostMedia) -> String {
+    let url = escape_html_attr(&item.media_url);
+    match item.media_type.as_str() {
         "photo" => format!(
             r#"<img class="social-post-photo" src="{url}" alt="" loading="lazy" />"#,
             url = url,
         ),
         "video" => {
-            let duration = post.video_duration.unwrap_or(MAX_SOCIAL_VIDEO_SECONDS);
+            let duration = item.video_duration.unwrap_or(MAX_SOCIAL_VIDEO_SECONDS);
             format!(
                 r#"<video class="social-post-video" src="{url}" controls playsinline preload="metadata" data-max-duration="{duration}"></video>
   <p class="social-post-video-hint">Short clip · up to 10 seconds</p>"#,
@@ -223,16 +533,35 @@ pub fn render_social_post_card(
     };
     let delete_form = if post.user_id.eq_ignore_ascii_case(viewer_email) {
         format!(
-            r#"<form class="social-post-delete-form" action="/home/social/post/delete" method="post" data-confirm="Are you sure?">
+            r#"<form class="social-post-delete-form" action="/home/social/post/delete" method="post" data-confirm="Remove this post? 🐾">
   <input type="hidden" name="post_id" value="{id}" />
   <input type="hidden" name="posts_view" value="" data-social-posts-view />
-  <button type="submit" class="social-post-delete-btn" aria-label="Delete post">Delete</button>
+  <button type="submit" class="social-post-delete-btn" aria-label="Remove post">Remove 🐾</button>
 </form>"#,
             id = escape_html_attr(&post.id),
         )
     } else {
         String::new()
     };
+
+    let engagement = format!(
+        r#"<div class="social-post-engagement">
+  {upvote}
+  <span class="social-post-comment-count">{comment_label}</span>
+</div>
+{comments}
+{comment_form}"#,
+        upvote = render_social_post_upvote_controls(post),
+        comment_label = if post.comments.is_empty() {
+            "0 comments".to_string()
+        } else if post.comments.len() == 1 {
+            "1 comment".to_string()
+        } else {
+            format!("{} comments", post.comments.len())
+        },
+        comments = render_social_post_comments(post),
+        comment_form = render_social_post_comment_form(&post.id),
+    );
 
     format!(
         r#"<article class="social-post-card" data-post-id="{id}">
@@ -242,6 +571,7 @@ pub fn render_social_post_card(
   </header>
   {media_block}
   {caption}
+  {engagement}
 </article>"#,
         id = escape_html_attr(&post.id),
         author_block = author_block,
@@ -250,6 +580,7 @@ pub fn render_social_post_card(
         delete_form = delete_form,
         media_block = media_block,
         caption = caption,
+        engagement = engagement,
     )
 }
 
@@ -269,28 +600,28 @@ pub fn render_social_post_form(instance: &str) -> String {
     <span class="social-post-compose-summary-text">Share a photo or video</span>
   </summary>
   <div class="social-post-compose-body">
-    <p class="field-hint">Post a cat photo or a video up to {max_seconds} seconds for your friends — or share with the whole community in All posts. Posts also appear on your profile.</p>
+    <p class="field-hint">Post up to {max_photos} cat photos or one video up to {max_seconds} seconds for your friends — or share with the whole community in All posts. Posts also appear on your profile.</p>
     <form class="login-form social-post-form" id="{form_id}" data-social-compose="{instance}" action="/home/social/post" method="post" enctype="multipart/form-data">
       <label for="{body_id}">Caption (optional)</label>
-      <textarea id="{body_id}" name="body" rows="3" maxlength="2000" placeholder="What is your kitty up to?"></textarea>
+      <textarea id="{body_id}" name="body" rows="3" maxlength="2000" placeholder="What is your kitty up to?" data-emoji-picker></textarea>
       <label class="social-post-private-option">
         <input type="checkbox" name="private" value="1" />
         <span>Private post — only visible on your profile, not in friends or community feeds</span>
       </label>
       <fieldset class="social-post-media-fieldset">
-        <legend>Photo or video</legend>
+        <legend>Photos or video</legend>
         <div class="pet-photo-upload social-post-media-upload">
-          <input id="{media_id}" name="media" type="file" class="pet-photo-input social-post-media-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/webm,video/quicktime,.heic,.heif" required />
+          <input id="{media_id}" name="media" type="file" class="pet-photo-input social-post-media-input" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/webm,video/quicktime,.heic,.heif" multiple required />
           <label for="{media_id}" class="pet-photo-paw-btn" aria-label="Choose a photo or video to share">
             <span class="pet-photo-paw-icon" aria-hidden="true">📸</span>
           </label>
-          <p class="pet-photo-upload-cta social-post-media-cta" id="{media_cta_id}">Tap to pick a photo or video 🐾</p>
+          <p class="pet-photo-upload-cta social-post-media-cta" id="{media_cta_id}">Tap to pick up to {max_photos} photos or one video 🐾</p>
         </div>
         <div class="social-post-media-preview-shell" data-social-preview-shell hidden>
           <p class="social-post-media-preview-label">Preview before posting ✨</p>
           <div id="{preview_id}" class="social-post-media-preview pet-photo-preview" aria-live="polite"></div>
         </div>
-        <p class="field-hint">Pick a photo or video — you will see a preview here to crop or trim before posting. Videos must be {max_seconds} seconds or shorter.</p>
+        <p class="field-hint">Pick up to {max_photos} photos or one video — you will see a preview here to crop or trim before posting. Videos must be {max_seconds} seconds or shorter.</p>
       </fieldset>
       <input type="hidden" name="video_duration" id="{duration_id}" value="" />
       <button type="submit" class="download-btn login-submit" id="{submit_id}">Post</button>
@@ -306,6 +637,7 @@ pub fn render_social_post_form(instance: &str) -> String {
         submit_id = submit_id,
         instance = escape_html_attr(instance),
         max_seconds = MAX_SOCIAL_VIDEO_SECONDS as u32,
+        max_photos = MAX_SOCIAL_PHOTOS_PER_POST,
     )
 }
 
@@ -375,7 +707,7 @@ pub fn render_friends_posts_section(
             "Photos and short videos from your WhiskerWatch friends. Tap a name to visit their profile."
         }
         SocialPostsView::All => {
-            "Photos and short videos from cat parents across the WhiskerWatch community. Tap a name to visit their profile."
+            "Photos and videos from cat parents across WhiskerWatch — most upvoted posts rise to the top. Tap a name to visit their profile."
         }
     };
 
@@ -543,6 +875,7 @@ pub fn render_parent_profile_page(
   {compose}
   <section class="parent-profile-posts-section">
     <h2 class="parent-profile-posts-title">Posts</h2>
+    <p class="field-hint parent-profile-posts-intro">Most upvoted posts appear first on this profile.</p>
     {posts_html}
   </section>
 </div>"#,

@@ -6834,7 +6834,7 @@ fn render_feedback_comment_reply_form(
           <input type="hidden" name="return_to" value="{return_to}" />
           {parent_field}
           <label for="{field_id}">{label}</label>
-          <textarea id="{field_id}" name="body" rows="3" placeholder="Share your thoughts..." required></textarea>
+          <textarea id="{field_id}" name="body" rows="3" placeholder="Share your thoughts..." required data-emoji-picker></textarea>
           <button type="submit" class="download-btn login-submit">{button_label}</button>
         </form>"#,
         feedback_id = feedback_id,
@@ -7100,6 +7100,7 @@ fn render_feedback_forum(
               rows="5"
               placeholder="What should we change or add?"
               required
+              data-emoji-picker
             ></textarea>
 
             <button type="submit" class="download-btn login-submit">Post to forum</button>
@@ -7222,7 +7223,7 @@ fn render_forum_thread(
             <form class="login-form forum-reply-form" action="/home/forum/reply" method="post">
               <input type="hidden" name="post_id" value="{id}" />
               <label for="forum-reply-{id}">Your answer</label>
-              <textarea id="forum-reply-{id}" name="body" rows="3" placeholder="Share advice or your experience..." required></textarea>
+              <textarea id="forum-reply-{id}" name="body" rows="3" placeholder="Share advice or your experience..." required data-emoji-picker></textarea>
               <button type="submit" class="download-btn login-submit">Post reply</button>
             </form>
           </div>
@@ -7372,7 +7373,7 @@ fn render_dashboard_forum_tab(
         <select id="forum-breed" name="breed_slug">{breed_options}</select>
         <p class="field-hint">Defaults to your cat's breed when left on "All breeds".</p>
         <label for="forum-body">Details</label>
-        <textarea id="forum-body" name="body" rows="4" placeholder="Tell us more about your pet and what you need help with..." required maxlength="4000"></textarea>
+        <textarea id="forum-body" name="body" rows="4" placeholder="Tell us more about your pet and what you need help with..." required maxlength="4000" data-emoji-picker></textarea>
         <button type="submit" class="download-btn login-submit">Post question</button>
       </form>
     </div>
@@ -11534,6 +11535,8 @@ async fn friend_messages_list(
                 ok: false,
                 friend: None,
                 messages: Vec::new(),
+                thread_status: None,
+                can_compose: false,
             }),
         )
             .into_response();
@@ -11548,6 +11551,8 @@ async fn friend_messages_list(
                 ok: false,
                 friend: None,
                 messages: Vec::new(),
+                thread_status: None,
+                can_compose: false,
             }),
         )
             .into_response(),
@@ -11557,7 +11562,7 @@ async fn friend_messages_list(
 async fn friend_message_send(
     State(state): State<AppState>,
     jar: CookieJar,
-    Json(form): Json<sharing::FriendMessageSendForm>,
+    mut multipart: Multipart,
 ) -> Response {
     let Some(email) = api_user_email(&state, &jar) else {
         return (
@@ -11571,9 +11576,113 @@ async fn friend_message_send(
             .into_response();
     };
 
-    let friend_email = sharing::normalize_email(&form.friend_email);
-    match sharing::send_friend_message(&state, &email, &friend_email, &form.body, timestamp_now())
-    {
+    let mut friend_email = String::new();
+    let mut body = String::new();
+    let mut video_duration = String::new();
+    let mut media_bytes: Option<(Vec<u8>, Option<String>)> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or_default().to_string();
+        match name.as_str() {
+            "friend_email" => {
+                if let Ok(value) = field.text().await {
+                    friend_email = value;
+                }
+            }
+            "body" => {
+                if let Ok(value) = field.text().await {
+                    body = value;
+                }
+            }
+            "video_duration" => {
+                if let Ok(value) = field.text().await {
+                    video_duration = value;
+                }
+            }
+            "media" => {
+                let content_type = field.content_type().map(str::to_string);
+                if let Ok(bytes) = field.bytes().await {
+                    if !bytes.is_empty() {
+                        media_bytes = Some((bytes.to_vec(), content_type));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let friend_email = sharing::normalize_email(&friend_email);
+    let (media_type, media_url, duration) = if let Some((bytes, content_type)) = media_bytes {
+        let content_type_ref = content_type.as_deref();
+        if let Ok(ext) = validate_social_photo(content_type_ref, &bytes) {
+            match save_social_media(&state, &email, &bytes, ext, "message-photo").await {
+                Ok(url) => ("photo", Some(url), None),
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(sharing::FriendMessageSendResponse {
+                            ok: false,
+                            message: None,
+                            status: Some("upload_failed".to_string()),
+                        }),
+                    )
+                        .into_response();
+                }
+            }
+        } else if let Ok(ext) = validate_social_video(content_type_ref, &bytes) {
+            let duration = match parse_social_video_duration(&video_duration) {
+                Ok(value) => value,
+                Err(_) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(sharing::FriendMessageSendResponse {
+                            ok: false,
+                            message: None,
+                            status: Some("invalid_video".to_string()),
+                        }),
+                    )
+                        .into_response();
+                }
+            };
+            match save_social_media(&state, &email, &bytes, ext, "message-video").await {
+                Ok(url) => ("video", Some(url), Some(duration)),
+                Err(_) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(sharing::FriendMessageSendResponse {
+                            ok: false,
+                            message: None,
+                            status: Some("upload_failed".to_string()),
+                        }),
+                    )
+                        .into_response();
+                }
+            }
+        } else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(sharing::FriendMessageSendResponse {
+                    ok: false,
+                    message: None,
+                    status: Some("invalid_media".to_string()),
+                }),
+            )
+                .into_response();
+        }
+    } else {
+        ("none", None, None)
+    };
+
+    match sharing::send_friend_message(
+        &state,
+        &email,
+        &friend_email,
+        &body,
+        media_type,
+        media_url.as_deref(),
+        duration,
+        timestamp_now(),
+    ) {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(storage::StorageError::InvalidInput(message)) => (
             StatusCode::BAD_REQUEST,
@@ -11589,6 +11698,50 @@ async fn friend_message_send(
             Json(sharing::FriendMessageSendResponse {
                 ok: false,
                 message: None,
+                status: Some("error".to_string()),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn message_request_respond(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(form): Json<sharing::MessageRequestRespondForm>,
+) -> Response {
+    let Some(email) = api_user_email(&state, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(sharing::MessageRequestRespondResponse {
+                ok: false,
+                status: Some("auth".to_string()),
+            }),
+        )
+            .into_response();
+    };
+
+    let accept = form.action.trim().eq_ignore_ascii_case("accept");
+    match sharing::respond_message_request(
+        &state,
+        &email,
+        &form.partner_email,
+        accept,
+        timestamp_now(),
+    ) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(storage::StorageError::InvalidInput(message)) => (
+            StatusCode::BAD_REQUEST,
+            Json(sharing::MessageRequestRespondResponse {
+                ok: false,
+                status: Some(message),
+            }),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(sharing::MessageRequestRespondResponse {
+                ok: false,
                 status: Some("error".to_string()),
             }),
         )
@@ -13336,7 +13489,7 @@ async fn social_post_submit(
     let mut body = String::new();
     let mut video_duration = String::new();
     let mut is_private = false;
-    let mut media_bytes: Option<(Vec<u8>, Option<String>)> = None;
+    let mut media_parts: Vec<(Vec<u8>, Option<String>)> = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or_default().to_string();
@@ -13363,7 +13516,7 @@ async fn social_post_submit(
                 let content_type = field.content_type().map(str::to_string);
                 if let Ok(bytes) = field.bytes().await {
                     if !bytes.is_empty() {
-                        media_bytes = Some((bytes.to_vec(), content_type));
+                        media_parts.push((bytes.to_vec(), content_type));
                     }
                 }
             }
@@ -13373,19 +13526,44 @@ async fn social_post_submit(
 
     let caption = body.trim();
     let username = social_posts::author_username_for_email(&state, &email);
-    let (media_type, media_url, duration) = if let Some((bytes, content_type)) = media_bytes {
+    let mut media_items = Vec::new();
+
+    if media_parts.len() > social_posts::MAX_SOCIAL_PHOTOS_PER_POST {
+        return Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
+            .into_response();
+    }
+
+    for (index, (bytes, content_type)) in media_parts.into_iter().enumerate() {
         let content_type_ref = content_type.as_deref();
         if let Ok(ext) = validate_social_photo(content_type_ref, &bytes) {
-            match save_social_media(&state, &email, &bytes, ext, "photo").await {
-                Ok(url) => (Some("photo"), Some(url), None),
+            let url = match save_social_media(&state, &email, &bytes, ext, "photo").await {
+                Ok(url) => url,
                 Err(_) => {
                     return Redirect::to(
                         "/home?tab=forum&community=friends&status=social_post_failed",
                     )
                     .into_response();
                 }
-            }
-        } else if let Ok(ext) = validate_social_video(content_type_ref, &bytes) {
+            };
+            media_items.push(storage::StoredSocialPostMedia {
+                media_type: "photo".to_string(),
+                media_url: url,
+                video_duration: None,
+                sort_order: index as u32,
+            });
+            continue;
+        }
+
+        if media_items
+            .iter()
+            .any(|item| item.media_type == "photo")
+            || index > 0
+        {
+            return Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
+                .into_response();
+        }
+
+        if let Ok(ext) = validate_social_video(content_type_ref, &bytes) {
             let duration = match parse_social_video_duration(&video_duration) {
                 Ok(value) => value,
                 Err(_) => {
@@ -13395,36 +13573,38 @@ async fn social_post_submit(
                     .into_response();
                 }
             };
-            match save_social_media(&state, &email, &bytes, ext, "video").await {
-                Ok(url) => (Some("video"), Some(url), Some(duration)),
+            let url = match save_social_media(&state, &email, &bytes, ext, "video").await {
+                Ok(url) => url,
                 Err(_) => {
                     return Redirect::to(
                         "/home?tab=forum&community=friends&status=social_post_failed",
                     )
                     .into_response();
                 }
-            }
-        } else {
-            return Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
-                .into_response();
+            };
+            media_items.push(storage::StoredSocialPostMedia {
+                media_type: "video".to_string(),
+                media_url: url,
+                video_duration: Some(duration),
+                sort_order: 0,
+            });
+            continue;
         }
-    } else {
-        (None, None, None)
-    };
 
-    if caption.is_empty() && media_type.is_none() {
+        return Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
+            .into_response();
+    }
+
+    if caption.is_empty() && media_items.is_empty() {
         return Redirect::to("/home?tab=forum&community=friends&status=social_post_missing")
             .into_response();
     }
 
-    let media_type = media_type.unwrap_or("none");
     match state.storage.create_social_post(
         &email,
         &username,
         caption,
-        media_type,
-        media_url.as_deref(),
-        duration,
+        &media_items,
         is_private,
         timestamp_now(),
     ) {
@@ -13470,16 +13650,215 @@ async fn social_post_delete(
         .storage
         .delete_social_post_owned(form.post_id.trim(), &email)
     {
-        Ok(Some(url)) => {
-            if !url.is_empty() {
-                remove_upload_files(&state, &[url]).await;
-            }
+        Ok(Some(urls)) => {
+            remove_upload_files(&state, &urls).await;
             Redirect::to(&format!("{redirect_base}social_post_deleted")).into_response()
         }
         Ok(None) => Redirect::to(&format!("{redirect_base}social_post_delete_denied")).into_response(),
         Err(error) => {
             eprintln!("social post delete failed for {email}: {error}");
             Redirect::to(&format!("{redirect_base}social_post_failed")).into_response()
+        }
+    }
+}
+
+async fn social_post_upvote_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<social_posts::SocialPostUpvoteForm>,
+) -> impl IntoResponse {
+    let Some(email) = user_session_email(&state, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(social_posts::SocialPostUpvoteResponse {
+                ok: false,
+                post_id: String::new(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("login_required".into()),
+            }),
+        )
+            .into_response();
+    };
+
+    let post_id = form.post_id.trim();
+    if post_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(social_posts::SocialPostUpvoteResponse {
+                ok: false,
+                post_id: String::new(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("invalid_post".into()),
+            }),
+        )
+            .into_response();
+    }
+
+    match social_posts::toggle_post_upvote(&state, &email, post_id, timestamp_now()) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(storage::StorageError::InvalidInput(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(social_posts::SocialPostUpvoteResponse {
+                ok: false,
+                post_id: post_id.to_string(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("not_found".into()),
+            }),
+        )
+            .into_response(),
+        Err(error) => {
+            eprintln!("social post upvote failed for {email}: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(social_posts::SocialPostUpvoteResponse {
+                    ok: false,
+                    post_id: post_id.to_string(),
+                    upvotes: 0,
+                    viewer_upvoted: false,
+                    error: Some("server_error".into()),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn social_comment_upvote_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<social_posts::SocialCommentUpvoteForm>,
+) -> impl IntoResponse {
+    let Some(email) = user_session_email(&state, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(social_posts::SocialCommentUpvoteResponse {
+                ok: false,
+                comment_id: String::new(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("login_required".into()),
+            }),
+        )
+            .into_response();
+    };
+
+    let comment_id = form.comment_id.trim();
+    if comment_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(social_posts::SocialCommentUpvoteResponse {
+                ok: false,
+                comment_id: String::new(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("invalid_comment".into()),
+            }),
+        )
+            .into_response();
+    }
+
+    match social_posts::toggle_comment_upvote(&state, &email, comment_id, timestamp_now()) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(storage::StorageError::InvalidInput(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(social_posts::SocialCommentUpvoteResponse {
+                ok: false,
+                comment_id: comment_id.to_string(),
+                upvotes: 0,
+                viewer_upvoted: false,
+                error: Some("not_found".into()),
+            }),
+        )
+            .into_response(),
+        Err(error) => {
+            eprintln!("social comment upvote failed for {email}: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(social_posts::SocialCommentUpvoteResponse {
+                    ok: false,
+                    comment_id: comment_id.to_string(),
+                    upvotes: 0,
+                    viewer_upvoted: false,
+                    error: Some("server_error".into()),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn social_post_comment_submit(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Form(form): Form<social_posts::SocialPostCommentForm>,
+) -> impl IntoResponse {
+    let Some(email) = user_session_email(&state, &jar) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(social_posts::SocialPostCommentResponse {
+                ok: false,
+                post_id: String::new(),
+                comment: None,
+                error: Some("login_required".into()),
+            }),
+        )
+            .into_response();
+    };
+
+    let post_id = form.post_id.trim();
+    let body = form.body.trim();
+    if post_id.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(social_posts::SocialPostCommentResponse {
+                ok: false,
+                post_id: String::new(),
+                comment: None,
+                error: Some("invalid_post".into()),
+            }),
+        )
+            .into_response();
+    }
+    if body.is_empty() || body.chars().count() > social_posts::MAX_SOCIAL_COMMENT_LEN {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(social_posts::SocialPostCommentResponse {
+                ok: false,
+                post_id: post_id.to_string(),
+                comment: None,
+                error: Some("invalid_comment".into()),
+            }),
+        )
+            .into_response();
+    }
+
+    match social_posts::add_post_comment(&state, &email, post_id, body, timestamp_now()) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(storage::StorageError::InvalidInput(_)) => (
+            StatusCode::NOT_FOUND,
+            Json(social_posts::SocialPostCommentResponse {
+                ok: false,
+                post_id: post_id.to_string(),
+                comment: None,
+                error: Some("not_found".into()),
+            }),
+        )
+            .into_response(),
+        Err(error) => {
+            eprintln!("social post comment failed for {email}: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(social_posts::SocialPostCommentResponse {
+                    ok: false,
+                    post_id: post_id.to_string(),
+                    comment: None,
+                    error: Some("server_error".into()),
+                }),
+            )
+                .into_response()
         }
     }
 }
@@ -17319,6 +17698,9 @@ mod tests {
                 "owner@test.local",
                 "friend@test.local",
                 "Want to trade brushing tips?",
+                "none",
+                None,
+                None,
                 10,
             )
             .expect("send message");
@@ -17394,6 +17776,99 @@ mod tests {
         assert!(html.contains("friend-message-thread-btn"));
         assert!(html.contains("friend-messages-compose"));
         assert!(html.contains("data-open-friend-chat"));
+        assert!(html.contains("friend_message_media"));
+        assert!(html.contains("friend_message_search_query"));
+    }
+
+    #[test]
+    fn message_request_allows_non_friend_conversation() {
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-message-request-{}", Uuid::new_v4())),
+        )
+        .expect("storage");
+        let state = AppState { storage };
+
+        let owner = User {
+            username: "catmom".to_string(),
+            first_name: "Cat".to_string(),
+            last_name: "Mom".to_string(),
+            email: "owner@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        let stranger = User {
+            username: "newpal".to_string(),
+            first_name: "New".to_string(),
+            last_name: "Pal".to_string(),
+            email: "stranger@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        state.storage.save_user(&owner).expect("save owner");
+        state.storage.save_user(&stranger).expect("save stranger");
+
+        state
+            .storage
+            .send_friend_message(
+                "owner@test.local",
+                "stranger@test.local",
+                "Hi! Want to swap cat care tips?",
+                "none",
+                None,
+                None,
+                10,
+            )
+            .expect("send request message");
+
+        let thread = state
+            .storage
+            .get_message_thread("owner@test.local", "stranger@test.local")
+            .expect("thread")
+            .expect("thread exists");
+        assert_eq!(thread.status, "pending");
+        assert_eq!(thread.initiated_by, "owner@test.local");
+
+        let incoming = sharing::friend_messages_for_conversation(
+            &state,
+            "stranger@test.local",
+            "owner@test.local",
+        )
+        .expect("incoming conversation");
+        assert!(incoming.ok);
+        assert_eq!(incoming.messages.len(), 1);
+        assert_eq!(incoming.thread_status.as_deref(), Some("pending_incoming"));
+        assert!(!incoming.can_compose);
+
+        sharing::respond_message_request(
+            &state,
+            "stranger@test.local",
+            "owner@test.local",
+            true,
+            11,
+        )
+        .expect("accept request");
+
+        let after_accept = sharing::friend_messages_for_conversation(
+            &state,
+            "stranger@test.local",
+            "owner@test.local",
+        )
+        .expect("accepted conversation");
+        assert_eq!(after_accept.thread_status.as_deref(), Some("accepted"));
+        assert!(after_accept.can_compose);
+
+        state
+            .storage
+            .send_friend_message(
+                "stranger@test.local",
+                "owner@test.local",
+                "Yes please!",
+                "none",
+                None,
+                None,
+                12,
+            )
+            .expect("reply after accept");
     }
 
     #[test]
@@ -17492,9 +17967,12 @@ mod tests {
                 "friend@test.local",
                 "friend",
                 "Nap time!",
-                "photo",
-                Some("/uploads/friend-nap.jpg"),
-                None,
+                &[storage::StoredSocialPostMedia {
+                    media_type: "photo".to_string(),
+                    media_url: "/uploads/friend-nap.jpg".to_string(),
+                    video_duration: None,
+                    sort_order: 0,
+                }],
                 false,
                 100,
             )
@@ -17505,9 +17983,12 @@ mod tests {
                 "stranger@test.local",
                 "stranger",
                 "Zoomies!",
-                "video",
-                Some("/uploads/stranger-zoom.mp4"),
-                Some(8.0),
+                &[storage::StoredSocialPostMedia {
+                    media_type: "video".to_string(),
+                    media_url: "/uploads/stranger-zoom.mp4".to_string(),
+                    video_duration: Some(8.0),
+                    sort_order: 0,
+                }],
                 false,
                 101,
             )
@@ -17642,9 +18123,12 @@ mod tests {
                 "friend@test.local",
                 "friend",
                 "Secret nap",
-                "photo",
-                Some("/uploads/secret.jpg"),
-                None,
+                &[storage::StoredSocialPostMedia {
+                    media_type: "photo".to_string(),
+                    media_url: "/uploads/secret.jpg".to_string(),
+                    video_duration: None,
+                    sort_order: 0,
+                }],
                 true,
                 100,
             )
@@ -17655,9 +18139,12 @@ mod tests {
                 "friend@test.local",
                 "friend",
                 "Public zoomies",
-                "photo",
-                Some("/uploads/public.jpg"),
-                None,
+                &[storage::StoredSocialPostMedia {
+                    media_type: "photo".to_string(),
+                    media_url: "/uploads/public.jpg".to_string(),
+                    video_duration: None,
+                    sort_order: 0,
+                }],
                 false,
                 101,
             )
@@ -17690,6 +18177,148 @@ mod tests {
         assert!(!owner_view_friend_profile
             .iter()
             .any(|post| post.body == "Secret nap"));
+    }
+
+    #[test]
+    fn social_posts_sort_by_upvotes_on_all_feed_and_profile() {
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-social-upvotes-{}", Uuid::new_v4())),
+        )
+        .expect("storage");
+        let state = AppState { storage };
+
+        let owner = User {
+            username: "owner".to_string(),
+            first_name: "Own".to_string(),
+            last_name: "Er".to_string(),
+            email: "owner@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        let friend = User {
+            username: "friend".to_string(),
+            first_name: "Friend".to_string(),
+            last_name: "One".to_string(),
+            email: "friend@test.local".to_string(),
+            password: "secret".to_string(),
+            created_at: 1,
+        };
+        state.storage.save_user(&owner).expect("save owner");
+        state.storage.save_user(&friend).expect("save friend");
+
+        let mut owner_profile = test_profile_weeks(52, "indoor");
+        owner_profile.email = owner.email.clone();
+        owner_profile.community_visible = true;
+        state
+            .storage
+            .save_profile(&owner_profile)
+            .expect("save owner profile");
+
+        let mut friend_profile = test_profile_weeks(52, "indoor");
+        friend_profile.email = friend.email.clone();
+        friend_profile.community_visible = true;
+        state
+            .storage
+            .save_profile(&friend_profile)
+            .expect("save friend profile");
+
+        state
+            .storage
+            .create_friend_request("owner@test.local", "friend@test.local", 1)
+            .expect("friend request");
+        let incoming = state
+            .storage
+            .list_incoming_friend_requests("friend@test.local")
+            .expect("incoming");
+        state
+            .storage
+            .respond_friend_request(&incoming[0].id, "friend@test.local", true)
+            .expect("accept friend");
+
+        let _newer = state
+            .storage
+            .create_social_post(
+                "friend@test.local",
+                "friend",
+                "Newer post",
+                &[],
+                false,
+                200,
+            )
+            .expect("newer post");
+        let older = state
+            .storage
+            .create_social_post(
+                "friend@test.local",
+                "friend",
+                "Older post",
+                &[],
+                false,
+                100,
+            )
+            .expect("older post");
+
+        state
+            .storage
+            .toggle_social_post_upvote(&older.id, "owner@test.local", 300)
+            .expect("upvote older once");
+        state
+            .storage
+            .toggle_social_post_upvote(&older.id, "friend@test.local", 301)
+            .expect("upvote older twice");
+
+        let all_posts = social_posts::collect_social_posts(
+            &state,
+            "owner@test.local",
+            social_posts::SocialPostsView::All,
+        );
+        assert_eq!(all_posts.len(), 2);
+        assert_eq!(all_posts[0].body, "Older post");
+        assert_eq!(all_posts[0].upvotes, 2);
+        assert_eq!(all_posts[1].body, "Newer post");
+
+        let profile_posts = social_posts::collect_parent_profile_posts(
+            &state,
+            "friend@test.local",
+            "owner@test.local",
+        );
+        assert_eq!(profile_posts[0].body, "Older post");
+        assert_eq!(profile_posts[0].upvotes, 2);
+
+        let comment = state
+            .storage
+            .create_social_post_comment(
+                &older.id,
+                "owner@test.local",
+                "owner",
+                "So cute!",
+                400,
+            )
+            .expect("comment");
+        social_posts::toggle_comment_upvote(&state, "friend@test.local", &comment.id, 401)
+            .expect("comment upvote");
+
+        let refreshed = state
+            .storage
+            .get_social_post_by_id(&older.id, Some("owner@test.local"))
+            .expect("reload post")
+            .expect("post exists");
+        assert_eq!(refreshed.comments.len(), 1);
+        assert_eq!(refreshed.comments[0].upvotes, 1);
+        assert!(!refreshed.comments[0].viewer_upvoted);
+
+        let all_html = render_dashboard_forum_tab(
+            &state,
+            &owner_profile,
+            None,
+            &owner.email,
+            "friends",
+            social_posts::SocialPostsView::All,
+            None,
+        );
+        assert!(all_html.contains("social-post-upvote-btn"));
+        assert!(all_html.contains("data-post-upvote"));
+        assert!(all_html.contains("data-post-comment-form"));
     }
 
     #[test]
@@ -18678,6 +19307,7 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/friends/search", get(friend_search))
         .route("/home/friends/messages", get(friend_messages_list).post(friend_message_send))
         .route("/home/friends/messages/read", post(friend_messages_read))
+        .route("/home/friends/messages/respond", post(message_request_respond))
         .route("/home/friends/request", post(friend_request_submit))
         .route("/home/friends/request/quick", post(friend_request_quick))
         .route("/home/friends/respond", post(friend_respond_submit))
@@ -18716,6 +19346,9 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/forum/post/delete", post(forum_post_delete))
         .route("/home/social/post", post(social_post_submit))
         .route("/home/social/post/delete", post(social_post_delete))
+        .route("/home/social/post/upvote", post(social_post_upvote_submit))
+        .route("/home/social/post/comment", post(social_post_comment_submit))
+        .route("/home/social/comment/upvote", post(social_comment_upvote_submit))
         .route("/home/forum/reply", post(forum_reply_submit))
         .route("/home/forum/reply/delete", post(forum_reply_delete))
         .route("/home/forum/{id}", get(forum_thread_redirect))

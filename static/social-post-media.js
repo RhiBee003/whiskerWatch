@@ -1,7 +1,8 @@
 (function () {
   const MAX_VIDEO_SECONDS = 10;
+  const MAX_PHOTOS_PER_POST = 10;
   const OUTPUT_VIDEO_WIDTH = 720;
-  const defaultMediaCta = "Tap to pick a photo or video 🐾";
+  const defaultMediaCta = `Tap to pick up to ${MAX_PHOTOS_PER_POST} photos or one video 🐾`;
 
   function currentPostsView() {
     const params = new URLSearchParams(window.location.search);
@@ -249,6 +250,7 @@
     let videoState = null;
     let photoPrepared = false;
     let videoPrepared = false;
+    let multiPhotoFiles = null;
 
     function resetVideoEditor() {
       if (videoState?.previewUrl) {
@@ -262,22 +264,53 @@
       resetVideoEditor();
       window.whiskerPetPhotoFramer?.reset?.(mediaInputId);
       photoPrepared = false;
+      multiPhotoFiles = null;
       previewRoot.innerHTML = "";
       if (!window.whiskerPetPhotoFramer?.hasImage?.(mediaInputId)) {
         hidePreviewShell();
       }
     }
 
-    function setMediaCta(file) {
+    function selectedImageFiles() {
+      const files = mediaInput.files ? Array.from(mediaInput.files) : [];
+      return files.filter((file) => isImageFile(file));
+    }
+
+    function showMultiPhotoPreview(files) {
+      resetVideoEditor();
+      window.whiskerPetPhotoFramer?.reset?.(mediaInputId);
+      multiPhotoFiles = files;
+      revealPreview();
+      previewRoot.innerHTML = `
+        <div class="social-post-multi-photo-preview">
+          <p class="field-hint">${files.length} photo${files.length === 1 ? "" : "s"} selected · up to ${MAX_PHOTOS_PER_POST} allowed</p>
+          <div class="social-post-multi-photo-grid">
+            ${files
+              .map((file, index) => {
+                const url = URL.createObjectURL(file);
+                return `<img src="${url}" alt="Photo ${index + 1}" class="social-post-multi-photo-thumb" loading="lazy" />`;
+              })
+              .join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function setMediaCta(files) {
       if (!(mediaCta instanceof HTMLElement)) {
         return;
       }
-      if (!(file instanceof File)) {
+      if (!files || files.length === 0) {
         mediaCta.textContent = defaultMediaCta;
         return;
       }
-      const kind = isVideoFile(file) ? "🎬" : "📸";
-      mediaCta.textContent = `${kind} ${file.name}`;
+      if (files.length === 1) {
+        const file = files[0];
+        const kind = isVideoFile(file) ? "🎬" : "📸";
+        mediaCta.textContent = `${kind} ${file.name}`;
+        return;
+      }
+      mediaCta.textContent = `📸 ${files.length} photos selected`;
     }
 
     function setupVideoEditor(file) {
@@ -344,7 +377,7 @@
           window.alert("Could not read that video. Please try another file.");
           mediaInput.value = "";
           resetAllEditors();
-          setMediaCta(null);
+          setMediaCta([]);
           return;
         }
 
@@ -413,17 +446,59 @@
     }
 
     mediaInput.addEventListener("change", () => {
-      const file = mediaInput.files && mediaInput.files[0];
+      const files = mediaInput.files ? Array.from(mediaInput.files) : [];
       photoPrepared = false;
       videoPrepared = false;
+      multiPhotoFiles = null;
 
-      if (!(file instanceof File)) {
+      if (files.length === 0) {
         resetAllEditors();
-        setMediaCta(null);
+        setMediaCta([]);
         return;
       }
 
-      setMediaCta(file);
+      const videos = files.filter((file) => isVideoFile(file));
+      const images = files.filter((file) => isImageFile(file));
+
+      if (videos.length > 0 && (images.length > 0 || files.length > 1)) {
+        window.alert("Choose up to 10 photos or one video, not both.");
+        mediaInput.value = "";
+        resetAllEditors();
+        setMediaCta([]);
+        return;
+      }
+
+      if (videos.length > 1) {
+        window.alert("Posts can include only one video.");
+        mediaInput.value = "";
+        resetAllEditors();
+        setMediaCta([]);
+        return;
+      }
+
+      if (images.length > MAX_PHOTOS_PER_POST) {
+        window.alert(`Posts can include up to ${MAX_PHOTOS_PER_POST} photos.`);
+        mediaInput.value = "";
+        resetAllEditors();
+        setMediaCta([]);
+        return;
+      }
+
+      if (videos.length === 1) {
+        setMediaCta([videos[0]]);
+        bindPhotoFramer();
+        setupVideoEditor(videos[0]);
+        return;
+      }
+
+      if (images.length > 1) {
+        setMediaCta(images);
+        showMultiPhotoPreview(images);
+        return;
+      }
+
+      const file = files[0];
+      setMediaCta([file]);
       bindPhotoFramer();
 
       if (isImageFile(file)) {
@@ -432,20 +507,15 @@
         return;
       }
 
-      if (isVideoFile(file)) {
-        setupVideoEditor(file);
-        return;
-      }
-
       window.alert("Please choose a photo or video file.");
       mediaInput.value = "";
       resetAllEditors();
-      setMediaCta(null);
+      setMediaCta([]);
     });
 
     form.addEventListener("submit", async (event) => {
-      const file = mediaInput.files && mediaInput.files[0];
-      if (!(file instanceof File)) {
+      const files = mediaInput.files ? Array.from(mediaInput.files) : [];
+      if (files.length === 0) {
         return;
       }
 
@@ -459,6 +529,19 @@
       }
 
       try {
+        if (multiPhotoFiles && multiPhotoFiles.length > 1) {
+          const transfer = new DataTransfer();
+          multiPhotoFiles.forEach((file) => transfer.items.add(file));
+          mediaInput.files = transfer.files;
+          if (durationInput instanceof HTMLInputElement) {
+            durationInput.value = "";
+          }
+          photoPrepared = true;
+          form.requestSubmit();
+          return;
+        }
+
+        const file = files[0];
         if (isImageFile(file)) {
           if (!window.whiskerPetPhotoFramer?.hasImage?.(mediaInputId)) {
             window.alert("Please wait for your photo preview to load.");

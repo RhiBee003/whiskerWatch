@@ -62,6 +62,26 @@ pub struct StoredUserSearchHit {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct StoredSocialPostMedia {
+    pub media_type: String,
+    pub media_url: String,
+    pub video_duration: Option<f32>,
+    pub sort_order: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredSocialPostComment {
+    pub id: String,
+    pub post_id: String,
+    pub user_id: String,
+    pub author_username: String,
+    pub body: String,
+    pub created_at: u64,
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredSocialPost {
     pub id: String,
     pub user_id: String,
@@ -72,16 +92,46 @@ pub struct StoredSocialPost {
     pub video_duration: Option<f32>,
     pub is_private: bool,
     pub created_at: u64,
+    pub media_items: Vec<StoredSocialPostMedia>,
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+    pub comments: Vec<StoredSocialPostComment>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocialPostUpvoteSummary {
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocialCommentUpvoteSummary {
+    pub upvotes: u32,
+    pub viewer_upvoted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredFriendMessage {
     pub id: String,
     pub from_email: String,
     pub to_email: String,
     pub body: String,
+    pub media_type: String,
+    pub media_url: Option<String>,
+    pub video_duration: Option<f32>,
     pub created_at: u64,
     pub read_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredMessageThread {
+    pub id: String,
+    pub participant_a: String,
+    pub participant_b: String,
+    pub status: String,
+    pub initiated_by: String,
+    pub created_at: u64,
+    pub responded_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +212,10 @@ fn map_social_post_row(row: &rusqlite::Row<'_>) -> Result<StoredSocialPost, rusq
         video_duration: row.get::<_, Option<f64>>(6)?.map(|value| value as f32),
         is_private: row.get::<_, i64>(7)? != 0,
         created_at: row.get::<_, i64>(8)? as u64,
+        media_items: Vec::new(),
+        upvotes: 0,
+        viewer_upvoted: false,
+        comments: Vec::new(),
     })
 }
 
@@ -377,7 +431,10 @@ impl Storage {
         storage.migrate_push_subscriptions_table()?;
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
+        storage.migrate_message_threads_table()?;
         storage.migrate_social_posts_table()?;
+        storage.migrate_social_post_media_table()?;
+        storage.migrate_social_post_engagement_tables()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
@@ -421,7 +478,10 @@ impl Storage {
         storage.migrate_push_subscriptions_table()?;
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
+        storage.migrate_message_threads_table()?;
         storage.migrate_social_posts_table()?;
+        storage.migrate_social_post_media_table()?;
+        storage.migrate_social_post_engagement_tables()?;
         storage.migrate_from_jsonl()?;
         let _ = storage.purge_expired_auth_sessions();
         Ok(storage)
@@ -484,6 +544,23 @@ impl Storage {
         Ok(())
     }
 
+    fn migrate_social_post_media_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS social_post_media (
+                 id TEXT PRIMARY KEY,
+                 post_id TEXT NOT NULL,
+                 sort_order INTEGER NOT NULL,
+                 media_type TEXT NOT NULL,
+                 media_url TEXT NOT NULL,
+                 video_duration REAL
+             );
+             CREATE INDEX IF NOT EXISTS idx_social_post_media_post
+                 ON social_post_media(post_id, sort_order);",
+        )?;
+        Ok(())
+    }
+
     fn migrate_friend_messages_table(&self) -> Result<(), StorageError> {
         let conn = self.conn.lock().expect("storage lock");
         conn.execute_batch(
@@ -499,6 +576,72 @@ impl Storage {
                  ON friend_messages(from_email, to_email, created_at);
              CREATE INDEX IF NOT EXISTS idx_friend_messages_recipient_read
                  ON friend_messages(to_email, read_at);",
+        )?;
+        if !Self::table_has_column(&conn, "friend_messages", "media_type")? {
+            conn.execute(
+                "ALTER TABLE friend_messages ADD COLUMN media_type TEXT NOT NULL DEFAULT 'none'",
+                [],
+            )?;
+        }
+        if !Self::table_has_column(&conn, "friend_messages", "media_url")? {
+            conn.execute("ALTER TABLE friend_messages ADD COLUMN media_url TEXT", [])?;
+        }
+        if !Self::table_has_column(&conn, "friend_messages", "video_duration")? {
+            conn.execute("ALTER TABLE friend_messages ADD COLUMN video_duration REAL", [])?;
+        }
+        Ok(())
+    }
+
+    fn migrate_message_threads_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS message_threads (
+                 id TEXT PRIMARY KEY,
+                 participant_a TEXT NOT NULL COLLATE NOCASE,
+                 participant_b TEXT NOT NULL COLLATE NOCASE,
+                 status TEXT NOT NULL,
+                 initiated_by TEXT NOT NULL COLLATE NOCASE,
+                 created_at INTEGER NOT NULL,
+                 responded_at INTEGER,
+                 UNIQUE(participant_a, participant_b)
+             );
+             CREATE INDEX IF NOT EXISTS idx_message_threads_participant_a
+                 ON message_threads(participant_a);
+             CREATE INDEX IF NOT EXISTS idx_message_threads_participant_b
+                 ON message_threads(participant_b);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_social_post_engagement_tables(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS social_post_votes (
+                 post_id TEXT NOT NULL,
+                 user_id TEXT NOT NULL COLLATE NOCASE,
+                 created_at INTEGER NOT NULL,
+                 PRIMARY KEY (post_id, user_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_social_post_votes_post
+                 ON social_post_votes(post_id);
+             CREATE TABLE IF NOT EXISTS social_post_comments (
+                 id TEXT PRIMARY KEY,
+                 post_id TEXT NOT NULL,
+                 user_id TEXT NOT NULL COLLATE NOCASE,
+                 author_username TEXT NOT NULL,
+                 body TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS idx_social_post_comments_post
+                 ON social_post_comments(post_id, created_at);
+             CREATE TABLE IF NOT EXISTS social_comment_votes (
+                 comment_id TEXT NOT NULL,
+                 user_id TEXT NOT NULL COLLATE NOCASE,
+                 created_at INTEGER NOT NULL,
+                 PRIMARY KEY (comment_id, user_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_social_comment_votes_comment
+                 ON social_comment_votes(comment_id);",
         )?;
         Ok(())
     }
@@ -2127,6 +2270,19 @@ impl Storage {
         let recipient_email = Self::normalize_social_email(recipient_email);
         let status = if accept { "accepted" } else { "declined" };
         let conn = self.conn.lock().expect("storage lock");
+        let participants = conn.query_row(
+            "SELECT from_email, to_email FROM friend_requests
+             WHERE id = ?1 AND to_email = ?2 COLLATE NOCASE AND status = 'pending'",
+            params![request_id, recipient_email],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        );
+        let (from_email, to_email) = match participants {
+            Ok(value) => value,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(StorageError::InvalidInput("request not found".into()));
+            }
+            Err(error) => return Err(error.into()),
+        };
         let updated = conn.execute(
             "UPDATE friend_requests SET status = ?1
              WHERE id = ?2 AND to_email = ?3 COLLATE NOCASE AND status = 'pending'",
@@ -2135,7 +2291,22 @@ impl Storage {
         if updated == 0 {
             return Err(StorageError::InvalidInput("request not found".into()));
         }
+        drop(conn);
+        if accept {
+            let _ = self.accept_message_threads_for_friends(
+                &from_email,
+                &to_email,
+                Self::timestamp_now_fallback(),
+            );
+        }
         Ok(())
+    }
+
+    fn timestamp_now_fallback() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0)
     }
 
     pub fn list_incoming_friend_requests(
@@ -2207,41 +2378,278 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
     }
 
+    fn sorted_message_participants(left: &str, right: &str) -> (String, String) {
+        let left = Self::normalize_social_email(left);
+        let right = Self::normalize_social_email(right);
+        if left <= right {
+            (left, right)
+        } else {
+            (right, left)
+        }
+    }
+
+    fn other_message_participant(viewer_email: &str, participant_a: &str, participant_b: &str) -> String {
+        if participant_a.eq_ignore_ascii_case(viewer_email) {
+            participant_b.to_string()
+        } else {
+            participant_a.to_string()
+        }
+    }
+
+    pub fn get_message_thread(
+        &self,
+        left_email: &str,
+        right_email: &str,
+    ) -> Result<Option<StoredMessageThread>, StorageError> {
+        let (participant_a, participant_b) = Self::sorted_message_participants(left_email, right_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let result = conn.query_row(
+            "SELECT id, participant_a, participant_b, status, initiated_by, created_at, responded_at
+             FROM message_threads
+             WHERE participant_a = ?1 AND participant_b = ?2",
+            params![participant_a, participant_b],
+            |row| {
+                Ok(StoredMessageThread {
+                    id: row.get(0)?,
+                    participant_a: row.get(1)?,
+                    participant_b: row.get(2)?,
+                    status: row.get(3)?,
+                    initiated_by: row.get(4)?,
+                    created_at: row.get::<_, i64>(5)? as u64,
+                    responded_at: row.get::<_, Option<i64>>(6)?.map(|value| value as u64),
+                })
+            },
+        );
+        match result {
+            Ok(thread) => Ok(Some(thread)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn accept_message_thread_between(
+        &self,
+        viewer_email: &str,
+        other_email: &str,
+        responded_at: u64,
+    ) -> Result<(), StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let other_email = Self::normalize_social_email(other_email);
+        let (participant_a, participant_b) =
+            Self::sorted_message_participants(&viewer_email, &other_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let updated = conn.execute(
+            "UPDATE message_threads
+             SET status = 'accepted', responded_at = ?1
+             WHERE participant_a = ?2 AND participant_b = ?3 AND status = 'pending'
+               AND initiated_by != ?4 COLLATE NOCASE",
+            params![responded_at as i64, participant_a, participant_b, viewer_email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::InvalidInput("message request not found".into()));
+        }
+        Ok(())
+    }
+
+    pub fn decline_message_thread_between(
+        &self,
+        viewer_email: &str,
+        other_email: &str,
+        responded_at: u64,
+    ) -> Result<(), StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let other_email = Self::normalize_social_email(other_email);
+        let (participant_a, participant_b) =
+            Self::sorted_message_participants(&viewer_email, &other_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let updated = conn.execute(
+            "UPDATE message_threads
+             SET status = 'declined', responded_at = ?1
+             WHERE participant_a = ?2 AND participant_b = ?3 AND status = 'pending'
+               AND initiated_by != ?4 COLLATE NOCASE",
+            params![responded_at as i64, participant_a, participant_b, viewer_email],
+        )?;
+        if updated == 0 {
+            return Err(StorageError::InvalidInput("message request not found".into()));
+        }
+        Ok(())
+    }
+
+    pub fn accept_message_threads_for_friends(
+        &self,
+        left_email: &str,
+        right_email: &str,
+        responded_at: u64,
+    ) -> Result<(), StorageError> {
+        let (participant_a, participant_b) =
+            Self::sorted_message_participants(left_email, right_email);
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE message_threads
+             SET status = 'accepted', responded_at = ?1
+             WHERE participant_a = ?2 AND participant_b = ?3 AND status = 'pending'",
+            params![responded_at as i64, participant_a, participant_b],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_message_thread_partners(&self, viewer_email: &str) -> Result<Vec<String>, StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT participant_a, participant_b
+             FROM message_threads
+             WHERE participant_a = ?1 OR participant_b = ?1",
+        )?;
+        let rows = stmt.query_map(params![viewer_email], |row| {
+            let participant_a: String = row.get(0)?;
+            let participant_b: String = row.get(1)?;
+            Ok(Self::other_message_participant(
+                &viewer_email,
+                &participant_a,
+                &participant_b,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn count_pending_message_requests(&self, viewer_email: &str) -> Result<usize, StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM message_threads
+             WHERE status = 'pending'
+               AND initiated_by != ?1 COLLATE NOCASE
+               AND (participant_a = ?1 OR participant_b = ?1)",
+            params![viewer_email],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
+    fn can_view_message_conversation(
+        &self,
+        viewer_email: &str,
+        other_email: &str,
+    ) -> Result<bool, StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let other_email = Self::normalize_social_email(other_email);
+        if viewer_email == other_email {
+            return Ok(false);
+        }
+        if self.are_friends(&viewer_email, &other_email)? {
+            return Ok(true);
+        }
+        Ok(self.get_message_thread(&viewer_email, &other_email)?.is_some())
+    }
+
+    fn ensure_message_send_allowed(
+        &self,
+        from_email: &str,
+        to_email: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let from_email = Self::normalize_social_email(from_email);
+        let to_email = Self::normalize_social_email(to_email);
+        if from_email == to_email {
+            return Err(StorageError::InvalidInput("cannot message yourself".into()));
+        }
+        if !self.user_exists(&to_email)? {
+            return Err(StorageError::InvalidInput("user not found".into()));
+        }
+        if self.are_friends(&from_email, &to_email)? {
+            let _ = self.accept_message_threads_for_friends(&from_email, &to_email, created_at);
+            return Ok(());
+        }
+
+        let thread = self.get_message_thread(&from_email, &to_email)?;
+        match thread {
+            None => {
+                let (participant_a, participant_b) =
+                    Self::sorted_message_participants(&from_email, &to_email);
+                let id = uuid::Uuid::new_v4().to_string();
+                let conn = self.conn.lock().expect("storage lock");
+                conn.execute(
+                    "INSERT INTO message_threads (id, participant_a, participant_b, status, initiated_by, created_at, responded_at)
+                     VALUES (?1, ?2, ?3, 'pending', ?4, ?5, NULL)",
+                    params![id, participant_a, participant_b, from_email, created_at as i64],
+                )?;
+                Ok(())
+            }
+            Some(thread) if thread.status == "accepted" => Ok(()),
+            Some(thread) if thread.status == "pending" && thread.initiated_by.eq_ignore_ascii_case(&from_email) => {
+                Ok(())
+            }
+            Some(thread) if thread.status == "pending" => {
+                Err(StorageError::InvalidInput(
+                    "accept the message request before replying".into(),
+                ))
+            }
+            Some(_) => Err(StorageError::InvalidInput(
+                "message request declined".into(),
+            )),
+        }
+    }
+
     pub fn send_friend_message(
         &self,
         from_email: &str,
         to_email: &str,
         body: &str,
+        media_type: &str,
+        media_url: Option<&str>,
+        video_duration: Option<f32>,
         created_at: u64,
     ) -> Result<StoredFriendMessage, StorageError> {
         let from_email = Self::normalize_social_email(from_email);
         let to_email = Self::normalize_social_email(to_email);
         let body = body.trim();
-        if body.is_empty() {
+        let media_type = media_type.trim();
+        if body.is_empty()
+            && media_url.map(str::trim).filter(|value| !value.is_empty()).is_none()
+        {
             return Err(StorageError::InvalidInput("message required".into()));
         }
         if body.chars().count() > 2000 {
             return Err(StorageError::InvalidInput("message too long".into()));
         }
-        if from_email == to_email {
-            return Err(StorageError::InvalidInput("cannot message yourself".into()));
+        if media_type != "none" && media_url.map(str::trim).filter(|v| !v.is_empty()).is_none() {
+            return Err(StorageError::InvalidInput("media required".into()));
         }
-        if !self.are_friends(&from_email, &to_email)? {
-            return Err(StorageError::InvalidInput("not friends".into()));
+        if media_type == "none" && media_url.is_some() {
+            return Err(StorageError::InvalidInput("invalid media".into()));
         }
+
+        self.ensure_message_send_allowed(&from_email, &to_email, created_at)?;
 
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
-            "INSERT INTO friend_messages (id, from_email, to_email, body, created_at, read_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
-            params![id, from_email, to_email, body, created_at as i64],
+            "INSERT INTO friend_messages (id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)",
+            params![
+                id,
+                from_email,
+                to_email,
+                body,
+                if media_type.is_empty() { "none" } else { media_type },
+                media_url,
+                video_duration,
+                created_at as i64
+            ],
         )?;
         Ok(StoredFriendMessage {
             id,
             from_email,
             to_email,
             body: body.to_string(),
+            media_type: if media_type.is_empty() {
+                "none".to_string()
+            } else {
+                media_type.to_string()
+            },
+            media_url: media_url.map(str::to_string),
+            video_duration,
             created_at,
             read_at: None,
         })
@@ -2255,14 +2663,14 @@ impl Storage {
     ) -> Result<Vec<StoredFriendMessage>, StorageError> {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let friend_email = Self::normalize_social_email(friend_email);
-        if !self.are_friends(&viewer_email, &friend_email)? {
-            return Err(StorageError::InvalidInput("not friends".into()));
+        if !self.can_view_message_conversation(&viewer_email, &friend_email)? {
+            return Err(StorageError::InvalidInput("cannot view conversation".into()));
         }
 
         let limit = limit.min(100) as i64;
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT id, from_email, to_email, body, created_at, read_at
+            "SELECT id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at
              FROM friend_messages
              WHERE (from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1)
              ORDER BY created_at ASC
@@ -2274,8 +2682,11 @@ impl Storage {
                 from_email: row.get(1)?,
                 to_email: row.get(2)?,
                 body: row.get(3)?,
-                created_at: row.get::<_, i64>(4)? as u64,
-                read_at: row.get::<_, Option<i64>>(5)?.map(|value| value as u64),
+                media_type: row.get(4)?,
+                media_url: row.get(5)?,
+                video_duration: row.get(6)?,
+                created_at: row.get::<_, i64>(7)? as u64,
+                read_at: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
@@ -2289,8 +2700,8 @@ impl Storage {
     ) -> Result<(), StorageError> {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let friend_email = Self::normalize_social_email(friend_email);
-        if !self.are_friends(&viewer_email, &friend_email)? {
-            return Err(StorageError::InvalidInput("not friends".into()));
+        if !self.can_view_message_conversation(&viewer_email, &friend_email)? {
+            return Err(StorageError::InvalidInput("cannot view conversation".into()));
         }
 
         let conn = self.conn.lock().expect("storage lock");
@@ -2341,7 +2752,7 @@ impl Storage {
         let friend_email = Self::normalize_social_email(friend_email);
         let conn = self.conn.lock().expect("storage lock");
         let result = conn.query_row(
-            "SELECT id, from_email, to_email, body, created_at, read_at
+            "SELECT id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at
              FROM friend_messages
              WHERE (from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1)
              ORDER BY created_at DESC
@@ -2353,8 +2764,11 @@ impl Storage {
                     from_email: row.get(1)?,
                     to_email: row.get(2)?,
                     body: row.get(3)?,
-                    created_at: row.get::<_, i64>(4)? as u64,
-                    read_at: row.get::<_, Option<i64>>(5)?.map(|value| value as u64),
+                    media_type: row.get(4)?,
+                    media_url: row.get(5)?,
+                    video_duration: row.get(6)?,
+                    created_at: row.get::<_, i64>(7)? as u64,
+                    read_at: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
                 })
             },
         );
@@ -2365,41 +2779,142 @@ impl Storage {
         }
     }
 
+    fn legacy_media_item(post: &StoredSocialPost) -> Option<StoredSocialPostMedia> {
+        let url = post.media_url.as_deref().filter(|value| !value.is_empty())?;
+        if post.media_type == "none" {
+            return None;
+        }
+        Some(StoredSocialPostMedia {
+            media_type: post.media_type.clone(),
+            media_url: url.to_string(),
+            video_duration: post.video_duration,
+            sort_order: 0,
+        })
+    }
+
+    pub fn hydrate_social_posts_media(
+        &self,
+        posts: &mut [StoredSocialPost],
+    ) -> Result<(), StorageError> {
+        if posts.is_empty() {
+            return Ok(());
+        }
+        let placeholders = std::iter::repeat("?")
+            .take(posts.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT post_id, sort_order, media_type, media_url, video_duration
+             FROM social_post_media
+             WHERE post_id IN ({placeholders})
+             ORDER BY post_id, sort_order ASC"
+        );
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(&sql)?;
+        let ids: Vec<String> = posts.iter().map(|post| post.id.clone()).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                StoredSocialPostMedia {
+                    sort_order: row.get::<_, i64>(1)? as u32,
+                    media_type: row.get(2)?,
+                    media_url: row.get(3)?,
+                    video_duration: row.get::<_, Option<f64>>(4)?.map(|value| value as f32),
+                },
+            ))
+        })?;
+        let mut grouped: std::collections::HashMap<String, Vec<StoredSocialPostMedia>> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let (post_id, item) = row?;
+            grouped.entry(post_id).or_default().push(item);
+        }
+        for post in posts.iter_mut() {
+            if let Some(items) = grouped.remove(&post.id) {
+                post.media_items = items;
+            } else if let Some(item) = Self::legacy_media_item(post) {
+                post.media_items = vec![item];
+            }
+        }
+        Ok(())
+    }
+
     pub fn create_social_post(
         &self,
         user_id: &str,
         author_username: &str,
         body: &str,
-        media_type: &str,
-        media_url: Option<&str>,
-        video_duration: Option<f32>,
+        media_items: &[StoredSocialPostMedia],
         is_private: bool,
         created_at: u64,
     ) -> Result<StoredSocialPost, StorageError> {
         let user_id = Self::normalize_social_email(user_id);
         let body = body.trim();
-        let media_type = media_type.trim().to_lowercase();
-        if body.is_empty() && media_url.map(str::trim).filter(|v| !v.is_empty()).is_none() {
+        if body.is_empty() && media_items.is_empty() {
             return Err(StorageError::InvalidInput("post requires text or media".into()));
         }
         if body.chars().count() > 2000 {
             return Err(StorageError::InvalidInput("caption too long".into()));
         }
-        if !matches!(media_type.as_str(), "none" | "photo" | "video") {
-            return Err(StorageError::InvalidInput("invalid media type".into()));
+        if media_items.len() > crate::social_posts::MAX_SOCIAL_PHOTOS_PER_POST {
+            return Err(StorageError::InvalidInput(format!(
+                "posts can include up to {} photos",
+                crate::social_posts::MAX_SOCIAL_PHOTOS_PER_POST
+            )));
         }
-        if media_type == "none" && media_url.is_some() {
-            return Err(StorageError::InvalidInput("invalid media".into()));
+
+        let photo_count = media_items
+            .iter()
+            .filter(|item| item.media_type == "photo")
+            .count();
+        let video_count = media_items
+            .iter()
+            .filter(|item| item.media_type == "video")
+            .count();
+        if photo_count > 0 && video_count > 0 {
+            return Err(StorageError::InvalidInput(
+                "choose photos or one video, not both".into(),
+            ));
         }
-        if media_type != "none" && media_url.map(str::trim).filter(|v| !v.is_empty()).is_none() {
-            return Err(StorageError::InvalidInput("media required".into()));
+        if video_count > 1 {
+            return Err(StorageError::InvalidInput(
+                "posts can include only one video".into(),
+            ));
         }
-        if media_type == "video" {
-            let duration = video_duration.unwrap_or(0.0);
-            if duration <= 0.0 || duration > 10.0 {
-                return Err(StorageError::InvalidInput("video must be 10 seconds or less".into()));
+        if photo_count > crate::social_posts::MAX_SOCIAL_PHOTOS_PER_POST {
+            return Err(StorageError::InvalidInput(format!(
+                "posts can include up to {} photos",
+                crate::social_posts::MAX_SOCIAL_PHOTOS_PER_POST
+            )));
+        }
+        for item in media_items {
+            if item.media_url.trim().is_empty() {
+                return Err(StorageError::InvalidInput("media required".into()));
+            }
+            if !matches!(item.media_type.as_str(), "photo" | "video") {
+                return Err(StorageError::InvalidInput("invalid media type".into()));
+            }
+            if item.media_type == "video" {
+                let duration = item.video_duration.unwrap_or(0.0);
+                if duration <= 0.0 || duration > crate::social_posts::MAX_SOCIAL_VIDEO_SECONDS {
+                    return Err(StorageError::InvalidInput(
+                        "video must be 10 seconds or less".into(),
+                    ));
+                }
             }
         }
+
+        let primary = media_items.first();
+        let media_type = primary
+            .map(|item| item.media_type.as_str())
+            .unwrap_or("none")
+            .to_string();
+        let media_url = primary.map(|item| item.media_url.clone());
+        let video_duration = primary.and_then(|item| item.video_duration);
 
         let id = uuid::Uuid::new_v4().to_string();
         let conn = self.conn.lock().expect("storage lock");
@@ -2412,36 +2927,328 @@ impl Storage {
                 author_username.trim(),
                 body,
                 media_type,
-                media_url,
+                media_url.as_deref(),
                 video_duration,
                 if is_private { 1_i64 } else { 0_i64 },
                 created_at as i64
             ],
         )?;
+        for item in media_items {
+            let media_id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO social_post_media (id, post_id, sort_order, media_type, media_url, video_duration)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    media_id,
+                    id,
+                    item.sort_order as i64,
+                    item.media_type,
+                    item.media_url,
+                    item.video_duration
+                ],
+            )?;
+        }
         Ok(StoredSocialPost {
             id,
             user_id,
             author_username: author_username.trim().to_string(),
             body: body.to_string(),
-            media_type,
-            media_url: media_url.map(str::to_string),
+            media_type: if media_items.is_empty() {
+                "none".to_string()
+            } else {
+                media_type
+            },
+            media_url,
             video_duration,
             is_private,
             created_at,
+            media_items: media_items.to_vec(),
+            upvotes: 0,
+            viewer_upvoted: false,
+            comments: Vec::new(),
         })
+    }
+
+    fn social_post_upvote_count(conn: &Connection, post_id: &str) -> Result<u32, rusqlite::Error> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM social_post_votes WHERE post_id = ?1",
+            params![post_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u32)
+    }
+
+    fn social_post_viewer_upvoted(
+        conn: &Connection,
+        post_id: &str,
+        viewer_email: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_post_votes WHERE post_id = ?1 AND user_id = ?2",
+            params![post_id, viewer_email],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    fn social_comment_upvote_count(conn: &Connection, comment_id: &str) -> Result<u32, rusqlite::Error> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM social_comment_votes WHERE comment_id = ?1",
+            params![comment_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count as u32)
+    }
+
+    fn social_comment_viewer_upvoted(
+        conn: &Connection,
+        comment_id: &str,
+        viewer_email: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_comment_votes WHERE comment_id = ?1 AND user_id = ?2",
+            params![comment_id, viewer_email],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn hydrate_social_posts_engagement(
+        &self,
+        posts: &mut [StoredSocialPost],
+        viewer_email: Option<&str>,
+    ) -> Result<(), StorageError> {
+        if posts.is_empty() {
+            return Ok(());
+        }
+        let viewer_email = viewer_email.map(Self::normalize_social_email);
+        let conn = self.conn.lock().expect("storage lock");
+        for post in posts.iter_mut() {
+            post.upvotes = Self::social_post_upvote_count(&conn, &post.id)?;
+            post.viewer_upvoted = viewer_email
+                .as_ref()
+                .map(|email| Self::social_post_viewer_upvoted(&conn, &post.id, email))
+                .transpose()?
+                .unwrap_or(false);
+
+            let mut comment_stmt = conn.prepare(
+                "SELECT id, post_id, user_id, author_username, body, created_at
+                 FROM social_post_comments
+                 WHERE post_id = ?1
+                 ORDER BY created_at ASC",
+            )?;
+            let rows = comment_stmt.query_map(params![post.id], |row| {
+                Ok(StoredSocialPostComment {
+                    id: row.get(0)?,
+                    post_id: row.get(1)?,
+                    user_id: row.get(2)?,
+                    author_username: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get::<_, i64>(5)? as u64,
+                    upvotes: 0,
+                    viewer_upvoted: false,
+                })
+            })?;
+            let mut comments = rows.collect::<Result<Vec<_>, _>>()?;
+            for comment in &mut comments {
+                comment.upvotes = Self::social_comment_upvote_count(&conn, &comment.id)?;
+                comment.viewer_upvoted = viewer_email
+                    .as_ref()
+                    .map(|email| Self::social_comment_viewer_upvoted(&conn, &comment.id, email))
+                    .transpose()?
+                    .unwrap_or(false);
+            }
+            comments.sort_by(|left, right| {
+                right
+                    .upvotes
+                    .cmp(&left.upvotes)
+                    .then_with(|| left.created_at.cmp(&right.created_at))
+            });
+            post.comments = comments;
+        }
+        Ok(())
+    }
+
+    pub fn toggle_social_post_upvote(
+        &self,
+        post_id: &str,
+        user_id: &str,
+        created_at: u64,
+    ) -> Result<SocialPostUpvoteSummary, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let conn = self.conn.lock().expect("storage lock");
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_posts WHERE id = ?1",
+            params![post_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(StorageError::InvalidInput("post not found".into()));
+        }
+
+        let already_voted = Self::social_post_viewer_upvoted(&conn, post_id, &user_id)?;
+        if already_voted {
+            conn.execute(
+                "DELETE FROM social_post_votes WHERE post_id = ?1 AND user_id = ?2",
+                params![post_id, user_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO social_post_votes (post_id, user_id, created_at) VALUES (?1, ?2, ?3)",
+                params![post_id, user_id, created_at as i64],
+            )?;
+        }
+
+        Ok(SocialPostUpvoteSummary {
+            upvotes: Self::social_post_upvote_count(&conn, post_id)?,
+            viewer_upvoted: !already_voted,
+        })
+    }
+
+    pub fn toggle_social_comment_upvote(
+        &self,
+        comment_id: &str,
+        user_id: &str,
+        created_at: u64,
+    ) -> Result<SocialCommentUpvoteSummary, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let conn = self.conn.lock().expect("storage lock");
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_post_comments WHERE id = ?1",
+            params![comment_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(StorageError::InvalidInput("comment not found".into()));
+        }
+
+        let already_voted =
+            Self::social_comment_viewer_upvoted(&conn, comment_id, &user_id)?;
+        if already_voted {
+            conn.execute(
+                "DELETE FROM social_comment_votes WHERE comment_id = ?1 AND user_id = ?2",
+                params![comment_id, user_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO social_comment_votes (comment_id, user_id, created_at) VALUES (?1, ?2, ?3)",
+                params![comment_id, user_id, created_at as i64],
+            )?;
+        }
+
+        Ok(SocialCommentUpvoteSummary {
+            upvotes: Self::social_comment_upvote_count(&conn, comment_id)?,
+            viewer_upvoted: !already_voted,
+        })
+    }
+
+    pub fn get_social_post_id_for_comment(
+        &self,
+        comment_id: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        match conn.query_row(
+            "SELECT post_id FROM social_post_comments WHERE id = ?1",
+            params![comment_id],
+            |row| row.get(0),
+        ) {
+            Ok(post_id) => Ok(Some(post_id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn create_social_post_comment(
+        &self,
+        post_id: &str,
+        user_id: &str,
+        author_username: &str,
+        body: &str,
+        created_at: u64,
+    ) -> Result<StoredSocialPostComment, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(StorageError::InvalidInput("comment required".into()));
+        }
+        if body.chars().count() > 1000 {
+            return Err(StorageError::InvalidInput("comment too long".into()));
+        }
+
+        let conn = self.conn.lock().expect("storage lock");
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_posts WHERE id = ?1",
+            params![post_id],
+            |row| row.get(0),
+        )?;
+        if exists == 0 {
+            return Err(StorageError::InvalidInput("post not found".into()));
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO social_post_comments (id, post_id, user_id, author_username, body, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                post_id,
+                user_id,
+                author_username.trim(),
+                body,
+                created_at as i64
+            ],
+        )?;
+
+        Ok(StoredSocialPostComment {
+            id,
+            post_id: post_id.to_string(),
+            user_id,
+            author_username: author_username.trim().to_string(),
+            body: body.to_string(),
+            created_at,
+            upvotes: 0,
+            viewer_upvoted: false,
+        })
+    }
+
+    pub fn get_social_post_by_id(
+        &self,
+        post_id: &str,
+        viewer_email: Option<&str>,
+    ) -> Result<Option<StoredSocialPost>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let result = conn.query_row(
+            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
+             FROM social_posts WHERE id = ?1",
+            params![post_id],
+            map_social_post_row,
+        );
+        let mut post = match result {
+            Ok(post) => post,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        drop(conn);
+        self.hydrate_social_posts_media(std::slice::from_mut(&mut post))?;
+        self.hydrate_social_posts_engagement(std::slice::from_mut(&mut post), viewer_email)?;
+        Ok(Some(post))
     }
 
     pub fn list_social_posts(&self, limit: usize) -> Result<Vec<StoredSocialPost>, StorageError> {
         let limit = limit.min(100) as i64;
-        let conn = self.conn.lock().expect("storage lock");
-        let mut stmt = conn.prepare(
-            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
-             FROM social_posts
-             ORDER BY created_at DESC
-             LIMIT ?1",
-        )?;
-        let rows = stmt.query_map(params![limit], map_social_post_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        let mut posts = {
+            let conn = self.conn.lock().expect("storage lock");
+            let mut stmt = conn.prepare(
+                "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
+                 FROM social_posts
+                 ORDER BY created_at DESC
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit], map_social_post_row)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        self.hydrate_social_posts_media(&mut posts)?;
+        Ok(posts)
     }
 
     pub fn list_social_posts_from_users(
@@ -2465,35 +3272,99 @@ impl Storage {
              LIMIT ?{}",
             user_ids.len() + 1
         );
-        let conn = self.conn.lock().expect("storage lock");
-        let mut stmt = conn.prepare(&sql)?;
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = user_ids
-            .iter()
-            .map(|email| Box::new(Self::normalize_social_email(email)) as Box<dyn rusqlite::types::ToSql>)
-            .collect();
-        params_vec.push(Box::new(limit));
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|value| value.as_ref()).collect();
-        let rows = stmt.query_map(params_refs.as_slice(), map_social_post_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        let mut posts = {
+            let conn = self.conn.lock().expect("storage lock");
+            let mut stmt = conn.prepare(&sql)?;
+            let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = user_ids
+                .iter()
+                .map(|email| {
+                    Box::new(Self::normalize_social_email(email)) as Box<dyn rusqlite::types::ToSql>
+                })
+                .collect();
+            params_vec.push(Box::new(limit));
+            let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+                params_vec.iter().map(|value| value.as_ref()).collect();
+            let rows = stmt.query_map(params_refs.as_slice(), map_social_post_row)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        self.hydrate_social_posts_media(&mut posts)?;
+        Ok(posts)
+    }
+
+    pub fn list_social_posts_from_users_with_engagement(
+        &self,
+        user_ids: &[String],
+        limit: usize,
+        viewer_email: Option<&str>,
+    ) -> Result<Vec<StoredSocialPost>, StorageError> {
+        let mut posts = self.list_social_posts_from_users(user_ids, limit)?;
+        self.hydrate_social_posts_engagement(&mut posts, viewer_email)?;
+        Ok(posts)
+    }
+
+    pub fn list_social_posts_with_engagement(
+        &self,
+        limit: usize,
+        viewer_email: Option<&str>,
+    ) -> Result<Vec<StoredSocialPost>, StorageError> {
+        let mut posts = self.list_social_posts(limit)?;
+        self.hydrate_social_posts_engagement(&mut posts, viewer_email)?;
+        Ok(posts)
     }
 
     pub fn delete_social_post_owned(
         &self,
         post_id: &str,
         user_id: &str,
-    ) -> Result<Option<String>, StorageError> {
+    ) -> Result<Option<Vec<String>>, StorageError> {
         let user_id = Self::normalize_social_email(user_id);
         let conn = self.conn.lock().expect("storage lock");
-        let media_url: Option<String> = match conn.query_row(
-            "SELECT media_url FROM social_posts WHERE id = ?1 AND user_id = ?2",
-            params![post_id, user_id],
-            |row| row.get::<_, Option<String>>(0),
-        ) {
-            Ok(value) => value,
-            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
-            Err(error) => return Err(error.into()),
-        };
+        let exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM social_posts WHERE id = ?1 AND user_id = ?2",
+                params![post_id, user_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !exists {
+            return Ok(None);
+        }
+
+        let mut media_urls: Vec<String> = conn
+            .prepare("SELECT media_url FROM social_post_media WHERE post_id = ?1 ORDER BY sort_order ASC")?
+            .query_map(params![post_id], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+        if media_urls.is_empty() {
+            if let Ok(url) = conn.query_row(
+                "SELECT media_url FROM social_posts WHERE id = ?1 AND user_id = ?2",
+                params![post_id, user_id],
+                |row| row.get::<_, Option<String>>(0),
+            ) {
+                if let Some(url) = url.filter(|value| !value.is_empty()) {
+                    media_urls.push(url);
+                }
+            }
+        }
+
+        conn.execute(
+            "DELETE FROM social_comment_votes
+             WHERE comment_id IN (SELECT id FROM social_post_comments WHERE post_id = ?1)",
+            params![post_id],
+        )?;
+        conn.execute(
+            "DELETE FROM social_post_comments WHERE post_id = ?1",
+            params![post_id],
+        )?;
+        conn.execute(
+            "DELETE FROM social_post_votes WHERE post_id = ?1",
+            params![post_id],
+        )?;
+        conn.execute(
+            "DELETE FROM social_post_media WHERE post_id = ?1",
+            params![post_id],
+        )?;
         let deleted = conn.execute(
             "DELETE FROM social_posts WHERE id = ?1 AND user_id = ?2",
             params![post_id, user_id],
@@ -2501,7 +3372,7 @@ impl Storage {
         if deleted == 0 {
             return Ok(None);
         }
-        Ok(media_url)
+        Ok(Some(media_urls))
     }
 
     pub fn create_pet_share(
