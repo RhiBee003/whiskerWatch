@@ -272,6 +272,27 @@ pub fn pending_notifications_for_profile(profile: &UserProfile) -> Vec<PendingNo
         }
     }
 
+    if !profile.friend_message_deletion_notices.is_empty() {
+        for minutes in effective_checkin_times(&profile.notification_prefs) {
+            if !minutes_match_target(now_minutes, minutes) {
+                continue;
+            }
+            for notice in &profile.friend_message_deletion_notices {
+                let tag = format!("friend:msg-delete:{}", notice.notice_id);
+                if already_sent(profile, &tag) {
+                    continue;
+                }
+                pending.push(PendingNotification {
+                    tag,
+                    title: "Friend message update".to_string(),
+                    body: format!("{} {}", notice.partner_label, notice.summary),
+                    url: "/home?tab=friends".to_string(),
+                });
+            }
+            break;
+        }
+    }
+
     pending
 }
 

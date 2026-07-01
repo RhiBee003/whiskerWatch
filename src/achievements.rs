@@ -64,6 +64,17 @@ pub fn collect_achievements(profile: &UserProfile) -> Vec<Achievement> {
     achievements
 }
 
+pub fn collect_parent_profile_achievements(profile: &UserProfile, is_self: bool) -> Vec<Achievement> {
+    collect_achievements(profile)
+        .into_iter()
+        .filter(|achievement| is_self || !is_private_parent_profile_achievement(achievement))
+        .collect()
+}
+
+fn is_private_parent_profile_achievement(achievement: &Achievement) -> bool {
+    matches!(achievement.id, "plus_member")
+}
+
 fn streak_achievement(tier: &StreakRewardTier) -> Achievement {
     Achievement {
         id: "streak",
@@ -74,7 +85,7 @@ fn streak_achievement(tier: &StreakRewardTier) -> Achievement {
 }
 
 pub fn render_parent_profile_achievements(profile: &UserProfile, is_self: bool) -> String {
-    let achievements = collect_achievements(profile);
+    let achievements = collect_parent_profile_achievements(profile, is_self);
     if achievements.is_empty() {
         if is_self {
             return r#"<section class="parent-profile-achievements-section dashboard-card">
@@ -134,7 +145,20 @@ mod tests {
         let html = render_parent_profile_achievements(&profile, false);
         assert!(html.contains("parent-profile-achievements"));
         assert!(html.contains("Week warrior"));
-        assert!(html.contains("WhiskerWatch Plus"));
+        assert!(!html.contains("WhiskerWatch Plus"));
+
+        let own_html = render_parent_profile_achievements(&profile, true);
+        assert!(own_html.contains("WhiskerWatch Plus"));
+    }
+
+    #[test]
+    fn plus_achievement_hidden_on_public_parent_profiles() {
+        let mut profile = default_profile("plus@example.com");
+        profile.premium_unlocked = true;
+        let public = collect_parent_profile_achievements(&profile, false);
+        assert!(public.iter().all(|item| item.id != "plus_member"));
+        let own = collect_parent_profile_achievements(&profile, true);
+        assert!(own.iter().any(|item| item.id == "plus_member"));
     }
 
     #[test]

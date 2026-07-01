@@ -4,22 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>WhiskerWatch — {{CAT_HOME_TITLE}}</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619n" />
+    <link rel="stylesheet" href="/styles.css?v=20260624t" />
   </head>
   <body class="dashboard-body cat-home-body">
     <header class="dashboard-topbar">
       <div class="brand" aria-label="WhiskerWatch">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
-        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+        <span class="dashboard-greeting">Hi, {{USER_NAME}}!</span>
       </div>
       <nav class="dashboard-nav">
-        <a href="/home?tab=pet">HOME</a>
         <a href="/home?tab=feedback">FEEDBACK</a>
         {{ADMIN_NAV_LINK}}
-        <a href="/contact">CONTACT</a>
-        <form class="admin-logout-form" action="/logout" method="post">
-          <button type="submit" class="admin-logout-btn">LOG OUT</button>
-        </form>
+        {{DASHBOARD_NAV_ACTIONS}}
       </nav>
     </header>
 
@@ -64,6 +60,6 @@
     <script src="/cinder-pet.js?v=20260616a"></script>
     <script src="/cat-home.js?v=20260617d"></script>
     <script src="/cat-home-ambient.js?v=20260619b"></script>
-    <script src="/playdate.js?v=20260619o"></script>
+    <script src="/playdate.js?v=20260624c"></script>
   </body>
 </html>

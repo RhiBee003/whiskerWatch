@@ -1,4 +1,24 @@
 (function () {
+  function openFriendsAddCard() {
+    const card = document.getElementById("friends-add-card");
+    if (!(card instanceof HTMLDetailsElement)) {
+      return;
+    }
+    card.open = true;
+    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const queryInput = document.getElementById("friend_search_query");
+    if (queryInput instanceof HTMLInputElement) {
+      window.setTimeout(() => queryInput.focus(), 250);
+    }
+  }
+
+  document.querySelectorAll("[data-open-friends-add]").forEach((trigger) => {
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      openFriendsAddCard();
+    });
+  });
+
   const form = document.querySelector("[data-friend-search-form]");
   if (!(form instanceof HTMLFormElement)) {
     return;
@@ -72,7 +92,7 @@
   function renderResults(results) {
     if (!Array.isArray(results) || results.length === 0) {
       resultsPanel.innerHTML =
-        '<p class="friend-search-empty">No matching usernames yet. Keep typing or try another search.</p>';
+        '<p class="friend-search-empty">No matching usernames yet — try another spelling or keep typing. 🐾</p>';
       setResultsVisible(true);
       return;
     }

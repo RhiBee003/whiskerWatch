@@ -16,6 +16,12 @@
     { id: "hiss", label: "Dramatic hiss", emoji: "😾" },
   ];
 
+  const BOND_ACTIONS = [
+    { id: "pet", label: "Gentle pet", emoji: "🐾", blurb: "+2 paw points · +10 parent XP" },
+    { id: "play", label: "Playtime", emoji: "🧶", blurb: "+4 paw points · +15 parent XP" },
+    { id: "cuddle", label: "Cozy cuddle", emoji: "💕", blurb: "+6 paw points · +22 parent XP" },
+  ];
+
   function friendshipTier(score) {
     if (score <= -20) {
       return { label: "Frenemies", emoji: "💢" };
@@ -109,6 +115,101 @@
     });
   }
 
+  function readBonds(scene) {
+    const dataNode = scene.querySelector(".playdate-bonds-data");
+    if (!dataNode) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(dataNode.textContent || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function writeBonds(scene, bonds) {
+    scene.querySelectorAll(".playdate-bonds-data").forEach((node) => {
+      node.textContent = JSON.stringify(bonds);
+    });
+  }
+
+  function bondScore(petId, bonds) {
+    const match = bonds.find((entry) => entry.pet_id === petId);
+    return typeof match?.score === "number" ? match.score : 0;
+  }
+
+  function findBondsPanel(scene) {
+    const parent = scene.parentElement;
+    if (!(parent instanceof HTMLElement)) {
+      return null;
+    }
+    const panel = parent.querySelector(".cat-home-bonds-panel");
+    return panel instanceof HTMLElement ? panel : null;
+  }
+
+  function renderBondRow(petId, petName, score) {
+    const tier = friendshipTier(score);
+    const percent = friendshipTierProgressPercent(score);
+    const levelDisplay = formatFriendshipLevelDisplay(score);
+    const row = document.createElement("li");
+    row.className = "cat-home-bond-row";
+    row.dataset.bondPetId = petId;
+    row.innerHTML = `
+      <div class="cat-home-bond-meta">
+        <span class="cat-home-bond-name">${petName}</span>
+        <span class="cat-home-bond-role">Your cat</span>
+      </div>
+      <div class="cat-home-bond-meter" role="meter" aria-valuenow="${score}" aria-valuemin="${FRIENDSHIP_SCORE_MIN}" aria-valuemax="${FRIENDSHIP_SCORE_MAX}" aria-label="Bond with ${petName}: ${tier.label} (${levelDisplay})">
+        <div class="cat-home-bond-meter-fill" style="width: ${percent}%"></div>
+      </div>
+      <p class="cat-home-bond-tier">${tier.emoji} ${tier.label} · ${levelDisplay}</p>
+    `;
+    return row;
+  }
+
+  function updateBondsPanel(scene, bonds, cats) {
+    const panel = findBondsPanel(scene);
+    if (!panel) {
+      return;
+    }
+    const list = panel.querySelector(".cat-home-bonds-list");
+    if (!(list instanceof HTMLElement)) {
+      return;
+    }
+    const owned = cats.filter((cat) => cat.isOwned);
+    list.replaceChildren(
+      ...owned.map((cat) => renderBondRow(cat.petId, cat.name, bondScore(cat.petId, bonds)))
+    );
+  }
+
+  function updatePlayAsBondBadge(scene, bonds) {
+    const playAs = getPlayAsCat(scene);
+    if (!playAs) {
+      return;
+    }
+    const score = bondScore(playAs.petId, bonds);
+    const tier = friendshipTier(score);
+    const levelDisplay = formatFriendshipLevelDisplay(score);
+    const badge = playAs.element.querySelector(".cat-home-friendship-badge");
+    if (badge instanceof HTMLElement) {
+      badge.textContent = `${tier.emoji} ${tier.label} · ${levelDisplay}`;
+    }
+    playAs.element.dataset.friendshipScore = String(score);
+  }
+
+  function syncBondsAcrossScenes(bonds) {
+    document.querySelectorAll(".cat-home-playdate-scene").forEach((scene) => {
+      if (!(scene instanceof HTMLElement)) {
+        return;
+      }
+      writeBonds(scene, bonds);
+      const cats = readCats(scene);
+      updatePlayAsBondBadge(scene, bonds);
+      updateBondsPanel(scene, bonds, cats);
+    });
+  }
+
   function friendshipKey(left, right) {
     const norm = (owner, petId) =>
       `${owner.trim().toLowerCase()}|${petId.trim()}`;
@@ -145,6 +246,38 @@
   function friendshipProgressPercent(score) {
     const clamped = Math.min(FRIENDSHIP_SCORE_MAX, Math.max(FRIENDSHIP_SCORE_MIN, score));
     return Math.round(((clamped - FRIENDSHIP_SCORE_MIN) * 100) / (FRIENDSHIP_SCORE_MAX - FRIENDSHIP_SCORE_MIN));
+  }
+
+  function friendshipTierFloor(score) {
+    if (score <= -20) {
+      return FRIENDSHIP_SCORE_MIN;
+    }
+    if (score < 0) {
+      return -19;
+    }
+    if (score < 10) {
+      return 0;
+    }
+    if (score < 30) {
+      return 10;
+    }
+    if (score < 55) {
+      return 30;
+    }
+    if (score < 80) {
+      return 55;
+    }
+    return 80;
+  }
+
+  function friendshipTierProgressPercent(score) {
+    const floor = friendshipTierFloor(score);
+    const target = friendshipNextLevelTarget(score);
+    if (target <= floor) {
+      return 100;
+    }
+    const clamped = Math.min(target, Math.max(floor, score));
+    return Math.round(((clamped - floor) * 100) / (target - floor));
   }
 
   function friendshipNextLevelTarget(score) {
@@ -193,7 +326,7 @@
   function renderFriendshipRow(playAs, other, friendships) {
     const score = friendshipScore(playAs, other, friendships);
     const tier = friendshipTier(score);
-    const percent = friendshipProgressPercent(score);
+    const percent = friendshipTierProgressPercent(score);
     const levelDisplay = formatFriendshipLevelDisplay(score);
     const row = document.createElement("li");
     row.className = "cat-home-friendship-row";
@@ -244,7 +377,7 @@
       panel.innerHTML = `
         <div class="cat-home-friendships-header">
           <h3 id="cat-home-friendships-title"></h3>
-          <p class="field-hint cat-home-friendships-lead">Bars show overall friendship; points below are progress toward the next level.</p>
+          <p class="field-hint cat-home-friendships-lead">Bars fill toward the next friendship level shown below.</p>
         </div>
         <ul class="cat-home-friendships-list"></ul>
       `;
@@ -384,6 +517,18 @@
     menuActions.appendChild(button);
   }
 
+  function addActionButtonWithHint(label, hint, onClick, className) {
+    if (!(menuActions instanceof HTMLElement)) {
+      return;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className || "download-btn playdate-action-btn";
+    button.innerHTML = `<span class="playdate-action-label">${label}</span><span class="playdate-action-hint">${hint}</span>`;
+    button.addEventListener("click", onClick);
+    menuActions.appendChild(button);
+  }
+
   function pulseCats(elements) {
     elements.forEach((element) => {
       if (!(element instanceof HTMLElement)) {
@@ -415,6 +560,39 @@
     }
 
     return response.json().catch(() => null);
+  }
+
+  async function sendBondInteraction(payload) {
+    const response = await fetch("/home/cat-home/bond", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      window.location.href = "/login";
+      return null;
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (_error) {
+      data = null;
+    }
+
+    if (!response.ok) {
+      if (response.status === 404 || response.status === 405) {
+        return { ok: false, status: "route_missing" };
+      }
+      return data ?? { ok: false, status: "error" };
+    }
+
+    return data ?? { ok: false, status: "error" };
   }
 
   function mountPlaydateScene(scene) {
@@ -475,6 +653,106 @@
       closeMenu();
     }
 
+    async function runBondInteraction(cat, action) {
+      const data = await sendBondInteraction({
+        pet_id: cat.petId,
+        action,
+      });
+
+      if (!data?.ok) {
+        if (data?.status === "route_missing") {
+          showToast("Bonding needs a quick server refresh — reload after the app restarts.");
+        } else if (data?.status === "invalid_pet") {
+          showToast("That cat isn't in your household yet.");
+        } else {
+          showToast("That cozy moment didn't save — try again.");
+        }
+        return;
+      }
+
+      const bonds = readBonds(scene);
+      const existing = bonds.find((entry) => entry.pet_id === cat.petId);
+      if (existing) {
+        existing.score = data.bond_score;
+      } else {
+        bonds.push({ pet_id: cat.petId, score: data.bond_score });
+      }
+      syncBondsAcrossScenes(bonds);
+
+      if (typeof data.paw_points === "number" && window.whiskerApplyPawPointsBalance) {
+        window.whiskerApplyPawPointsBalance(data.paw_points);
+      }
+
+      pulseCats([cat.element]);
+
+      const bubble = cat.element.querySelector(".cat-home-pet-bubble");
+      if (bubble) {
+        setBubbleText(bubble, data.message);
+      }
+      window.setTimeout(() => {
+        if (bubble) {
+          setBubbleText(bubble, defaultBubbleText(cat.element));
+        }
+      }, 2200);
+
+      const rewardBits = [
+        `+${data.paw_points_earned} paw points`,
+        `+${data.parent_xp_earned} parent XP`,
+      ];
+      if (data.leveled_up && data.new_parent_level) {
+        rewardBits.push(`Parent level ${data.new_parent_level}!`);
+      }
+      const positive = data.bond_score >= 10;
+      showToast(
+        `${data.bond_emoji} ${data.message} (${data.bond_label} · ${formatFriendshipLevelDisplay(data.bond_score)}) — ${rewardBits.join(" · ")}`,
+        positive
+      );
+      closeMenu();
+    }
+
+    function openBondMenu(cat) {
+      const bonds = readBonds(scene);
+      const score = bondScore(cat.petId, bonds);
+      const tier = friendshipTier(score);
+      openMenu(
+        `Bond with ${cat.name}`,
+        `${tier.emoji} ${tier.label} · ${formatFriendshipLevelDisplay(score)} — cozy time earns paw points and parent XP.`
+      );
+
+      BOND_ACTIONS.forEach((action) => {
+        addActionButtonWithHint(
+          `${action.emoji} ${action.label}`,
+          action.blurb,
+          () => {
+            runBondInteraction(cat, action.id);
+          },
+          "download-btn playdate-action-btn playdate-action-btn-primary"
+        );
+      });
+
+      const others = sortedOthers(cat, readCats(scene));
+      if (others.length) {
+        addActionButton("🐱 Playdate with another cat", () => {
+          clearMenu();
+          openMenu(
+            `${cat.name}'s playdate`,
+            "Pick someone to interact with."
+          );
+          others.forEach((target) => {
+            const friendships = readFriendships(scene);
+            const targetScore = friendshipScore(cat, target, friendships);
+            const targetTier = friendshipTier(targetScore);
+            addActionButton(
+              `${targetTier.emoji} → ${target.name} (${formatFriendshipLevelDisplay(targetScore)})`,
+              () => {
+                showTargetActions(cat, target, null);
+              }
+            );
+          });
+        });
+      }
+    }
+
     function showTargetActions(actor, target, propSlot) {
       const friendships = readFriendships(scene);
       const score = friendshipScore(actor, target, friendships);
@@ -532,25 +810,13 @@
       const cats = readCats(scene);
       const playAs = getPlayAsCat(scene);
       const actor = playAs && !sameCat(playAs, cat) ? playAs : cat;
-      const friendships = readFriendships(scene);
 
-      if (sameCat(cat, playAs)) {
-        const others = sortedOthers(cat, cats);
-        openMenu(
-          `${cat.name}'s playdate`,
-          others.length
-            ? "Pick someone to interact with."
-            : "Invite a friend's cat to start a virtual playdate!"
-        );
-        others.forEach((target) => {
-          const score = friendshipScore(cat, target, friendships);
-          const tier = friendshipTier(score);
-          addActionButton(`${tier.emoji} → ${target.name} (${formatFriendshipLevelDisplay(score)})`, () => {
-            showTargetActions(cat, target, null);
-          });
-        });
+      if (playAs && sameCat(cat, playAs) && cat.isOwned) {
+        openBondMenu(cat);
         return;
       }
+
+      const friendships = readFriendships(scene);
 
       openMenu(
         `${actor.name} → ${cat.name}`,
@@ -653,6 +919,11 @@
   function mountAllPlaydateScenes() {
     document.querySelectorAll(".cat-home-playdate-scene").forEach((scene) => {
       mountPlaydateScene(scene);
+      if (scene instanceof HTMLElement) {
+        const bonds = readBonds(scene);
+        updatePlayAsBondBadge(scene, bonds);
+        updateBondsPanel(scene, bonds, readCats(scene));
+      }
     });
     window.whiskerRefreshFriendshipPanel?.();
   }

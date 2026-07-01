@@ -16,6 +16,12 @@
   }
 
   function replaceControl(button, html) {
+    const menuPanel = button.closest(".profile-interact-menu-panel");
+    if (menuPanel instanceof HTMLElement) {
+      button.outerHTML = html.trim();
+      return;
+    }
+
     const wrapper = button.closest(".community-cat-friend-action, .forum-thread-author-row, .forum-reply-actions");
     if (wrapper instanceof HTMLElement) {
       const temp = document.createElement("div");

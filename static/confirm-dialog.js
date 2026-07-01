@@ -44,10 +44,10 @@
   function resetConfirmDialog() {
     const { dialog, modal, emoji, title, message, yesButton, noButton } = dialogElements();
     if (dialog instanceof HTMLElement) {
-      dialog.classList.remove("confirm-dialog--delete-pet");
+      dialog.classList.remove("confirm-dialog--delete-pet", "confirm-dialog--delete-social-post");
     }
     if (modal instanceof HTMLElement) {
-      modal.classList.remove("confirm-dialog-modal--delete-pet");
+      modal.classList.remove("confirm-dialog-modal--delete-pet", "confirm-dialog-modal--delete-social-post");
     }
     if (emoji instanceof HTMLElement) {
       emoji.hidden = true;
@@ -86,6 +86,15 @@
       if (emoji instanceof HTMLElement) {
         emoji.hidden = false;
         emoji.textContent = "🥺🐾";
+      }
+    } else if (config.kind === "delete-social-post") {
+      dialog.classList.add("confirm-dialog--delete-social-post");
+      if (modal instanceof HTMLElement) {
+        modal.classList.add("confirm-dialog-modal--delete-social-post");
+      }
+      if (emoji instanceof HTMLElement) {
+        emoji.hidden = false;
+        emoji.textContent = "📸🐾";
       }
     } else if (emoji instanceof HTMLElement && config.emoji) {
       emoji.hidden = false;
@@ -177,6 +186,19 @@
     });
   }
 
+  function whiskerConfirmDeleteSocialPost() {
+    return openConfirmDialog({
+      kind: "delete-social-post",
+      title: "Remove this post? 🐾",
+      message:
+        "This post and its comments will tiptoe away forever — there's no undo once it's gone. Sure you're ready?",
+      yesLabel: "Yes, remove it 🐾",
+      noLabel: "Keep my post",
+      yesClass: "download-btn confirm-dialog-delete-yes",
+      noClass: "download-btn confirm-dialog-delete-no",
+    });
+  }
+
   document.addEventListener(
     "submit",
     (event) => {
@@ -202,7 +224,9 @@
       const confirmPromise =
         confirmKind === "delete-pet"
           ? whiskerConfirmDeletePet(form.dataset.confirmPetName || "this cat")
-          : whiskerConfirm(message || DEFAULT_MESSAGE);
+          : confirmKind === "delete-social-post"
+            ? whiskerConfirmDeleteSocialPost()
+            : whiskerConfirm(message || DEFAULT_MESSAGE);
 
       void confirmPromise.then((confirmed) => {
         if (!confirmed) {
@@ -217,5 +241,6 @@
 
   window.whiskerConfirm = whiskerConfirm;
   window.whiskerConfirmDeletePet = whiskerConfirmDeletePet;
+  window.whiskerConfirmDeleteSocialPost = whiskerConfirmDeleteSocialPost;
   bindConfirmDialog();
 })();

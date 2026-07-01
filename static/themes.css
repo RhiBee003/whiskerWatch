@@ -1,11 +1,17 @@
 /* Color scheme tokens — loaded after styles.css; overrides :root when data-color-scheme is set. */
 
 html[data-color-scheme="pink"] {
-  --dashboard-bg-image: url("/images/dashboard-background.png");
+  color-scheme: light;
+  --dashboard-bg-image:
+    radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.62) 0%, transparent 45%),
+    radial-gradient(circle at 84% 16%, rgba(var(--accent-rgb), 0.18) 0%, transparent 42%),
+    linear-gradient(180deg, #fff0f7 0%, var(--pink-bg) 50%, var(--pink-card) 100%);
+  --shadow-rgb: 42, 31, 40;
 }
 
 html[data-color-scheme="blue"] {
   color-scheme: light;
+  --shadow-rgb: 30, 44, 62;
   --bg-rgb: 200, 223, 245;
   --accent-rgb: 72, 120, 180;
   --accent-dark-rgb: 58, 100, 152;
@@ -32,6 +38,7 @@ html[data-color-scheme="blue"] {
 
 html[data-color-scheme="neutral"] {
   color-scheme: light;
+  --shadow-rgb: 38, 36, 34;
   --bg-rgb: 232, 228, 223;
   --accent-rgb: 107, 101, 96;
   --accent-dark-rgb: 82, 78, 74;
@@ -56,8 +63,36 @@ html[data-color-scheme="neutral"] {
   --theme-color: #e8e4df;
 }
 
+html[data-color-scheme="beige"] {
+  color-scheme: light;
+  --shadow-rgb: 48, 38, 28;
+  --bg-rgb: 240, 228, 208;
+  --accent-rgb: 168, 120, 72;
+  --accent-dark-rgb: 130, 92, 56;
+  --pink-bg: #f0e4d0;
+  --pink-card: #e4d4bc;
+  --pink-surface: rgba(255, 252, 245, 0.52);
+  --pink-surface-soft: rgba(255, 248, 238, 0.42);
+  --pink-input: #f5ebdc;
+  --pink-accent: #a87848;
+  --pink-dark: #825c38;
+  --ink: #2a2218;
+  --muted: #5c4e3e;
+  --footer: #403428;
+  --topbar-bg: rgba(var(--bg-rgb), 0.94);
+  --topbar-solid: #f0e4d0;
+  --topbar-border: rgba(80, 60, 40, 0.12);
+  --dashboard-bg-color: #f5ebdc;
+  --dashboard-bg-image:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.58) 0%, transparent 44%),
+    radial-gradient(circle at 82% 18%, rgba(168, 120, 72, 0.14) 0%, transparent 40%),
+    linear-gradient(180deg, #faf4ea 0%, #f0e4d0 52%, #e4d4bc 100%);
+  --theme-color: #f0e4d0;
+}
+
 html[data-color-scheme="lavender"] {
   color-scheme: light;
+  --shadow-rgb: 36, 30, 50;
   --bg-rgb: 221, 212, 240;
   --accent-rgb: 128, 104, 184;
   --accent-dark-rgb: 104, 88, 160;
@@ -84,6 +119,7 @@ html[data-color-scheme="lavender"] {
 
 html[data-color-scheme="green"] {
   color-scheme: light;
+  --shadow-rgb: 28, 48, 36;
   --bg-rgb: 204, 232, 212;
   --accent-rgb: 72, 136, 96;
   --accent-dark-rgb: 56, 112, 80;
@@ -110,6 +146,7 @@ html[data-color-scheme="green"] {
 
 html[data-color-scheme="yellow"] {
   color-scheme: light;
+  --shadow-rgb: 58, 48, 18;
   --bg-rgb: 255, 239, 176;
   --accent-rgb: 232, 168, 0;
   --accent-dark-rgb: 200, 136, 0;
@@ -136,6 +173,7 @@ html[data-color-scheme="yellow"] {
 
 html[data-color-scheme="coral"] {
   color-scheme: light;
+  --shadow-rgb: 52, 28, 22;
   --bg-rgb: 255, 214, 196;
   --accent-rgb: 224, 96, 72;
   --accent-dark-rgb: 184, 72, 52;
@@ -159,13 +197,11 @@ html[data-color-scheme="coral"] {
     linear-gradient(180deg, #fff0e8 0%, #ffd6c4 50%, #ffb898 100%);
   --theme-color: #ffd6c4;
   --default-profile-photo-bg: #ffe8dc;
-  --accent-bright: #e06048;
-  --accent-border-strong: #b84834;
-  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
 }
 
 html[data-color-scheme="mint"] {
   color-scheme: light;
+  --shadow-rgb: 24, 48, 42;
   --bg-rgb: 196, 232, 224;
   --accent-rgb: 56, 152, 136;
   --accent-dark-rgb: 40, 120, 108;
@@ -189,13 +225,11 @@ html[data-color-scheme="mint"] {
     linear-gradient(180deg, #e4f5f0 0%, #c4e8e0 50%, #a0d4c8 100%);
   --theme-color: #c4e8e0;
   --default-profile-photo-bg: #d8f0ea;
-  --accent-bright: #389888;
-  --accent-border-strong: #28786c;
-  --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
 }
 
 html[data-color-scheme="dark-pink"] {
   color-scheme: dark;
+  --shadow-rgb: 8, 6, 8;
   --bg-rgb: 26, 20, 24;
   --accent-rgb: 232, 144, 176;
   --accent-dark-rgb: 200, 110, 148;
@@ -222,6 +256,7 @@ html[data-color-scheme="dark-pink"] {
 
 html[data-color-scheme="dark-blue"] {
   color-scheme: dark;
+  --shadow-rgb: 6, 10, 16;
   --bg-rgb: 20, 26, 36;
   --accent-rgb: 104, 160, 220;
   --accent-dark-rgb: 80, 130, 190;
@@ -248,6 +283,7 @@ html[data-color-scheme="dark-blue"] {
 
 html[data-color-scheme="dark-white"] {
   color-scheme: dark;
+  --shadow-rgb: 0, 0, 0;
   --bg-rgb: 20, 20, 20;
   --accent-rgb: 240, 240, 240;
   --accent-dark-rgb: 200, 200, 200;
@@ -274,6 +310,7 @@ html[data-color-scheme="dark-white"] {
 
 html[data-color-scheme="dark-lavender"] {
   color-scheme: dark;
+  --shadow-rgb: 8, 6, 12;
   --bg-rgb: 24, 22, 31;
   --accent-rgb: 168, 144, 216;
   --accent-dark-rgb: 140, 118, 188;
@@ -298,8 +335,10 @@ html[data-color-scheme="dark-lavender"] {
   --theme-color: #18161f;
 }
 
+html[data-color-scheme="pink"],
 html[data-color-scheme="blue"],
 html[data-color-scheme="neutral"],
+html[data-color-scheme="beige"],
 html[data-color-scheme="lavender"],
 html[data-color-scheme="green"],
 html[data-color-scheme="yellow"],
@@ -308,7 +347,48 @@ html[data-color-scheme="mint"] {
   --default-profile-photo-bg: var(--dashboard-bg-color);
   --accent-bright: var(--pink-accent);
   --accent-border-strong: var(--pink-dark);
+  --accent-gradient-end: color-mix(in srgb, var(--pink-accent) 55%, white);
+  --accent-gradient-mid: color-mix(in srgb, var(--pink-accent) 72%, white);
   --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 72%, white);
+  --success-color: #2d8a4e;
+  --danger-color: #c04040;
+  --accent-ink: var(--pink-dark);
+  --accent-ink-soft: var(--pink-dark);
+  --link-accent: var(--pink-dark);
+  --surface-sheet: color-mix(in srgb, var(--pink-bg) 18%, white);
+  --surface-sheet-strong: color-mix(in srgb, var(--pink-card) 28%, white);
+  --surface-hover-accent: color-mix(in srgb, var(--pink-accent) 35%, white);
+  --social-hover-bg: color-mix(in srgb, var(--pink-surface-soft) 55%, white);
+  --social-panel-bg: color-mix(in srgb, var(--pink-surface-soft) 40%, white);
+  --social-comment-bg: color-mix(in srgb, var(--pink-bg) 22%, white);
+  --social-comment-border: color-mix(in srgb, var(--pink-surface) 70%, white);
+  --social-chip-gradient: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--pink-card) 50%, white),
+    color-mix(in srgb, var(--pink-surface-soft) 65%, white)
+  );
+  --accent-shadow-soft: rgba(var(--accent-rgb), 0.12);
+  --accent-shadow-md: rgba(var(--accent-rgb), 0.18);
+  --photo-ring: rgba(var(--accent-rgb), 0.35);
+  --badge-bg: rgba(var(--accent-rgb), 0.22);
+  --menu-trigger-gradient: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--pink-bg) 15%, white),
+    color-mix(in srgb, var(--pink-card) 30%, white)
+  );
+  --panel-gradient: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--pink-bg) 10%, white) 0%,
+    color-mix(in srgb, var(--pink-card) 22%, white) 48%,
+    color-mix(in srgb, var(--pink-surface-soft) 55%, white) 100%
+  );
+  --surface-elevated: color-mix(in srgb, var(--pink-bg) 6%, white 94%);
+  --surface-elevated-strong: color-mix(in srgb, var(--pink-bg) 10%, white 90%);
+  --surface-hover: color-mix(in srgb, var(--pink-card) 42%, white 58%);
+  --surface-tint: color-mix(in srgb, var(--pink-card) 28%, white 72%);
+  --surface-tint-strong: color-mix(in srgb, var(--pink-card) 38%, white 62%);
+  --surface-blush: color-mix(in srgb, var(--pink-surface-soft) 82%, white);
+  --toast-bg: color-mix(in srgb, var(--pink-card) 48%, white 52%);
   --stat-chip-bg: rgba(var(--accent-rgb), 0.22);
   --stat-chip-border: rgba(var(--accent-rgb), 0.18);
   --stat-chip-hover-bg: rgba(var(--accent-rgb), 0.34);
@@ -342,6 +422,8 @@ html[data-color-scheme="mint"] {
 html[data-color-scheme^="dark-"] {
   --accent-bright: var(--pink-accent);
   --accent-border-strong: var(--pink-dark);
+  --accent-gradient-end: color-mix(in srgb, var(--pink-accent) 65%, var(--pink-bg));
+  --accent-gradient-mid: color-mix(in srgb, var(--pink-accent) 45%, var(--pink-card));
   --surface-elevated: var(--pink-surface);
   --surface-elevated-strong: var(--pink-surface-soft);
   --surface-hover: color-mix(in srgb, var(--pink-surface) 80%, white 20%);
@@ -354,6 +436,38 @@ html[data-color-scheme^="dark-"] {
   --ink-muted-soft: color-mix(in srgb, var(--muted) 88%, transparent);
   --btn-hover-bg: color-mix(in srgb, var(--pink-accent) 28%, var(--pink-card));
   --default-profile-photo-bg: var(--pink-input);
+  --accent-ink: var(--pink-accent);
+  --accent-ink-soft: color-mix(in srgb, var(--pink-accent) 88%, var(--ink));
+  --link-accent: var(--pink-accent);
+  --surface-sheet: var(--pink-surface-soft);
+  --surface-sheet-strong: var(--pink-surface);
+  --surface-hover-accent: color-mix(in srgb, var(--pink-accent) 22%, var(--pink-card));
+  --social-hover-bg: rgba(var(--accent-rgb), 0.12);
+  --social-panel-bg: rgba(var(--accent-rgb), 0.08);
+  --social-comment-bg: rgba(var(--accent-rgb), 0.06);
+  --social-comment-border: rgba(var(--accent-rgb), 0.18);
+  --social-chip-gradient: linear-gradient(
+    145deg,
+    rgba(var(--accent-rgb), 0.14),
+    rgba(var(--accent-rgb), 0.24)
+  );
+  --accent-shadow-soft: rgba(var(--accent-rgb), 0.14);
+  --accent-shadow-md: rgba(var(--accent-rgb), 0.22);
+  --photo-ring: rgba(var(--accent-rgb), 0.42);
+  --badge-bg: rgba(var(--accent-rgb), 0.18);
+  --menu-trigger-gradient: linear-gradient(
+    145deg,
+    var(--pink-surface-soft),
+    var(--pink-surface)
+  );
+  --panel-gradient: linear-gradient(
+    165deg,
+    var(--pink-card) 0%,
+    var(--pink-bg) 52%,
+    color-mix(in srgb, var(--pink-bg) 88%, black) 100%
+  );
+  --success-color: #6ecf8a;
+  --danger-color: #f08080;
   --stat-chip-bg: rgba(var(--accent-rgb), 0.14);
   --stat-chip-border: rgba(var(--accent-rgb), 0.24);
   --stat-chip-hover-bg: rgba(var(--accent-rgb), 0.22);
@@ -406,4 +520,14 @@ html[data-color-scheme^="dark-"] .dashboard-greeting-link {
 html[data-color-scheme^="dark-"] .dashboard-greeting-link:hover,
 html[data-color-scheme^="dark-"] .dashboard-greeting-link:focus-visible {
   text-decoration-color: var(--ink);
+}
+
+html[data-color-scheme] {
+  --shadow-xs: 0 2px 6px rgba(var(--shadow-rgb), 0.08);
+  --shadow-sm: 0 4px 12px rgba(var(--shadow-rgb), 0.12);
+  --shadow-md: 0 8px 20px rgba(var(--shadow-rgb), 0.15);
+  --shadow-lg: 0 12px 32px rgba(var(--shadow-rgb), 0.18);
+  --shadow-bar: 0 4px 16px rgba(var(--shadow-rgb), 0.1);
+  --shadow-btn: 0 4px 12px rgba(var(--shadow-rgb), 0.13);
+  --shadow-btn-hover: 0 6px 18px rgba(var(--shadow-rgb), 0.17);
 }

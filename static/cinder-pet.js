@@ -1,5 +1,24 @@
 (function () {
   const PET_CLIP_DURATION_DEFAULT = 6;
+  const CLIP_TOGGLE_ICON = "✨🐾";
+  const CLIP_TOGGLE_BACK = "🐾";
+
+  function clipPlayAriaLabel(petName) {
+    const name = petName?.trim();
+    if (!name || name === "your cat" || name === "this kitty") {
+      return "Play clip";
+    }
+    return `Play ${name}'s clip`;
+  }
+
+  function setClipToggleState(toggle, showVideo, petName) {
+    toggle.textContent = showVideo ? CLIP_TOGGLE_BACK : CLIP_TOGGLE_ICON;
+    toggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
+    toggle.setAttribute(
+      "aria-label",
+      showVideo ? `Back to ${petName}` : clipPlayAriaLabel(petName),
+    );
+  }
 
   function prepareInlineVideo(video) {
     if (!(video instanceof HTMLVideoElement)) {
@@ -185,10 +204,7 @@
         const showVideo = !videoWrap.classList.contains("is-visible");
         videoWrap.classList.toggle("is-visible", showVideo);
         videoWrap.hidden = !showVideo;
-        toggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
-        toggle.textContent = showVideo
-          ? `Back to ${petName} 🐾`
-          : `Watch ${petName} play! 🎬`;
+        setClipToggleState(toggle, showVideo, petName);
         media.classList.toggle("video-mode", showVideo);
 
         if (showVideo) {
@@ -230,8 +246,7 @@
       const petName = petStageName();
       videoWrap.classList.toggle("is-visible", showVideo);
       videoWrap.hidden = !showVideo;
-      videoToggle.setAttribute("aria-pressed", showVideo ? "true" : "false");
-      videoToggle.textContent = showVideo ? `Back to ${petName} 🐾` : "Watch my kitty play! 🎬";
+      setClipToggleState(videoToggle, showVideo, petName);
       stage.classList.toggle("video-mode", showVideo);
 
       if (showVideo) {

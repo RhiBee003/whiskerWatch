@@ -7,6 +7,7 @@ const SCHEMES: &[(&str, &str, &str)] = &[
     ("pink", "Pink (default)", "light"),
     ("blue", "Blue", "light"),
     ("neutral", "Neutral", "light"),
+    ("beige", "Beige", "light"),
     ("lavender", "Lavender", "light"),
     ("green", "Green", "light"),
     ("yellow", "Yellow", "light"),
@@ -104,7 +105,7 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
 
     out = out.replace(
         "<link rel=\"stylesheet\" href=\"/styles.css",
-        r#"<script src="/appearance-init.js?v=20260620a"></script>
+        r#"<script src="/appearance-init.js?v=20260625f"></script>
     <link rel="stylesheet" href="/styles.css"#,
     );
 
@@ -114,7 +115,7 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
             out.insert_str(
                 insert_at,
                 r#"
-    <link rel="stylesheet" href="/themes.css?v=20260620a" />"#,
+    <link rel="stylesheet" href="/themes.css?v=20260625f" />"#,
             );
         }
     }

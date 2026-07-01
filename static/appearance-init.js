@@ -5,9 +5,12 @@
     pink: "#fac8dd",
     blue: "#c8dff5",
     neutral: "#e8e4df",
+    beige: "#f0e4d0",
     lavender: "#ddd4f0",
     green: "#cce8d4",
     yellow: "#ffefb0",
+    coral: "#ffd6c4",
+    mint: "#c4e8e0",
     "dark-pink": "#1a1418",
     "dark-blue": "#141a24",
     "dark-white": "#141414",
@@ -42,8 +45,10 @@
       meta.setAttribute("content", THEME_COLORS[scheme]);
     }
     updateBrandLogos(scheme);
+    return scheme;
   }
 
+  window.whiskerApplyColorScheme = apply;
   window.whiskerUpdateBrandLogos = updateBrandLogos;
 
   try {

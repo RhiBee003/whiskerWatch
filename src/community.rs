@@ -93,6 +93,9 @@ pub fn collect_public_cat_cards(
         if !profile.community_visible || !profile_has_pet(&profile) {
             continue;
         }
+        if sharing::users_block_each_other(state, viewer_email, &email) {
+            continue;
+        }
 
         let is_viewer = email.eq_ignore_ascii_case(viewer_email);
         let author_username = user_for_email(state, &email)
@@ -229,13 +232,14 @@ pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicC
         String::new()
     };
     let media_toggle = if has_video {
-        let toggle_label = if show_personal {
-            format!("Watch {pet_name} play! 🎬")
+        let aria_label = if show_personal {
+            format!("Play {pet_name}'s clip")
         } else {
-            "Watch play! 🎬".to_string()
+            "Play clip".to_string()
         };
         format!(
-            r#"<button type="button" class="community-cat-media-toggle" aria-pressed="false">{toggle_label}</button>"#,
+            r#"<button type="button" class="community-cat-media-toggle community-cat-media-toggle--clip" aria-pressed="false" aria-label="{aria}">✨🐾</button>"#,
+            aria = escape_html_attr(&aria_label),
         )
     } else {
         String::new()
@@ -320,37 +324,43 @@ pub fn render_cat_feed_card(state: &AppState, viewer_email: &str, card: &PublicC
     } else {
         "View profile and posts"
     };
-    let friend_action = if card.is_viewer {
+    let interact_menu = if card.is_viewer {
         String::new()
     } else {
-        sharing::render_friend_add_control(state, viewer_email, &card.owner_email)
+        sharing::render_profile_interact_menu(
+            state,
+            viewer_email,
+            &card.owner_email,
+            &card.author_username,
+            false,
+        )
     };
-    let friend_action_line = if friend_action.is_empty() {
-        String::new()
-    } else {
-        format!(r#"<div class="community-cat-friend-action">{friend_action}</div>"#)
-    };
+    let friend_action_line = interact_menu;
 
     format!(
         r#"<article class="{card_class}">
   {memorial_badge}
-  <a href="{profile_url}" class="community-cat-card-link" aria-label="{profile_label} for {parent_display}">
-    <div class="community-cat-media" data-pet-name="{name}">
+  {friend_action_line}
+  <div class="community-cat-media" data-pet-name="{name}">
+    <a href="{profile_url}" class="community-cat-card-link" aria-label="{profile_label} for {parent_display}">
       <div class="community-cat-photo-wrap">
         {photo}
         {video}
       </div>
+      <h3 class="community-cat-name">{name}{you_badge}</h3>
+      <div class="community-cat-details">
+        {breed_line}
+        {color_line}
+        {memorial_line}
+        {streak_line}
+        {outfit_line}
+        {parent_line}
+      </div>
+    </a>
+    <div class="community-cat-media-footer">
+      {media_toggle}
     </div>
-    <h3 class="community-cat-name">{name}{you_badge}</h3>
-    {breed_line}
-    {color_line}
-    {memorial_line}
-    {streak_line}
-    {outfit_line}
-    {parent_line}
-  </a>
-  {media_toggle}
-  {friend_action_line}
+  </div>
 </article>"#,
         card_class = card_class,
         profile_url = profile_url,

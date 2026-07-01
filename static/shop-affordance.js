@@ -104,7 +104,9 @@
       }
     }
 
-    const statBalance = document.querySelector(".paw-points-trigger .stat-value");
+    const statBalance = document.querySelector(
+      ".dashboard-nav-menu-paw-points-value, .paw-points-trigger .stat-value"
+    );
     if (statBalance) {
       const parsed = Number.parseInt(statBalance.textContent || "", 10);
       if (Number.isFinite(parsed)) {
@@ -133,7 +135,9 @@
       catHomeBalance.textContent = String(balance);
     }
 
-    document.querySelectorAll(".paw-points-trigger .stat-value").forEach((element) => {
+    document
+      .querySelectorAll(".dashboard-nav-menu-paw-points-value, .paw-points-trigger .stat-value")
+      .forEach((element) => {
       element.textContent = String(balance);
     });
 

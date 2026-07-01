@@ -2,14 +2,10 @@
   const tabs = document.querySelectorAll(".dashboard-tab");
   const panels = document.querySelectorAll(".dashboard-panel");
   const tabList = document.querySelector(".dashboard-tabs");
+  const tabScroller = document.querySelector(".dashboard-tabs-scroller");
 
   function updateDashboardTabsEdgeFade() {
     if (!(tabList instanceof HTMLElement)) {
-      return;
-    }
-
-    if (window.matchMedia("(min-width: 901px)").matches) {
-      tabList.classList.remove("is-scroll-start", "is-scroll-end");
       return;
     }
 
@@ -17,9 +13,11 @@
     const noScroll = maxScroll <= 4;
     const atStart = tabList.scrollLeft <= 4;
     const atEnd = tabList.scrollLeft >= maxScroll - 4;
+    const fadeTarget =
+      tabScroller instanceof HTMLElement ? tabScroller : tabList;
 
-    tabList.classList.toggle("is-scroll-start", atStart || noScroll);
-    tabList.classList.toggle("is-scroll-end", atEnd || noScroll);
+    fadeTarget.classList.toggle("is-scroll-start", atStart || noScroll);
+    fadeTarget.classList.toggle("is-scroll-end", atEnd || noScroll);
   }
 
   function scrollActiveTabIntoView(tabId) {
@@ -48,7 +46,9 @@
 
   const petSetupPromptStorageKey = "whiskerPetSetupPrompted";
   const dashboardTabStorageKey = "whiskerDashboardTab";
+  const communitySectionStorageKey = "whiskerCommunitySection";
   const validTabs = ["pet", "points", "account", "friends", "tasks", "health", "forum", "profile", "calendar", "feedback"];
+  const menuOnlyTabs = new Set(["points", "account", "friends", "profile", "feedback"]);
   let calendarReadyForUrlSync = false;
 
   function rememberDashboardTab(tabId) {
@@ -71,8 +71,66 @@
       params.has("feedback") ||
       params.has("chat") ||
       params.has("posts_view") ||
-      params.has("parent")
+      params.has("parent") ||
+      params.has("community")
     );
+  }
+
+  function resolveCommunitySection(params) {
+    const explicit = params.get("community");
+    if (explicit === "forum" || explicit === "friends" || explicit === "cats") {
+      return explicit;
+    }
+    if (params.get("thread")) {
+      return "forum";
+    }
+    if (params.get("posts_view")) {
+      return "friends";
+    }
+    const saved = sessionStorage.getItem(communitySectionStorageKey);
+    if (saved === "forum" || saved === "friends" || saved === "cats") {
+      return saved;
+    }
+    return "cats";
+  }
+
+  function rememberCommunitySection(section) {
+    if (section === "forum" || section === "friends" || section === "cats") {
+      sessionStorage.setItem(communitySectionStorageKey, section);
+    }
+  }
+
+  function syncCommunityPanels(section) {
+    const panelsRoot = document.querySelector(".community-panels");
+    if (panelsRoot instanceof HTMLElement) {
+      panelsRoot.dataset.activeCommunity = section;
+    }
+
+    document.querySelectorAll(".community-subtab").forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement)) {
+        return;
+      }
+      const url = new URL(link.href, window.location.origin);
+      const linkSection = url.searchParams.get("community");
+      link.classList.toggle("active", linkSection === section);
+    });
+  }
+
+  function ensureForumTabContent(params) {
+    const section = resolveCommunitySection(params);
+    syncCommunityPanels(section);
+
+    if (params.get("community") !== section) {
+      const next = new URLSearchParams(params.toString());
+      next.set("tab", "forum");
+      next.set("community", section);
+      const cleanUrl =
+        window.location.pathname + "?" + next.toString();
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+
+    rememberCommunitySection(section);
+    return true;
   }
 
   function isStaleCalendarUrl(params) {
@@ -139,6 +197,8 @@
       cleanParams.delete("community");
       cleanParams.delete("breed");
       cleanParams.delete("posts_view");
+    } else if (!cleanParams.get("community")) {
+      cleanParams.set("community", resolveCommunitySection(cleanParams));
     }
 
     if (tabId !== "profile") {
@@ -155,8 +215,15 @@
   }
 
   function showTab(tabId) {
+    if (tabId === "forum") {
+      const liveParams = new URLSearchParams(window.location.search);
+      if (!ensureForumTabContent(liveParams)) {
+        return;
+      }
+    }
+
     tabs.forEach((tab) => {
-      const active = tab.dataset.tab === tabId;
+      const active = !menuOnlyTabs.has(tabId) && tab.dataset.tab === tabId;
       tab.classList.toggle("active", active);
       tab.setAttribute("aria-selected", active ? "true" : "false");
     });
@@ -259,7 +326,9 @@
 
   const requestedTab = params.get("tab");
   const initialTab = resolveInitialTab(params);
-  showTab(initialTab);
+  if (initialTab !== "forum" || ensureForumTabContent(params)) {
+    showTab(initialTab);
+  }
   updateDashboardTabsEdgeFade();
 
   if (tabList) {
@@ -324,6 +393,17 @@
     }
   }
 
+  document.querySelectorAll(".community-subtab").forEach((link) => {
+    link.addEventListener("click", () => {
+      if (!(link instanceof HTMLAnchorElement)) {
+        return;
+      }
+      const url = new URL(link.href, window.location.origin);
+      const section = url.searchParams.get("community");
+      rememberCommunitySection(section);
+    });
+  });
+
   document.querySelectorAll(".forum-thread").forEach((threadEl) => {
     if (!(threadEl instanceof HTMLDetailsElement)) {
       return;
@@ -336,8 +416,9 @@
       if (!postId) {
         return;
       }
-      const cleanParams = new URLSearchParams();
+      const cleanParams = new URLSearchParams(window.location.search);
       cleanParams.set("tab", "forum");
+      cleanParams.set("community", "forum");
       cleanParams.set("thread", postId);
       const cleanUrl =
         window.location.pathname + "?" + cleanParams.toString();
@@ -428,7 +509,9 @@
     if (typeof window.whiskerApplyPawPointsBalance === "function") {
       window.whiskerApplyPawPointsBalance(pawPoints);
     } else {
-      document.querySelectorAll(".paw-points-trigger .stat-value").forEach((element) => {
+      document
+        .querySelectorAll(".dashboard-nav-menu-paw-points-value, .paw-points-trigger .stat-value")
+        .forEach((element) => {
         element.textContent = String(pawPoints);
       });
       if (typeof window.whiskerRefreshShopAffordance === "function") {
@@ -3719,7 +3802,8 @@
 
   const pawPointsTriggers = document.querySelectorAll(".paw-points-trigger");
   pawPointsTriggers.forEach((trigger) => {
-    trigger.addEventListener("click", () => {
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
       showTab("points");
     });
   });

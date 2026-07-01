@@ -564,7 +564,7 @@ fn render_scene_cat(
         ""
     };
     format!(
-        r#"<div class="cat-home-pet-stage cat-home-playdate-cat cat-home-pet-slot-{slot}{guest_class}{play_as_class}{housemate_class}{birthday_class}{npc_class}" data-pet-id="{pet_id}" data-pet-owner="{owner}" data-pet-name="{pet_name}" data-owner-label="{owner_label}" data-is-owned="{is_owned}" data-is-housemate="{is_housemate}" data-is-npc="{is_npc}" data-is-birthday-cat="{is_birthday_cat}" data-friendship-score="{friendship_score}" tabindex="0" role="button" aria-label="{display_name}, {role_label}. Friendship {friendship_label}">
+        r#"<div class="cat-home-pet-stage cat-home-playdate-cat cat-home-pet-slot-{slot}{guest_class}{play_as_class}{housemate_class}{birthday_class}{npc_class}" data-pet-id="{pet_id}" data-pet-owner="{owner}" data-pet-name="{pet_name}" data-owner-label="{owner_label}" data-is-owned="{is_owned}" data-is-housemate="{is_housemate}" data-is-npc="{is_npc}" data-is-birthday-cat="{is_birthday_cat}" data-friendship-score="{friendship_score}" tabindex="0" role="button" aria-label="{display_name}, {role_label}. {score_label} {friendship_label}">
   <div class="cat-home-pet-stack">
     <p class="cat-home-pet-bubble" role="note"><span class="cat-home-pet-bubble-name">{display_name}</span>{birthday_heart}<span class="cat-home-pet-bubble-heart" aria-hidden="true">💗</span></p>
     <p class="cat-home-pet-role-chip">{role_label}</p>
@@ -591,6 +591,7 @@ fn render_scene_cat(
         friendship_level = escape_html(&format_friendship_level_display(best_friendship)),
         friendship_label = escape_html(best_label),
         friendship_emoji = best_emoji,
+        score_label = if is_play_as { "Bond" } else { "Friendship" },
         display_name = escape_html(display_name),
         role_label = escape_html(&role_label),
         birthday_heart = birthday_heart,
@@ -680,7 +681,7 @@ fn render_friendship_row(
         &other.pet_id,
     );
     let (label, emoji) = friendship_tier(score);
-    let percent = friendship_progress_percent(score);
+    let percent = friendship_tier_progress_percent(score);
     let level_display = format_friendship_level_display(score);
     let name = scene_cat_display_name(&other.pet_name);
     let role = friendship_target_role(other);
@@ -768,7 +769,7 @@ pub fn render_friendships_panel(
         r#"<section class="cat-home-friendships-panel" aria-labelledby="cat-home-friendships-title" data-play-as-pet-id="{play_as_pet_id}">
   <div class="cat-home-friendships-header">
     <h3 id="cat-home-friendships-title">{play_as_name}&apos;s friendships</h3>
-    <p class="field-hint cat-home-friendships-lead">Bars show overall friendship; points below are progress toward the next level.</p>
+    <p class="field-hint cat-home-friendships-lead">Bars fill toward the next friendship level shown below.</p>
   </div>
   <ul class="cat-home-friendships-list">{rows}</ul>
 </section>"#,
@@ -863,8 +864,11 @@ pub fn render_playdate_scene(
                         && cat.is_owned
                         && sharing::normalize_email(&cat.owner_email)
                             == sharing::normalize_email(&viewer.email);
-                    let score =
-                        display_friendship_for_cat(viewer, cat, play_as_cat, &cats, is_play_as);
+                    let score = if is_play_as {
+                        crate::cat_bonds::bond_score(viewer, &cat.pet_id)
+                    } else {
+                        display_friendship_for_cat(viewer, cat, play_as_cat, &cats, is_play_as)
+                    };
                     let (label, emoji) = friendship_tier(score);
                     render_scene_cat(cat, slot, score, label, emoji, is_play_as, party_mode)
                 })
@@ -873,6 +877,7 @@ pub fn render_playdate_scene(
     };
     let friendships_panel =
         render_friendships_panel(viewer, play_as_pet_id, &cats);
+    let bonds_panel = crate::cat_bonds::render_parent_bonds_panel(viewer);
 
     let friendship_json = serde_json::to_string(
         &cats
@@ -885,6 +890,19 @@ pub fn render_playdate_scene(
                         "key": friendship_key(&left.owner_email, &left.pet_id, &right.owner_email, &right.pet_id),
                         "score": friendship_score(viewer, &left.owner_email, &left.pet_id, &right.owner_email, &right.pet_id),
                     })
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_string());
+
+    let bonds_json = serde_json::to_string(
+        &crate::cat_bonds::list_owned_pet_bonds(viewer)
+            .into_iter()
+            .map(|(pet_id, _name, score)| {
+                serde_json::json!({
+                    "pet_id": pet_id,
+                    "score": score,
                 })
             })
             .collect::<Vec<_>>(),
@@ -909,7 +927,7 @@ pub fn render_playdate_scene(
     let playdate_hint = if party_mode {
         "Tap birthday guests and decor for party playdates"
     } else {
-        "Tap cats or decor for playdates"
+        "Tap your cat to pet, play, or cuddle · Tap housemates or decor for playdates"
     };
 
     format!(
@@ -937,8 +955,10 @@ pub fn render_playdate_scene(
     <p class="cat-home-playdate-hint">{playdate_hint}</p>
   </div>
   <script type="application/json" class="playdate-friendships-data">{friendship_json}</script>
+  <script type="application/json" class="playdate-bonds-data">{bonds_json}</script>
 </div>
-{friendships_panel}"#,
+{friendships_panel}
+{bonds_panel}"#,
         room = escape_html_attr(room),
         play_as_pet_id = escape_html_attr(play_as_pet_id),
         equipped_strip = equipped_strip,
@@ -947,7 +967,9 @@ pub fn render_playdate_scene(
         accent_decor = accent_decor,
         mood = mood,
         friendship_json = friendship_json,
+        bonds_json = bonds_json,
         friendships_panel = friendships_panel,
+        bonds_panel = bonds_panel,
         party_class = party_class,
         party_mode = if party_mode { "true" } else { "false" },
         party_banner = party_banner,

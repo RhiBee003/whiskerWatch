@@ -13,6 +13,7 @@
   const mediaPreview = document.getElementById("friend-message-media-preview");
   const headerPhoto = document.getElementById("friend-messages-header-photo");
   const headerName = document.getElementById("friend-messages-header-name");
+  const blockButton = document.getElementById("friend-messages-block-btn");
   const requestActions = document.getElementById("friend-message-request-actions");
   const requestAccept = document.getElementById("friend-message-request-accept");
   const requestDecline = document.getElementById("friend-message-request-decline");
@@ -45,6 +46,7 @@
   let searchTimer = null;
   let activeSearchRequest = 0;
   let mediaPreviewUrl = "";
+  let openDeleteMenu = null;
 
   function escapeHtml(value) {
     return String(value)
@@ -70,6 +72,22 @@
     });
   }
 
+  function updateBlockButton(friendEmail) {
+    if (!(blockButton instanceof HTMLButtonElement)) {
+      return;
+    }
+    if (!friendEmail) {
+      blockButton.hidden = true;
+      blockButton.dataset.blockUserEmail = "";
+      return;
+    }
+    blockButton.hidden = false;
+    blockButton.dataset.blockUserEmail = friendEmail;
+    blockButton.dataset.blockAction = "block";
+    blockButton.textContent = "Block";
+    blockButton.classList.remove("user-block-btn-unblock");
+  }
+
   function clearMediaPreview() {
     if (mediaPreviewUrl) {
       URL.revokeObjectURL(mediaPreviewUrl);
@@ -78,6 +96,24 @@
     mediaInput.value = "";
     mediaPreview.hidden = true;
     mediaPreview.innerHTML = "";
+  }
+
+  function showPickFriendToast() {
+    const message =
+      "Hold up — you haven't chosen anyone to reach out to yet! Search for a cat parent above or pick a conversation. 🐾";
+    if (typeof window.whiskerShowToast === "function") {
+      window.whiskerShowToast(message);
+    } else {
+      window.alert(message);
+    }
+    searchInput.focus();
+    if (searchWrap instanceof HTMLElement) {
+      searchWrap.classList.add("is-pick-friend-highlight");
+      window.setTimeout(() => {
+        searchWrap.classList.remove("is-pick-friend-highlight");
+      }, 1600);
+    }
+    placeholder.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   function setComposeEnabled(enabled) {
@@ -166,19 +202,150 @@
     return "";
   }
 
+  function closeDeleteMenu() {
+    if (openDeleteMenu instanceof HTMLElement) {
+      openDeleteMenu.remove();
+      openDeleteMenu = null;
+    }
+    thread.querySelectorAll(".friend-message-paw-btn.is-open").forEach((button) => {
+      button.classList.remove("is-open");
+      button.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function deleteMenuHtml(messageId) {
+    return `<div class="friend-message-delete-menu" role="menu" data-message-id="${escapeHtml(messageId)}">
+  <button type="button" role="menuitem" data-delete-scope="message_me">Delete for me</button>
+  <button type="button" role="menuitem" data-delete-scope="message_both">Delete for both of us</button>
+  <div class="friend-message-delete-divider" aria-hidden="true"></div>
+  <button type="button" role="menuitem" data-delete-scope="conversation_me">Delete whole chat for me</button>
+  <button type="button" role="menuitem" class="is-danger" data-delete-scope="conversation_both">Delete whole chat for both</button>
+</div>`;
+  }
+
+  function deleteConfirmMessage(scope) {
+    switch (scope) {
+      case "message_me":
+        return "Delete this message on your side only? Your friend will still see it.";
+      case "message_both":
+        return "Delete this message for both of you? Your friend will get a heads-up in their daily notifications.";
+      case "conversation_me":
+        return "Delete this whole conversation on your side only? Your friend will still see the messages.";
+      case "conversation_both":
+        return "Delete this whole conversation for both of you? Your friend will get a heads-up in their daily notifications.";
+      default:
+        return "Are you sure you want to delete this?";
+    }
+  }
+
+  async function requestDelete(scope, messageId) {
+    if (!activeFriendEmail) {
+      return;
+    }
+    const confirmMessage = deleteConfirmMessage(scope);
+    const confirmed =
+      typeof window.whiskerConfirm === "function"
+        ? await window.whiskerConfirm(confirmMessage)
+        : window.confirm(confirmMessage);
+    if (!confirmed) {
+      return;
+    }
+
+    closeDeleteMenu();
+
+    try {
+      const response = await fetch("/home/friends/messages/delete", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          friend_email: activeFriendEmail,
+          message_id: messageId || null,
+          scope,
+        }),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const data = await response.json();
+      if (!data || !data.ok) {
+        window.alert("Could not delete that. Please try again.");
+        return;
+      }
+
+      if (data.conversation_cleared) {
+        panel.hidden = true;
+        placeholder.hidden = false;
+        activeFriendEmail = "";
+        const params = new URLSearchParams(window.location.search);
+        params.delete("chat");
+        const nextUrl = params.toString()
+          ? `${window.location.pathname}?${params.toString()}`
+          : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+        window.location.reload();
+        return;
+      }
+
+      const wrap = thread.querySelector(
+        `.friend-message-bubble-wrap[data-message-id="${CSS.escape(messageId)}"]`
+      );
+      if (wrap instanceof HTMLElement) {
+        wrap.remove();
+      }
+      if (!thread.querySelector(".friend-message-bubble-wrap")) {
+        thread.innerHTML =
+          '<p class="friend-messages-empty-thread">No messages yet — say hello!</p>';
+      }
+    } catch (_error) {
+      window.alert("Could not delete that. Please try again.");
+    }
+  }
+
+  function toggleDeleteMenu(button, messageId) {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+    const wrap = button.closest(".friend-message-bubble-wrap");
+    if (!(wrap instanceof HTMLElement)) {
+      return;
+    }
+    const existing = wrap.querySelector(".friend-message-delete-menu");
+    if (existing instanceof HTMLElement) {
+      closeDeleteMenu();
+      return;
+    }
+    closeDeleteMenu();
+    wrap.insertAdjacentHTML("beforeend", deleteMenuHtml(messageId));
+    const menu = wrap.querySelector(".friend-message-delete-menu");
+    if (menu instanceof HTMLElement) {
+      openDeleteMenu = menu;
+      button.classList.add("is-open");
+      button.setAttribute("aria-expanded", "true");
+    }
+  }
+
   function renderMessageBubble(message) {
     const mine = Boolean(message.is_mine);
+    const messageId = message.id || "";
     const text = message.body && message.body.trim()
       ? `<p class="friend-message-text">${escapeHtml(message.body)}</p>`
       : "";
     const media = renderMessageMedia(message);
-    return `<div class="friend-message-bubble-wrap${mine ? " is-mine" : ""}">
+    return `<div class="friend-message-bubble-wrap${mine ? " is-mine" : ""}" data-message-id="${escapeHtml(messageId)}">
   <div class="friend-message-bubble">
     ${media}
     ${text}
     <time class="friend-message-time" datetime="${message.created_at}">${escapeHtml(
       formatMessageTime(message.created_at)
     )}</time>
+    <button type="button" class="friend-message-paw-btn" aria-label="Message options" aria-haspopup="menu" aria-expanded="false" title="Message options">🐾</button>
   </div>
 </div>`;
   }
@@ -217,11 +384,12 @@
 
     activeFriendEmail = friendEmail;
     setActiveThreadButton(friendEmail);
+    updateBlockButton(friendEmail);
     panel.hidden = false;
     placeholder.hidden = true;
     headerName.textContent = friendLabel || friendEmail;
     headerPhoto.src = friendPhoto || "/cinderanimate.png";
-    headerPhoto.alt = `${friendLabel || "Friend"}'s profile photo`;
+    headerPhoto.alt = `${friendLabel || "Friend"}'s cat profile photo`;
     updateRequestActions(threadStatus || "");
     clearMediaPreview();
     thread.innerHTML =
@@ -363,7 +531,9 @@
 
     const requestId = ++activeSearchRequest;
     try {
-      const response = await fetch(`/home/friends/search?q=${encodeURIComponent(trimmed)}`, {
+      const response = await fetch(
+        `/home/friends/messages/search?q=${encodeURIComponent(trimmed)}`,
+        {
         headers: { Accept: "application/json" },
         credentials: "same-origin",
       });
@@ -406,6 +576,29 @@
   }
 
   card.addEventListener("click", (event) => {
+    const pawButton = event.target instanceof Element
+      ? event.target.closest(".friend-message-paw-btn")
+      : null;
+    if (pawButton instanceof HTMLButtonElement) {
+      event.stopPropagation();
+      const wrap = pawButton.closest(".friend-message-bubble-wrap");
+      const messageId = wrap instanceof HTMLElement ? wrap.dataset.messageId || "" : "";
+      toggleDeleteMenu(pawButton, messageId);
+      return;
+    }
+
+    const deleteOption = event.target instanceof Element
+      ? event.target.closest("[data-delete-scope]")
+      : null;
+    if (deleteOption instanceof HTMLButtonElement) {
+      event.stopPropagation();
+      const menu = deleteOption.closest(".friend-message-delete-menu");
+      const messageId =
+        menu instanceof HTMLElement ? menu.dataset.messageId || "" : "";
+      requestDelete(deleteOption.dataset.deleteScope || "", messageId);
+      return;
+    }
+
     const threadButton = event.target instanceof Element
       ? event.target.closest(".friend-message-thread-btn")
       : null;
@@ -428,6 +621,24 @@
         openConversation(friendEmail, "", "/cinderanimate.png", "");
       }
       card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    const firstResult = searchResults.querySelector(".friend-search-result");
+    if (
+      !searchResults.hidden &&
+      firstResult instanceof HTMLButtonElement
+    ) {
+      firstResult.click();
+      return;
+    }
+    if (!activeFriendEmail) {
+      showPickFriendToast();
     }
   });
 
@@ -462,6 +673,14 @@
       !searchWrap.contains(event.target)
     ) {
       setSearchVisible(false);
+    }
+    if (
+      openDeleteMenu instanceof HTMLElement &&
+      event.target instanceof Node &&
+      !openDeleteMenu.contains(event.target) &&
+      !(event.target instanceof Element && event.target.closest(".friend-message-paw-btn"))
+    ) {
+      closeDeleteMenu();
     }
   });
 
@@ -503,7 +722,11 @@
 
   composeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!activeFriendEmail || !canCompose) {
+    if (!activeFriendEmail) {
+      showPickFriendToast();
+      return;
+    }
+    if (!canCompose) {
       return;
     }
 

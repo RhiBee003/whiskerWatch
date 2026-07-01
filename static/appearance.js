@@ -12,7 +12,11 @@
     if (!scheme) {
       return;
     }
-    document.documentElement.setAttribute("data-color-scheme", scheme);
+    if (typeof window.whiskerApplyColorScheme === "function") {
+      window.whiskerApplyColorScheme(scheme);
+    } else {
+      document.documentElement.setAttribute("data-color-scheme", scheme);
+    }
     swatches.forEach(function (swatch) {
       swatch.classList.toggle(
         "appearance-scheme-swatch--active",
@@ -23,9 +27,6 @@
       localStorage.setItem(KEY, scheme);
     } catch (error) {
       /* ignore */
-    }
-    if (typeof window.whiskerUpdateBrandLogos === "function") {
-      window.whiskerUpdateBrandLogos(scheme);
     }
   }
 

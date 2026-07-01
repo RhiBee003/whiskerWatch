@@ -3,25 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta name="theme-color" content="#fac8dd" />
     <title>WhiskerWatch — My Home</title>
-    <link rel="stylesheet" href="/styles.css?v=20260619p" />
+    <link rel="stylesheet" href="/styles.css?v=20260625g" />
   </head>
   <body class="dashboard-body" {{NEEDS_PET_SETUP_DATA}}>
     <header class="dashboard-topbar">
       <div class="brand" aria-label="WhiskerWatch">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
-        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+        <span class="dashboard-greeting">Hi, {{USER_NAME}}!</span>
       </div>
       <nav class="dashboard-nav">
-        <a href="/home?tab=pet">HOME</a>
         {{CAT_HOME_NAV_LINK}}
         <a href="/home?tab=feedback">FEEDBACK</a>
         {{ADMIN_NAV_LINK}}
-        <a href="/contact">CONTACT</a>
-        <form class="admin-logout-form" action="/logout" method="post">
-          <button type="submit" class="admin-logout-btn">LOG OUT</button>
-        </form>
+        {{DASHBOARD_NAV_ACTIONS}}
       </nav>
     </header>
 
@@ -36,17 +33,15 @@
         {{CARE_STREAK_CHIP}}
       </div>
 
-      <nav class="dashboard-tabs is-scroll-start" role="tablist" aria-label="Dashboard sections">
-        <button type="button" class="dashboard-tab" data-tab="account" role="tab" aria-selected="false" aria-label="Settings">Settings</button>
+      <div class="dashboard-tabs-scroller is-scroll-start is-scroll-end">
+        <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard sections">
         <button type="button" class="dashboard-tab active" data-tab="pet" role="tab" aria-selected="true" aria-label="My Pet"><span class="dashboard-tab-label-long" aria-hidden="true">My Pet</span><span class="dashboard-tab-label-short" aria-hidden="true">Pet</span></button>
-        <button type="button" class="dashboard-tab" data-tab="points" role="tab" aria-selected="false" aria-label="Paw Points"><span class="dashboard-tab-label-long" aria-hidden="true">Paw Points</span><span class="dashboard-tab-label-short" aria-hidden="true">Points</span></button>
-        <button type="button" class="dashboard-tab" data-tab="friends" role="tab" aria-selected="false" aria-label="Friends">{{FRIENDS_TAB_LABEL}}</button>
-        <button type="button" class="dashboard-tab" data-tab="profile" role="tab" aria-selected="false" aria-label="Your profile"><span class="dashboard-tab-label-long" aria-hidden="true">Your Profile</span><span class="dashboard-tab-label-short" aria-hidden="true">Profile</span></button>
         <button type="button" class="dashboard-tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
         <button type="button" class="dashboard-tab" data-tab="health" role="tab" aria-selected="false">Health</button>
         <button type="button" class="dashboard-tab" data-tab="forum" role="tab" aria-selected="false">Community</button>
         <button type="button" class="dashboard-tab" data-tab="calendar" role="tab" aria-selected="false">Calendar</button>
-      </nav>
+        </nav>
+      </div>
 
       <main class="dashboard-panels">
         <section id="panel-pet" class="dashboard-panel active" role="tabpanel">
@@ -59,7 +54,7 @@
           {{MULTI_PET_SECTION}}
         </section>
 
-        <section id="panel-points" class="dashboard-panel" role="tabpanel" hidden>
+        <section id="panel-points" class="dashboard-panel dashboard-menu-panel" role="region" aria-label="Paw Points" hidden>
           <h1>Paw Points</h1>
           <div class="points-grid">
             <article class="dashboard-card">
@@ -158,7 +153,7 @@
           {{CALENDAR_VET_ALERT}}
           <p class="panel-intro">Tap a day to preview what's planned — including each cat's birthday. Complete today's care right from the calendar.</p>
           <div class="calendar-layout">
-            <div class="calendar-month-panel">
+            <div class="calendar-main">
               <div class="calendar-nav">
                 <button type="button" class="calendar-nav-btn" id="calendar-prev-month" aria-label="Previous month">‹</button>
                 <h2 class="calendar-month-label" id="calendar-month-label">{{CALENDAR_MONTH_LABEL}}</h2>
@@ -167,18 +162,18 @@
               <div class="calendar-grid" id="calendar-grid" aria-label="Month calendar">
                 {{CALENDAR_GRID}}
               </div>
-              <article class="dashboard-card calendar-events" id="calendar-events-panel">
-                <h2 id="calendar-events-heading">Select a date</h2>
-                <p class="calendar-day-hint" id="calendar-day-hint">Tap a day on the calendar.</p>
-                <p class="calendar-day-progress" id="calendar-day-progress" hidden></p>
-                <div class="calendar-day-detail" id="calendar-day-detail" hidden>
-                  <ul class="calendar-schedule" id="calendar-schedule" role="list"></ul>
-                </div>
-                <div class="calendar-add-event" id="calendar-add-event" hidden>
-                  <a href="#" class="download-btn calendar-add-event-btn" id="calendar-add-event-btn">Add event</a>
-                </div>
-              </article>
             </div>
+            <article class="dashboard-card calendar-events" id="calendar-events-panel">
+              <h2 id="calendar-events-heading">Select a date</h2>
+              <p class="calendar-day-hint" id="calendar-day-hint">Tap a day on the calendar.</p>
+              <p class="calendar-day-progress" id="calendar-day-progress" hidden></p>
+              <div class="calendar-day-detail" id="calendar-day-detail" hidden>
+                <ul class="calendar-schedule" id="calendar-schedule" role="list"></ul>
+              </div>
+              <div class="calendar-add-event" id="calendar-add-event" hidden>
+                <a href="#" class="download-btn calendar-add-event-btn" id="calendar-add-event-btn">Add event</a>
+              </div>
+            </article>
           </div>
         </section>
       </main>
@@ -213,28 +208,31 @@
 
     <script id="calendar-data" type="application/json">{{CALENDAR_DATA_JSON}}</script>
     <script src="/paw-cursor.js"></script>
-    <script src="/shop-affordance.js?v=20260617b"></script>
-    <script src="/alerts.js?v=20260610d"></script>
-    <script src="/confirm-dialog.js?v=20260619q"></script>
-    <script src="/pet-setup-draft.js?v=20260614h"></script>
-    <script src="/pet-color-picker.js?v=20260610d"></script>
-    <script src="/cute-date-picker.js?v=20260614h"></script>
-    <script src="/pet-photo-framer.js?v=20260614o"></script>
-    <script src="/pet-video-framer.js?v=20260613d"></script>
-    <script src="/share-cards.js?v=20260613b"></script>
-    <script src="/emoji-picker.js?v=20260620f"></script>
-    <script src="/dashboard.js?v=20260619r"></script>
-    <script src="/friend-search.js?v=20260614g"></script>
-    <script src="/friend-messages.js?v=20260620b"></script>
-    <script src="/friend-add.js?v=20260611e"></script>
-    <script src="/social-posts.js?v=20260620e"></script>
-    <script src="/social-post-media.js?v=20260620c"></script>
+    <script src="/shop-affordance.js?v=20260624a"></script>
+    <script src="/alerts.js?v=20260624a"></script>
+    <script src="/confirm-dialog.js?v=20260624a"></script>
+    <script src="/pet-setup-draft.js?v=20260624a"></script>
+    <script src="/pet-color-picker.js?v=20260624a"></script>
+    <script src="/cute-date-picker.js?v=20260624a"></script>
+    <script src="/pet-photo-framer.js?v=20260624a"></script>
+    <script src="/pet-video-framer.js?v=20260624a"></script>
+    <script src="/share-cards.js?v=20260624a"></script>
+    <script src="/emoji-picker.js?v=20260624a"></script>
+    <script src="/dashboard.js?v=20260624f"></script>
+    <script src="/friend-search.js?v=20260624f"></script>
+    <script src="/friend-messages.js?v=20260624d"></script>
+    <script src="/friend-add.js?v=20260625a"></script>
+    <script src="/user-block.js?v=20260624a"></script>
+    <script src="/profile-interact-menu.js?v=20260625a"></script>
+    <script src="/social-posts.js?v=20260624f"></script>
+    <script src="/social-post-media.js?v=20260624a"></script>
     <script src="/push-notifications.js"></script>
-    <script src="/appearance.js?v=20260619a"></script>
+    <script src="/appearance.js?v=20260625f"></script>
     <script src="/password-toggle.js"></script>
-    <script src="/feedback-forum.js?v=20260619a"></script>
-    <script src="/cinder-pet.js?v=20260619e"></script>
-    <script src="/memorial.js?v=20260610i"></script>
+    <script src="/comment-paw-menu.js?v=20260624a"></script>
+    <script src="/feedback-forum.js?v=20260624e"></script>
+    <script src="/cinder-pet.js?v=20260624c"></script>
+    <script src="/memorial.js?v=20260624a"></script>
     {{MEMORIAL_COMFORT_MODAL}}
     {{MEMORIAL_CLIPS_MODAL}}
   </body>

@@ -151,24 +151,28 @@
     }
   }
 
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    const btn = target.closest(".feedback-vote-btn");
-    if (!(btn instanceof HTMLButtonElement)) {
-      return;
-    }
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const btn = target.closest(".feedback-vote-btn");
+      if (!(btn instanceof HTMLButtonElement)) {
+        return;
+      }
 
-    event.preventDefault();
-    event.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
 
-    const votesEl = btn.closest(".feedback-votes");
-    if (!(votesEl instanceof HTMLElement)) {
-      return;
-    }
+      const votesEl = btn.closest(".feedback-votes");
+      if (!(votesEl instanceof HTMLElement)) {
+        return;
+      }
 
-    void submitVote(votesEl, btn);
-  });
+      void submitVote(votesEl, btn);
+    },
+    true
+  );
 })();

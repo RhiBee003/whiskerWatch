@@ -11,6 +11,7 @@
     ".dashboard-tab",
     ".home-download-btn",
     ".admin-logout-btn",
+    ".dashboard-nav-logout-btn",
     ".password-toggle",
     ".pet-photo-paw-btn",
     "#cinder-pet-stage",
@@ -50,4 +51,26 @@
     document.body.appendChild(pop);
     pop.addEventListener("animationend", () => pop.remove(), { once: true });
   }
+
+  document.querySelectorAll(".dashboard-nav-menu").forEach((menu) => {
+    if (!(menu instanceof HTMLDetailsElement)) {
+      return;
+    }
+
+    document.addEventListener("click", (event) => {
+      if (!menu.open || !(event.target instanceof Node)) {
+        return;
+      }
+      if (menu.contains(event.target)) {
+        return;
+      }
+      menu.open = false;
+    });
+
+    menu.querySelectorAll("a").forEach((link) => {
+      link.addEventListener("click", () => {
+        menu.open = false;
+      });
+    });
+  });
 })();

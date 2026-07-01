@@ -10,16 +10,12 @@
     <header class="dashboard-topbar">
       <div class="brand" aria-label="WhiskerWatch">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
-        <span class="dashboard-greeting">Hi, <a href="/home?tab=account" class="dashboard-greeting-link">{{USER_NAME}}</a>!</span>
+        <span class="dashboard-greeting">Hi, {{USER_NAME}}!</span>
       </div>
       <nav class="dashboard-nav">
-        <a href="/home?tab=pet">HOME</a>
         <a href="/home?tab=feedback">FEEDBACK</a>
         {{ADMIN_NAV_LINK}}
-        <a href="/contact">CONTACT</a>
-        <form class="admin-logout-form" action="/logout" method="post">
-          <button type="submit" class="admin-logout-btn">LOG OUT</button>
-        </form>
+        {{DASHBOARD_NAV_ACTIONS}}
       </nav>
     </header>
 

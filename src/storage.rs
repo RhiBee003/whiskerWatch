@@ -92,6 +92,10 @@ pub struct StoredSocialPost {
     pub video_duration: Option<f32>,
     pub is_private: bool,
     pub created_at: u64,
+    pub post_kind: String,
+    pub wrapped_payload: Option<String>,
+    pub wrapped_year: Option<u32>,
+    pub wrapped_month: Option<u32>,
     pub media_items: Vec<StoredSocialPostMedia>,
     pub upvotes: u32,
     pub viewer_upvoted: bool,
@@ -212,12 +216,20 @@ fn map_social_post_row(row: &rusqlite::Row<'_>) -> Result<StoredSocialPost, rusq
         video_duration: row.get::<_, Option<f64>>(6)?.map(|value| value as f32),
         is_private: row.get::<_, i64>(7)? != 0,
         created_at: row.get::<_, i64>(8)? as u64,
+        post_kind: row
+            .get::<_, Option<String>>(9)?
+            .unwrap_or_else(|| "standard".to_string()),
+        wrapped_payload: row.get(10)?,
+        wrapped_year: row.get::<_, Option<i64>>(11)?.map(|value| value as u32),
+        wrapped_month: row.get::<_, Option<i64>>(12)?.map(|value| value as u32),
         media_items: Vec::new(),
         upvotes: 0,
         viewer_upvoted: false,
         comments: Vec::new(),
     })
 }
+
+const SOCIAL_POST_SELECT: &str = "id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at, post_kind, wrapped_payload, wrapped_year, wrapped_month";
 
 fn map_forum_post_row(row: &rusqlite::Row<'_>) -> Result<ForumPost, rusqlite::Error> {
     Ok(ForumPost {
@@ -432,6 +444,7 @@ impl Storage {
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
         storage.migrate_message_threads_table()?;
+        storage.migrate_blocked_users_table()?;
         storage.migrate_social_posts_table()?;
         storage.migrate_social_post_media_table()?;
         storage.migrate_social_post_engagement_tables()?;
@@ -479,6 +492,7 @@ impl Storage {
         storage.migrate_social_tables()?;
         storage.migrate_friend_messages_table()?;
         storage.migrate_message_threads_table()?;
+        storage.migrate_blocked_users_table()?;
         storage.migrate_social_posts_table()?;
         storage.migrate_social_post_media_table()?;
         storage.migrate_social_post_engagement_tables()?;
@@ -541,6 +555,26 @@ impl Storage {
                 [],
             )?;
         }
+        if !Self::table_has_column(&conn, "social_posts", "post_kind")? {
+            conn.execute(
+                "ALTER TABLE social_posts ADD COLUMN post_kind TEXT NOT NULL DEFAULT 'standard'",
+                [],
+            )?;
+        }
+        if !Self::table_has_column(&conn, "social_posts", "wrapped_payload")? {
+            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_payload TEXT", [])?;
+        }
+        if !Self::table_has_column(&conn, "social_posts", "wrapped_year")? {
+            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_year INTEGER", [])?;
+        }
+        if !Self::table_has_column(&conn, "social_posts", "wrapped_month")? {
+            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_month INTEGER", [])?;
+        }
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_social_posts_wrapped_month
+                 ON social_posts(user_id, wrapped_year, wrapped_month)
+                 WHERE post_kind = 'monthly_wrapped';",
+        )?;
         Ok(())
     }
 
@@ -589,6 +623,28 @@ impl Storage {
         if !Self::table_has_column(&conn, "friend_messages", "video_duration")? {
             conn.execute("ALTER TABLE friend_messages ADD COLUMN video_duration REAL", [])?;
         }
+        if !Self::table_has_column(&conn, "friend_messages", "deleted_for_all_at")? {
+            conn.execute(
+                "ALTER TABLE friend_messages ADD COLUMN deleted_for_all_at INTEGER",
+                [],
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS friend_message_hidden (
+                 message_id TEXT NOT NULL,
+                 user_email TEXT NOT NULL COLLATE NOCASE,
+                 deleted_at INTEGER NOT NULL,
+                 PRIMARY KEY (message_id, user_email)
+             );
+             CREATE INDEX IF NOT EXISTS idx_friend_message_hidden_user
+                 ON friend_message_hidden(user_email);
+             CREATE TABLE IF NOT EXISTS friend_conversation_hidden (
+                 user_email TEXT NOT NULL COLLATE NOCASE,
+                 partner_email TEXT NOT NULL COLLATE NOCASE,
+                 deleted_at INTEGER NOT NULL,
+                 PRIMARY KEY (user_email, partner_email)
+             );",
+        )?;
         Ok(())
     }
 
@@ -609,6 +665,21 @@ impl Storage {
                  ON message_threads(participant_a);
              CREATE INDEX IF NOT EXISTS idx_message_threads_participant_b
                  ON message_threads(participant_b);",
+        )?;
+        Ok(())
+    }
+
+    fn migrate_blocked_users_table(&self) -> Result<(), StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS blocked_users (
+                 blocker_email TEXT NOT NULL COLLATE NOCASE,
+                 blocked_email TEXT NOT NULL COLLATE NOCASE,
+                 created_at INTEGER NOT NULL,
+                 PRIMARY KEY (blocker_email, blocked_email)
+             );
+             CREATE INDEX IF NOT EXISTS idx_blocked_users_blocked
+                 ON blocked_users(blocked_email);",
         )?;
         Ok(())
     }
@@ -1567,7 +1638,12 @@ impl Storage {
 
         let existing = Self::feedback_user_vote(&conn, feedback_id, user_id)?;
         match existing {
-            Some(current) if current == vote => {}
+            Some(current) if current == vote => {
+                conn.execute(
+                    "DELETE FROM feedback_votes WHERE feedback_id = ?1 AND user_id = ?2",
+                    params![feedback_id, user_id],
+                )?;
+            }
             Some(_) => {
                 conn.execute(
                     "UPDATE feedback_votes SET vote = ?1 WHERE feedback_id = ?2 AND user_id = ?3",
@@ -2205,6 +2281,9 @@ impl Storage {
         if left == right {
             return Ok(false);
         }
+        if self.users_block_each_other(&left, &right)? {
+            return Ok(false);
+        }
         let conn = self.conn.lock().expect("storage lock");
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM friend_requests
@@ -2249,6 +2328,9 @@ impl Storage {
         }
         if self.has_pending_friend_request(&from_email, &to_email)? {
             return Err(StorageError::InvalidInput("request already pending".into()));
+        }
+        if self.users_block_each_other(&from_email, &to_email)? {
+            return Err(StorageError::InvalidInput("user blocked".into()));
         }
 
         let id = uuid::Uuid::new_v4().to_string();
@@ -2355,6 +2437,122 @@ impl Storage {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn is_user_blocked(&self, blocker_email: &str, blocked_email: &str) -> Result<bool, StorageError> {
+        let blocker_email = Self::normalize_social_email(blocker_email);
+        let blocked_email = Self::normalize_social_email(blocked_email);
+        if blocker_email == blocked_email {
+            return Ok(false);
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM blocked_users
+             WHERE blocker_email = ?1 AND blocked_email = ?2",
+            params![blocker_email, blocked_email],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn users_block_each_other(&self, left_email: &str, right_email: &str) -> Result<bool, StorageError> {
+        let left_email = Self::normalize_social_email(left_email);
+        let right_email = Self::normalize_social_email(right_email);
+        if left_email == right_email {
+            return Ok(false);
+        }
+        Ok(self.is_user_blocked(&left_email, &right_email)?
+            || self.is_user_blocked(&right_email, &left_email)?)
+    }
+
+    pub fn block_user(
+        &self,
+        blocker_email: &str,
+        blocked_email: &str,
+        created_at: u64,
+    ) -> Result<(), StorageError> {
+        let blocker_email = Self::normalize_social_email(blocker_email);
+        let blocked_email = Self::normalize_social_email(blocked_email);
+        if blocker_email == blocked_email {
+            return Err(StorageError::InvalidInput("cannot block yourself".into()));
+        }
+        if !self.user_exists(&blocked_email)? {
+            return Err(StorageError::InvalidInput("user not found".into()));
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO blocked_users (blocker_email, blocked_email, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(blocker_email, blocked_email) DO UPDATE SET created_at = excluded.created_at",
+            params![blocker_email, blocked_email, created_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn unblock_user(&self, blocker_email: &str, blocked_email: &str) -> Result<(), StorageError> {
+        let blocker_email = Self::normalize_social_email(blocker_email);
+        let blocked_email = Self::normalize_social_email(blocked_email);
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "DELETE FROM blocked_users
+             WHERE blocker_email = ?1 AND blocked_email = ?2",
+            params![blocker_email, blocked_email],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_blocked_users(&self, blocker_email: &str) -> Result<Vec<String>, StorageError> {
+        let blocker_email = Self::normalize_social_email(blocker_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT blocked_email FROM blocked_users
+             WHERE blocker_email = ?1
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![blocker_email], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn list_users_who_blocked(&self, blocked_email: &str) -> Result<Vec<String>, StorageError> {
+        let blocked_email = Self::normalize_social_email(blocked_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT blocker_email FROM blocked_users
+             WHERE blocked_email = ?1
+             ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![blocked_email], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+
+    pub fn remove_friendship_between(&self, left_email: &str, right_email: &str) -> Result<(), StorageError> {
+        let left_email = Self::normalize_social_email(left_email);
+        let right_email = Self::normalize_social_email(right_email);
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE friend_requests SET status = 'declined'
+             WHERE status = 'accepted'
+               AND ((from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1))",
+            params![left_email, right_email],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_pending_friend_requests_between(
+        &self,
+        left_email: &str,
+        right_email: &str,
+    ) -> Result<(), StorageError> {
+        let left_email = Self::normalize_social_email(left_email);
+        let right_email = Self::normalize_social_email(right_email);
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE friend_requests SET status = 'declined'
+             WHERE status = 'pending'
+               AND ((from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1))",
+            params![left_email, right_email],
+        )?;
+        Ok(())
     }
 
     pub fn list_friends(&self, email: &str) -> Result<Vec<StoredFriendSummary>, StorageError> {
@@ -2537,6 +2735,9 @@ impl Storage {
         if viewer_email == other_email {
             return Ok(false);
         }
+        if self.users_block_each_other(&viewer_email, &other_email)? {
+            return Ok(false);
+        }
         if self.are_friends(&viewer_email, &other_email)? {
             return Ok(true);
         }
@@ -2556,6 +2757,9 @@ impl Storage {
         }
         if !self.user_exists(&to_email)? {
             return Err(StorageError::InvalidInput("user not found".into()));
+        }
+        if self.users_block_each_other(&from_email, &to_email)? {
+            return Err(StorageError::InvalidInput("user blocked".into()));
         }
         if self.are_friends(&from_email, &to_email)? {
             let _ = self.accept_message_threads_for_friends(&from_email, &to_email, created_at);
@@ -2670,10 +2874,21 @@ impl Storage {
         let limit = limit.min(100) as i64;
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
-            "SELECT id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at
-             FROM friend_messages
-             WHERE (from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1)
-             ORDER BY created_at ASC
+            "SELECT m.id, m.from_email, m.to_email, m.body, m.media_type, m.media_url, m.video_duration, m.created_at, m.read_at
+             FROM friend_messages m
+             WHERE ((m.from_email = ?1 AND m.to_email = ?2) OR (m.from_email = ?2 AND m.to_email = ?1))
+               AND m.deleted_for_all_at IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_message_hidden h
+                 WHERE h.message_id = m.id AND h.user_email = ?1 COLLATE NOCASE
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_conversation_hidden c
+                 WHERE c.user_email = ?1 COLLATE NOCASE
+                   AND c.partner_email = ?2 COLLATE NOCASE
+                   AND m.created_at <= c.deleted_at
+               )
+             ORDER BY m.created_at ASC
              LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![viewer_email, friend_email, limit], |row| {
@@ -2718,8 +2933,19 @@ impl Storage {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let conn = self.conn.lock().expect("storage lock");
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM friend_messages
-             WHERE to_email = ?1 AND read_at IS NULL",
+            "SELECT COUNT(*) FROM friend_messages m
+             WHERE m.to_email = ?1 AND m.read_at IS NULL
+               AND m.deleted_for_all_at IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_message_hidden h
+                 WHERE h.message_id = m.id AND h.user_email = ?1 COLLATE NOCASE
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_conversation_hidden c
+                 WHERE c.user_email = ?1 COLLATE NOCASE
+                   AND c.partner_email = m.from_email COLLATE NOCASE
+                   AND m.created_at <= c.deleted_at
+               )",
             params![viewer_email],
             |row| row.get(0),
         )?;
@@ -2735,8 +2961,19 @@ impl Storage {
         let friend_email = Self::normalize_social_email(friend_email);
         let conn = self.conn.lock().expect("storage lock");
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM friend_messages
-             WHERE from_email = ?1 AND to_email = ?2 AND read_at IS NULL",
+            "SELECT COUNT(*) FROM friend_messages m
+             WHERE m.from_email = ?1 AND m.to_email = ?2 AND m.read_at IS NULL
+               AND m.deleted_for_all_at IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_message_hidden h
+                 WHERE h.message_id = m.id AND h.user_email = ?2 COLLATE NOCASE
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_conversation_hidden c
+                 WHERE c.user_email = ?2 COLLATE NOCASE
+                   AND c.partner_email = ?1 COLLATE NOCASE
+                   AND m.created_at <= c.deleted_at
+               )",
             params![friend_email, viewer_email],
             |row| row.get(0),
         )?;
@@ -2752,10 +2989,21 @@ impl Storage {
         let friend_email = Self::normalize_social_email(friend_email);
         let conn = self.conn.lock().expect("storage lock");
         let result = conn.query_row(
-            "SELECT id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at
-             FROM friend_messages
-             WHERE (from_email = ?1 AND to_email = ?2) OR (from_email = ?2 AND to_email = ?1)
-             ORDER BY created_at DESC
+            "SELECT m.id, m.from_email, m.to_email, m.body, m.media_type, m.media_url, m.video_duration, m.created_at, m.read_at
+             FROM friend_messages m
+             WHERE ((m.from_email = ?1 AND m.to_email = ?2) OR (m.from_email = ?2 AND m.to_email = ?1))
+               AND m.deleted_for_all_at IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_message_hidden h
+                 WHERE h.message_id = m.id AND h.user_email = ?1 COLLATE NOCASE
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM friend_conversation_hidden c
+                 WHERE c.user_email = ?1 COLLATE NOCASE
+                   AND c.partner_email = ?2 COLLATE NOCASE
+                   AND m.created_at <= c.deleted_at
+               )
+             ORDER BY m.created_at DESC
              LIMIT 1",
             params![viewer_email, friend_email],
             |row| {
@@ -2777,6 +3025,150 @@ impl Storage {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.into()),
         }
+    }
+
+    pub fn friend_conversation_hidden_for_user(
+        &self,
+        viewer_email: &str,
+        partner_email: &str,
+    ) -> Result<bool, StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let partner_email = Self::normalize_social_email(partner_email);
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM friend_conversation_hidden
+             WHERE user_email = ?1 AND partner_email = ?2",
+            params![viewer_email, partner_email],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    fn friend_message_participant(
+        message: &StoredFriendMessage,
+        user_email: &str,
+    ) -> bool {
+        message.from_email.eq_ignore_ascii_case(user_email)
+            || message.to_email.eq_ignore_ascii_case(user_email)
+    }
+
+    pub fn get_friend_message(&self, message_id: &str) -> Result<Option<StoredFriendMessage>, StorageError> {
+        let message_id = message_id.trim();
+        if message_id.is_empty() {
+            return Ok(None);
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        let result = conn.query_row(
+            "SELECT id, from_email, to_email, body, media_type, media_url, video_duration, created_at, read_at
+             FROM friend_messages
+             WHERE id = ?1",
+            params![message_id],
+            |row| {
+                Ok(StoredFriendMessage {
+                    id: row.get(0)?,
+                    from_email: row.get(1)?,
+                    to_email: row.get(2)?,
+                    body: row.get(3)?,
+                    media_type: row.get(4)?,
+                    media_url: row.get(5)?,
+                    video_duration: row.get(6)?,
+                    created_at: row.get::<_, i64>(7)? as u64,
+                    read_at: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
+                })
+            },
+        );
+        match result {
+            Ok(message) => Ok(Some(message)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub fn hide_friend_message_for_user(
+        &self,
+        message_id: &str,
+        user_email: &str,
+        deleted_at: u64,
+    ) -> Result<(), StorageError> {
+        let user_email = Self::normalize_social_email(user_email);
+        let Some(message) = self.get_friend_message(message_id)? else {
+            return Err(StorageError::InvalidInput("message not found".into()));
+        };
+        if !Self::friend_message_participant(&message, &user_email) {
+            return Err(StorageError::InvalidInput("not allowed".into()));
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO friend_message_hidden (message_id, user_email, deleted_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(message_id, user_email) DO UPDATE SET deleted_at = excluded.deleted_at",
+            params![message.id, user_email, deleted_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_friend_message_for_all(
+        &self,
+        message_id: &str,
+        user_email: &str,
+        deleted_at: u64,
+    ) -> Result<StoredFriendMessage, StorageError> {
+        let user_email = Self::normalize_social_email(user_email);
+        let Some(message) = self.get_friend_message(message_id)? else {
+            return Err(StorageError::InvalidInput("message not found".into()));
+        };
+        if !Self::friend_message_participant(&message, &user_email) {
+            return Err(StorageError::InvalidInput("not allowed".into()));
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE friend_messages SET deleted_for_all_at = ?1 WHERE id = ?2",
+            params![deleted_at as i64, message.id],
+        )?;
+        Ok(message)
+    }
+
+    pub fn hide_friend_conversation_for_user(
+        &self,
+        viewer_email: &str,
+        partner_email: &str,
+        deleted_at: u64,
+    ) -> Result<(), StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let partner_email = Self::normalize_social_email(partner_email);
+        if !self.can_view_message_conversation(&viewer_email, &partner_email)? {
+            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO friend_conversation_hidden (user_email, partner_email, deleted_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(user_email, partner_email) DO UPDATE SET deleted_at = excluded.deleted_at",
+            params![viewer_email, partner_email, deleted_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_friend_conversation_for_all(
+        &self,
+        viewer_email: &str,
+        partner_email: &str,
+        deleted_at: u64,
+    ) -> Result<(), StorageError> {
+        let viewer_email = Self::normalize_social_email(viewer_email);
+        let partner_email = Self::normalize_social_email(partner_email);
+        if !self.can_view_message_conversation(&viewer_email, &partner_email)? {
+            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+        }
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "UPDATE friend_messages
+             SET deleted_for_all_at = ?1
+             WHERE deleted_for_all_at IS NULL
+               AND ((from_email = ?2 AND to_email = ?3) OR (from_email = ?3 AND to_email = ?2))",
+            params![deleted_at as i64, viewer_email, partner_email],
+        )?;
+        Ok(())
     }
 
     fn legacy_media_item(post: &StoredSocialPost) -> Option<StoredSocialPostMedia> {
@@ -2962,6 +3354,10 @@ impl Storage {
             video_duration,
             is_private,
             created_at,
+            post_kind: "standard".to_string(),
+            wrapped_payload: None,
+            wrapped_year: None,
+            wrapped_month: None,
             media_items: media_items.to_vec(),
             upvotes: 0,
             viewer_upvoted: false,
@@ -3211,18 +3607,50 @@ impl Storage {
         })
     }
 
+    pub fn delete_social_post_comment_owned(
+        &self,
+        comment_id: &str,
+        user_id: &str,
+    ) -> Result<ForumDeleteOutcome, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let conn = self.conn.lock().expect("storage lock");
+        let owner: Result<String, rusqlite::Error> = conn.query_row(
+            "SELECT user_id FROM social_post_comments WHERE id = ?1",
+            params![comment_id],
+            |row| row.get(0),
+        );
+        let owner = match owner {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Ok(ForumDeleteOutcome::NotFound);
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !owner.eq_ignore_ascii_case(&user_id) {
+            return Ok(ForumDeleteOutcome::NotAuthorized);
+        }
+
+        conn.execute(
+            "DELETE FROM social_comment_votes WHERE comment_id = ?1",
+            params![comment_id],
+        )?;
+        conn.execute(
+            "DELETE FROM social_post_comments WHERE id = ?1",
+            params![comment_id],
+        )?;
+        Ok(ForumDeleteOutcome::Deleted)
+    }
+
     pub fn get_social_post_by_id(
         &self,
         post_id: &str,
         viewer_email: Option<&str>,
     ) -> Result<Option<StoredSocialPost>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
-        let result = conn.query_row(
-            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
-             FROM social_posts WHERE id = ?1",
-            params![post_id],
-            map_social_post_row,
+        let sql = format!(
+            "SELECT {SOCIAL_POST_SELECT} FROM social_posts WHERE id = ?1"
         );
+        let result = conn.query_row(&sql, params![post_id], map_social_post_row);
         let mut post = match result {
             Ok(post) => post,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
@@ -3238,12 +3666,13 @@ impl Storage {
         let limit = limit.min(100) as i64;
         let mut posts = {
             let conn = self.conn.lock().expect("storage lock");
-            let mut stmt = conn.prepare(
-                "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
+            let sql = format!(
+                "SELECT {SOCIAL_POST_SELECT}
                  FROM social_posts
                  ORDER BY created_at DESC
-                 LIMIT ?1",
-            )?;
+                 LIMIT ?1"
+            );
+            let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![limit], map_social_post_row)?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
@@ -3265,7 +3694,7 @@ impl Storage {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            "SELECT id, user_id, author_username, body, media_type, media_url, video_duration, is_private, created_at
+            "SELECT {SOCIAL_POST_SELECT}
              FROM social_posts
              WHERE LOWER(user_id) IN ({placeholders})
              ORDER BY created_at DESC
@@ -3373,6 +3802,190 @@ impl Storage {
             return Ok(None);
         }
         Ok(Some(media_urls))
+    }
+
+    pub fn has_monthly_wrapped(
+        &self,
+        user_id: &str,
+        year: u32,
+        month: u32,
+    ) -> Result<bool, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let conn = self.conn.lock().expect("storage lock");
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM social_posts
+             WHERE user_id = ?1 AND post_kind = 'monthly_wrapped'
+               AND wrapped_year = ?2 AND wrapped_month = ?3",
+            params![user_id, year as i64, month as i64],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn list_user_standard_posts_in_range(
+        &self,
+        user_id: &str,
+        start_ts: u64,
+        end_ts: u64,
+    ) -> Result<Vec<StoredSocialPost>, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let sql = format!(
+            "SELECT {SOCIAL_POST_SELECT}
+             FROM social_posts
+             WHERE user_id = ?1
+               AND created_at >= ?2
+               AND created_at <= ?3
+               AND post_kind = 'standard'
+             ORDER BY created_at ASC"
+        );
+        let mut posts = {
+            let conn = self.conn.lock().expect("storage lock");
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(
+                params![user_id, start_ts as i64, end_ts as i64],
+                map_social_post_row,
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        self.hydrate_social_posts_media(&mut posts)?;
+        Ok(posts)
+    }
+
+    pub fn create_monthly_wrapped_post(
+        &self,
+        user_id: &str,
+        author_username: &str,
+        body: &str,
+        wrapped_payload: &str,
+        year: u32,
+        month: u32,
+        created_at: u64,
+    ) -> Result<StoredSocialPost, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(StorageError::InvalidInput("wrapped post requires text".into()));
+        }
+        if wrapped_payload.trim().is_empty() {
+            return Err(StorageError::InvalidInput("wrapped payload required".into()));
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO social_posts (
+                 id, user_id, author_username, body, media_type, media_url, video_duration,
+                 is_private, created_at, post_kind, wrapped_payload, wrapped_year, wrapped_month
+             ) VALUES (?1, ?2, ?3, ?4, 'none', NULL, NULL, 0, ?5, 'monthly_wrapped', ?6, ?7, ?8)",
+            params![
+                id,
+                user_id,
+                author_username.trim(),
+                body,
+                created_at as i64,
+                wrapped_payload,
+                year as i64,
+                month as i64
+            ],
+        )?;
+        Ok(StoredSocialPost {
+            id,
+            user_id,
+            author_username: author_username.trim().to_string(),
+            body: body.to_string(),
+            media_type: "none".to_string(),
+            media_url: None,
+            video_duration: None,
+            is_private: false,
+            created_at,
+            post_kind: "monthly_wrapped".to_string(),
+            wrapped_payload: Some(wrapped_payload.to_string()),
+            wrapped_year: Some(year),
+            wrapped_month: Some(month),
+            media_items: Vec::new(),
+            upvotes: 0,
+            viewer_upvoted: false,
+            comments: Vec::new(),
+        })
+    }
+
+    pub fn has_pet_id_post(&self, user_id: &str, pet_id: &str) -> Result<bool, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT wrapped_payload FROM social_posts
+             WHERE user_id = ?1 AND post_kind = 'pet_id'",
+        )?;
+        let rows = stmt.query_map(params![user_id], |row| row.get::<_, Option<String>>(0))?;
+        for row in rows {
+            let json = row?;
+            let Some(json) = json else { continue };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+                continue;
+            };
+            if value
+                .get("pet_id")
+                .and_then(|part| part.as_str())
+                .is_some_and(|stored| stored == pet_id)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn create_pet_id_post(
+        &self,
+        user_id: &str,
+        author_username: &str,
+        body: &str,
+        wrapped_payload: &str,
+        created_at: u64,
+    ) -> Result<StoredSocialPost, StorageError> {
+        let user_id = Self::normalize_social_email(user_id);
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(StorageError::InvalidInput("pet id post requires text".into()));
+        }
+        if wrapped_payload.trim().is_empty() {
+            return Err(StorageError::InvalidInput("pet id payload required".into()));
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let conn = self.conn.lock().expect("storage lock");
+        conn.execute(
+            "INSERT INTO social_posts (
+                 id, user_id, author_username, body, media_type, media_url, video_duration,
+                 is_private, created_at, post_kind, wrapped_payload, wrapped_year, wrapped_month
+             ) VALUES (?1, ?2, ?3, ?4, 'none', NULL, NULL, 0, ?5, 'pet_id', ?6, NULL, NULL)",
+            params![
+                id,
+                user_id,
+                author_username.trim(),
+                body,
+                created_at as i64,
+                wrapped_payload,
+            ],
+        )?;
+        Ok(StoredSocialPost {
+            id,
+            user_id,
+            author_username: author_username.trim().to_string(),
+            body: body.to_string(),
+            media_type: "none".to_string(),
+            media_url: None,
+            video_duration: None,
+            is_private: false,
+            created_at,
+            post_kind: "pet_id".to_string(),
+            wrapped_payload: Some(wrapped_payload.to_string()),
+            wrapped_year: None,
+            wrapped_month: None,
+            media_items: Vec::new(),
+            upvotes: 0,
+            viewer_upvoted: false,
+            comments: Vec::new(),
+        })
     }
 
     pub fn create_pet_share(
@@ -4069,11 +4682,18 @@ mod tests {
         assert_eq!(first.downvotes, 0);
         assert_eq!(first.user_vote, Some(1));
 
-        let unchanged = storage
+        let removed = storage
             .cast_feedback_vote(post_id, "voter@example.com", 1)
-            .expect("repeat upvote");
-        assert_eq!(unchanged.upvotes, 1);
-        assert_eq!(unchanged.user_vote, Some(1));
+            .expect("repeat upvote removes vote");
+        assert_eq!(removed.upvotes, 0);
+        assert_eq!(removed.downvotes, 0);
+        assert_eq!(removed.user_vote, None);
+
+        let upvoted_again = storage
+            .cast_feedback_vote(post_id, "voter@example.com", 1)
+            .expect("upvote again");
+        assert_eq!(upvoted_again.upvotes, 1);
+        assert_eq!(upvoted_again.user_vote, Some(1));
 
         let switched = storage
             .cast_feedback_vote(post_id, "voter@example.com", -1)
@@ -4306,5 +4926,51 @@ mod tests {
             .list_feedback_comments(feedback_id)
             .expect("list after delete")
             .is_empty());
+    }
+
+    #[test]
+    fn social_post_comment_delete_requires_owner() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
+        let post = storage
+            .create_social_post(
+                "owner@test.local",
+                "owner",
+                "Hello",
+                &[],
+                false,
+                100,
+            )
+            .expect("create post");
+        let comment = storage
+            .create_social_post_comment(
+                &post.id,
+                "owner@test.local",
+                "owner",
+                "Nice post",
+                200,
+            )
+            .expect("create comment");
+        storage
+            .toggle_social_comment_upvote(&comment.id, "friend@test.local", 201)
+            .expect("vote");
+
+        assert_eq!(
+            storage
+                .delete_social_post_comment_owned(&comment.id, "friend@test.local")
+                .expect("non-owner delete"),
+            ForumDeleteOutcome::NotAuthorized
+        );
+        assert_eq!(
+            storage
+                .delete_social_post_comment_owned(&comment.id, "owner@test.local")
+                .expect("owner delete"),
+            ForumDeleteOutcome::Deleted
+        );
+        let refreshed = storage
+            .get_social_post_by_id(&post.id, Some("owner@test.local"))
+            .expect("load post")
+            .expect("post exists");
+        assert!(refreshed.comments.is_empty());
     }
 }
