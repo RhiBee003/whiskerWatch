@@ -11,7 +11,16 @@
       <a class="brand" href="/" aria-label="WhiskerWatch home">
         <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
       </a>
-      <nav>
+      <button
+        type="button"
+        class="topbar-menu-toggle"
+        aria-expanded="false"
+        aria-controls="public-nav"
+        aria-label="Open menu"
+      >
+        <span class="topbar-menu-bars" aria-hidden="true"></span>
+      </button>
+      <nav id="public-nav" class="topbar-nav">
         <a href="/">HOME</a>
         <a href="/#features">FEATURES</a>
         <a href="/login">LOG IN</a>
@@ -25,6 +34,7 @@
       {{FEEDBACK_ERROR_BLOCK}}
       {{FEEDBACK_FORUM_CONTENT}}
     </main>
+    <script src="/public-nav.js"></script>
     <script src="/paw-cursor.js"></script>
     <script src="/alerts.js"></script>
     <script src="/confirm-dialog.js?v=20260619q"></script>
