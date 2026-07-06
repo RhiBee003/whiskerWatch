@@ -52,7 +52,7 @@
     pop.addEventListener("animationend", () => pop.remove(), { once: true });
   }
 
-  document.querySelectorAll(".dashboard-nav-menu").forEach((menu) => {
+  document.querySelectorAll(".dashboard-nav-menu, .topbar-nav-menu").forEach((menu) => {
     if (!(menu instanceof HTMLDetailsElement)) {
       return;
     }

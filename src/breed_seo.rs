@@ -51,15 +51,19 @@ fn public_nav_html() -> &'static str {
   <a class="brand" href="/" aria-label="WhiskerWatch home">
     <img class="brand-logo" src="/images/logo.png" alt="WhiskerWatch" />
   </a>
-  <button type="button" class="topbar-menu-toggle" aria-expanded="false" aria-controls="public-nav" aria-label="Open menu">
-    <span class="topbar-menu-bars" aria-hidden="true"></span>
-  </button>
-  <nav id="public-nav" class="topbar-nav">
-    <a href="/">Home</a>
-    <a href="/breeds">Cat breeds</a>
-    <a href="/signup">Join free</a>
-    <a href="/login">Log in</a>
-  </nav>
+  <details class="topbar-nav-menu">
+    <summary class="topbar-nav-menu-trigger" aria-label="Open menu">
+      <span class="topbar-menu-bars" aria-hidden="true"></span>
+    </summary>
+    <div class="topbar-nav-menu-panel">
+      <nav id="public-nav" class="topbar-nav">
+        <a href="/">Home</a>
+        <a href="/breeds">Cat breeds</a>
+        <a href="/signup">Join free</a>
+        <a href="/login">Log in</a>
+      </nav>
+    </div>
+  </details>
 </header>"#
 }
 
@@ -203,7 +207,6 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
         <a href="/breeds" class="download-btn auth-link-btn breed-guide-back-btn">Browse all cat breeds</a>
       </p>
     </main>
-    <script src="/public-nav.js"></script>
     <script src="/paw-cursor.js"></script>
     <script src="/breed-guide.js?v=20260614d" defer></script>
   </body>
@@ -264,7 +267,6 @@ pub fn render_public_breeds_index(base_url: &str) -> String {
         <a class="download-btn public-breed-signup-btn" href="/signup">Join free</a>
       </aside>
     </main>
-    <script src="/public-nav.js"></script>
     <script src="/paw-cursor.js"></script>
   </body>
 </html>"##,

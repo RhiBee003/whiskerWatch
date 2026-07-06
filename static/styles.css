@@ -361,10 +361,16 @@ html:has(.homepage) {
   font-size: 0.92rem;
 }
 
-.topbar-menu-toggle {
+.topbar-nav-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.topbar-nav-menu-trigger {
   display: none;
   align-items: center;
   justify-content: center;
+  list-style: none;
   width: 2.75rem;
   height: 2.75rem;
   padding: 0;
@@ -373,6 +379,10 @@ html:has(.homepage) {
   background: var(--pink-card);
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.topbar-nav-menu-trigger::-webkit-details-marker {
+  display: none;
 }
 
 .topbar-menu-bars {
@@ -388,12 +398,23 @@ html:has(.homepage) {
 .topbar:not(.dashboard-topbar),
 .public-breed-topbar {
   position: relative;
+  z-index: 20;
+}
+
+@media (min-width: 901px) {
+  .topbar-nav-menu-panel {
+    display: block !important;
+  }
+
+  .topbar-nav-menu .topbar-nav {
+    display: flex;
+    flex-direction: row;
+    gap: 1.2rem;
+  }
 }
 
 @media (max-width: 900px) {
-  .homepage-topbar .topbar-menu-toggle,
-  .topbar:not(.dashboard-topbar) .topbar-menu-toggle,
-  .public-breed-topbar .topbar-menu-toggle {
+  .topbar-nav-menu-trigger {
     display: inline-flex;
   }
 
@@ -404,14 +425,21 @@ html:has(.homepage) {
     gap: 0.75rem;
   }
 
-  .homepage-topbar .topbar-nav,
-  .topbar:not(.dashboard-topbar) .topbar-nav,
-  .public-breed-topbar .topbar-nav {
-    display: none;
-    position: absolute;
-    top: calc(100% + 0.4rem);
+  .topbar-nav-menu[open] {
+    z-index: 100;
+  }
+
+  .topbar-nav-menu[open] .topbar-nav-menu-panel {
+    display: block;
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
     left: max(var(--page-gutter), env(safe-area-inset-left, 0px));
     right: max(var(--page-gutter), env(safe-area-inset-right, 0px));
+    z-index: 100;
+  }
+
+  .topbar-nav-menu .topbar-nav {
+    display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 0.15rem;
@@ -420,11 +448,6 @@ html:has(.homepage) {
     border: 2px solid rgba(30, 22, 35, 0.12);
     background: var(--pink-card);
     box-shadow: 0 14px 32px rgba(40, 20, 30, 0.14);
-    z-index: 30;
-  }
-
-  .topbar-nav-open .topbar-nav {
-    display: flex;
   }
 
   .topbar-nav a,
