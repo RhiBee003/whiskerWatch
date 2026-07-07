@@ -15462,7 +15462,7 @@ var(--panel-gradient)
 
 .checkin-time-row {
   display: grid;
-  grid-template-columns: minmax(6rem, auto) 1fr auto;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr) auto;
   gap: 0.5rem 0.75rem;
   align-items: center;
 }
@@ -15475,16 +15475,65 @@ var(--panel-gradient)
 .checkin-time-row input[type="time"] {
   width: 100%;
   max-width: 10rem;
+  min-width: 0;
 }
 
 .checkin-time-remove {
   padding: 0.35rem 0.65rem;
   font-size: 0.82rem;
+  white-space: nowrap;
+  justify-self: end;
 }
 
 .checkin-time-add {
   margin-bottom: 0.75rem;
   width: auto;
+}
+
+@media (max-width: 520px) {
+  .push-enable-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .push-enable-row .download-btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .push-status-pill {
+    width: 100%;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .checkin-time-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "label label"
+      "input remove";
+    gap: 0.35rem 0.65rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 12px;
+    background: var(--pink-input);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+  }
+
+  .checkin-time-label {
+    grid-area: label;
+  }
+
+  .checkin-time-row input[type="time"] {
+    grid-area: input;
+    max-width: none;
+  }
+
+  .checkin-time-remove {
+    grid-area: remove;
+    align-self: center;
+    padding: 0.35rem 0.5rem;
+  }
 }
 
 .onboarding-emails-card .onboarding-email-prefs-form {
@@ -15499,6 +15548,10 @@ var(--panel-gradient)
   margin-top: 0.5rem;
 }
 
+.push-enable-row .download-btn {
+  margin: 0;
+}
+
 .push-status-pill {
   display: inline-flex;
   align-items: center;
@@ -15507,6 +15560,11 @@ var(--panel-gradient)
   font-size: 0.85rem;
   background: rgba(230, 236, 245, 0.95);
   color: #4b5d73;
+}
+
+.push-status-pill[hidden],
+.push-status-pill:empty {
+  display: none !important;
 }
 
 .push-status-pill[data-tone="ok"] {

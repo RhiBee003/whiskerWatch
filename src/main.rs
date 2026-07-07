@@ -9639,9 +9639,7 @@ async fn dashboard_page(
         .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
         .replace(
             "{{NEEDS_PET_SETUP_DATA}}",
-            if user_needs_pet_setup(&profile)
-                && sharing::list_accessible_pets(&state, &profile).is_empty()
-            {
+            if user_needs_pet_setup(&profile) {
                 r#"data-needs-pet-setup="true""#
             } else {
                 ""

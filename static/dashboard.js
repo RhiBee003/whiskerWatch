@@ -3215,7 +3215,6 @@
   }
 
   const onboardingModal = document.getElementById("onboarding-modal");
-  const petSetupTriggers = document.querySelectorAll(".pet-setup-trigger");
   function getOnboardingForm() {
     return onboardingModal?.querySelector(".onboarding-form") ?? null;
   }
@@ -3288,13 +3287,19 @@
   }
 
   async function openOnboardingModal(focusFieldId) {
-    if (!onboardingModal) {
+    const modal = document.getElementById("onboarding-modal");
+    if (!(modal instanceof HTMLElement)) {
+      window.location.assign("/home?tab=pet&setup=pet");
       return;
     }
-    if (document.body.dataset.needsPetSetup === "true") {
+
+    try {
       window.whiskerPetSetupDraft?.resetDirty?.("onboarding");
       await restoreOnboardingDraft({ preserveBreed: Boolean(params.get("breed")) });
+    } catch (error) {
+      console.warn("Could not restore onboarding draft", error);
     }
+
     if (vetFollowupModal) {
       vetFollowupModal.hidden = true;
     }
@@ -3302,23 +3307,26 @@
       parentLevelModal.hidden = true;
     }
     window.scrollTo(0, 0);
-    initCuteDatePickers(onboardingModal);
-    onboardingModal.hidden = false;
+    try {
+      initCuteDatePickers(modal);
+    } catch (error) {
+      console.warn("Could not initialize onboarding date pickers", error);
+    }
+    modal.hidden = false;
     lockModalBodyScroll();
     document.body.classList.add("modal-open");
-    const focusTarget = onboardingModal.querySelector(
-      focusFieldId ? `#${focusFieldId}` : "#cat_name"
-    );
+    const focusTarget = modal.querySelector(focusFieldId ? `#${focusFieldId}` : "#cat_name");
     if (focusTarget instanceof HTMLElement) {
       focusTarget.focus();
     }
   }
 
   function closeOnboardingModal() {
-    if (!onboardingModal) {
+    const modal = document.getElementById("onboarding-modal");
+    if (!(modal instanceof HTMLElement)) {
       return;
     }
-    onboardingModal.hidden = true;
+    modal.hidden = true;
     document.body.classList.remove("modal-open");
     unlockModalBodyScroll();
   }
@@ -3332,7 +3340,7 @@
     if (document.body.dataset.needsPetSetup !== "true") {
       return;
     }
-    if (!onboardingModal) {
+    if (!document.getElementById("onboarding-modal")) {
       return;
     }
     if (params.get("setup") === "pet" || params.get("breed")) {
@@ -3345,28 +3353,57 @@
     openOnboardingModal();
   }
 
-  petSetupTriggers.forEach((trigger) => {
-    trigger.addEventListener("click", () => {
-      if (trigger.id === "pet-setup-trigger") {
-        showTab("pet");
+  document.addEventListener(
+    "click",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
       }
-      void openOnboardingModal();
-    });
-  });
+
+      const setupTrigger = target.closest(".pet-setup-trigger");
+      if (setupTrigger instanceof HTMLElement) {
+        event.preventDefault();
+        if (setupTrigger.id === "pet-setup-trigger") {
+          showTab("pet");
+        }
+        void openOnboardingModal();
+        return;
+      }
+
+      const addCatTrigger = target.closest(".add-cat-trigger");
+      if (addCatTrigger instanceof HTMLElement) {
+        event.preventDefault();
+        showTab("pet");
+        void openAddCatModal("add_cat_name");
+      }
+    },
+    true
+  );
 
   const addCatModal = document.getElementById("add-cat-modal");
-  const addCatTriggers = document.querySelectorAll(".add-cat-trigger");
   const addCatCancelButtons = document.querySelectorAll(".add-cat-cancel");
 
   async function openAddCatModal(focusId) {
-    if (!(addCatModal instanceof HTMLElement)) {
+    const modal = document.getElementById("add-cat-modal");
+    if (!(modal instanceof HTMLElement)) {
+      window.location.assign("/home?tab=pet&add_cat=1");
       return;
     }
 
-    window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
-    await restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) });
-    initCuteDatePickers(addCatModal);
-    addCatModal.hidden = false;
+    try {
+      window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
+      await restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) });
+    } catch (error) {
+      console.warn("Could not restore add-cat draft", error);
+    }
+
+    try {
+      initCuteDatePickers(modal);
+    } catch (error) {
+      console.warn("Could not initialize add-cat date pickers", error);
+    }
+    modal.hidden = false;
     lockModalBodyScroll();
     document.body.classList.add("modal-open");
     if (focusId) {
@@ -3385,13 +3422,6 @@
     document.body.classList.remove("modal-open");
     unlockModalBodyScroll();
   }
-
-  addCatTriggers.forEach((trigger) => {
-    trigger.addEventListener("click", () => {
-      showTab("pet");
-      void openAddCatModal("add_cat_name");
-    });
-  });
 
   addCatCancelButtons.forEach((button) => {
     button.addEventListener("click", closeAddCatModal);
@@ -3720,26 +3750,30 @@
   const photoSetupInvalid = params.get("status") === "onboarding_photo_invalid";
 
   async function bootstrapPetSetupModals() {
-    if (needsPetSetup) {
-      await restoreOnboardingDraft({ preserveBreed: Boolean(selectedBreed) });
-    }
+    try {
+      if (needsPetSetup) {
+        await restoreOnboardingDraft({ preserveBreed: Boolean(selectedBreed) });
+      }
 
-    if (returningToAddCat) {
-      showTab("pet");
-      await openAddCatModal(
-        photoSetupInvalid ? "add_cat_photo" : selectedBreed ? "add_cat_color_select" : "add_cat_name"
-      );
-      return;
-    }
+      if (returningToAddCat) {
+        showTab("pet");
+        await openAddCatModal(
+          photoSetupInvalid ? "add_cat_photo" : selectedBreed ? "add_cat_color_select" : "add_cat_name"
+        );
+        return;
+      }
 
-    if (returningToPetSetup || (needsPetSetup && photoSetupInvalid)) {
-      await openOnboardingModal(
-        photoSetupInvalid ? "pet_photo" : selectedBreed ? "pet_color_select" : undefined
-      );
-      return;
-    }
+      if (returningToPetSetup || (needsPetSetup && photoSetupInvalid)) {
+        await openOnboardingModal(
+          photoSetupInvalid ? "pet_photo" : selectedBreed ? "pet_color_select" : undefined
+        );
+        return;
+      }
 
-    maybePromptPetSetup();
+      maybePromptPetSetup();
+    } catch (error) {
+      console.warn("Could not bootstrap pet setup modals", error);
+    }
   }
 
   bootstrapPetSetupModals();

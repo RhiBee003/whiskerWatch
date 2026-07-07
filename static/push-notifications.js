@@ -108,6 +108,9 @@
     setStatus("Push enabled on this device", "ok");
     enableBtn.textContent = "Notifications enabled";
     enableBtn.disabled = true;
+    if (statusPill) {
+      statusPill.hidden = true;
+    }
     await refreshLocalSchedule();
   }
 
@@ -176,9 +179,11 @@
       if (registration?.pushManager?.getSubscription) {
         registration.pushManager.getSubscription().then((subscription) => {
           if (subscription) {
-            setStatus("Push enabled on this device", "ok");
             enableBtn.textContent = "Notifications enabled";
             enableBtn.disabled = true;
+            if (statusPill) {
+              statusPill.hidden = true;
+            }
           }
         });
       }
