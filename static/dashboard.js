@@ -3293,13 +3293,6 @@
       return;
     }
 
-    try {
-      window.whiskerPetSetupDraft?.resetDirty?.("onboarding");
-      await restoreOnboardingDraft({ preserveBreed: Boolean(params.get("breed")) });
-    } catch (error) {
-      console.warn("Could not restore onboarding draft", error);
-    }
-
     if (vetFollowupModal) {
       vetFollowupModal.hidden = true;
     }
@@ -3307,17 +3300,31 @@
       parentLevelModal.hidden = true;
     }
     window.scrollTo(0, 0);
+    modal.hidden = false;
+    lockModalBodyScroll();
+    document.body.classList.add("modal-open");
+
+    const focusTarget = modal.querySelector(focusFieldId ? `#${focusFieldId}` : "#cat_name");
+    if (focusTarget instanceof HTMLElement) {
+      focusTarget.focus();
+    }
+
+    try {
+      window.whiskerPetSetupDraft?.resetDirty?.("onboarding");
+      await Promise.race([
+        restoreOnboardingDraft({ preserveBreed: Boolean(params.get("breed")) }),
+        new Promise((_resolve, reject) => {
+          window.setTimeout(() => reject(new Error("onboarding draft restore timeout")), 2500);
+        }),
+      ]);
+    } catch (error) {
+      console.warn("Could not restore onboarding draft", error);
+    }
+
     try {
       initCuteDatePickers(modal);
     } catch (error) {
       console.warn("Could not initialize onboarding date pickers", error);
-    }
-    modal.hidden = false;
-    lockModalBodyScroll();
-    document.body.classList.add("modal-open");
-    const focusTarget = modal.querySelector(focusFieldId ? `#${focusFieldId}` : "#cat_name");
-    if (focusTarget instanceof HTMLElement) {
-      focusTarget.focus();
     }
   }
 
@@ -3367,7 +3374,10 @@
         if (setupTrigger.id === "pet-setup-trigger") {
           showTab("pet");
         }
-        void openOnboardingModal();
+        void openOnboardingModal().catch((error) => {
+          console.warn("Could not open onboarding modal", error);
+          window.location.assign("/home?tab=pet&setup=pet");
+        });
         return;
       }
 
@@ -3391,18 +3401,6 @@
       return;
     }
 
-    try {
-      window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
-      await restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) });
-    } catch (error) {
-      console.warn("Could not restore add-cat draft", error);
-    }
-
-    try {
-      initCuteDatePickers(modal);
-    } catch (error) {
-      console.warn("Could not initialize add-cat date pickers", error);
-    }
     modal.hidden = false;
     lockModalBodyScroll();
     document.body.classList.add("modal-open");
@@ -3411,6 +3409,24 @@
       if (field instanceof HTMLElement) {
         field.focus();
       }
+    }
+
+    try {
+      window.whiskerPetSetupDraft?.resetDirty?.("add_cat");
+      await Promise.race([
+        restoreAddCatDraft({ preserveBreed: Boolean(params.get("breed")) }),
+        new Promise((_resolve, reject) => {
+          window.setTimeout(() => reject(new Error("add-cat draft restore timeout")), 2500);
+        }),
+      ]);
+    } catch (error) {
+      console.warn("Could not restore add-cat draft", error);
+    }
+
+    try {
+      initCuteDatePickers(modal);
+    } catch (error) {
+      console.warn("Could not initialize add-cat date pickers", error);
     }
   }
 
