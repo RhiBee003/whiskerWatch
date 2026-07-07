@@ -1,15 +1,14 @@
+use crate::storage::{
+    StorageError, StoredFriendMessage, StoredFriendRequest, StoredFriendSummary,
+    StoredMessageThread, StoredPetShare, StoredUserSearchHit,
+};
 use crate::{
     escape_html, escape_html_attr, household_pet_is_complete, memorial, pet_snapshot,
-    profile_has_pet, user_for_email, visible_calendar_events, AppState, CalendarEvent,
-    UserProfile, CALENDAR_PREVIEW_HORIZON_DAYS, PRIMARY_PET_ID,
+    profile_has_pet, user_for_email, visible_calendar_events, AppState, CalendarEvent, UserProfile,
+    CALENDAR_PREVIEW_HORIZON_DAYS, PRIMARY_PET_ID,
 };
 use chrono::{Duration, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
-use crate::storage::{
-    StorageError, StoredFriendMessage, StoredFriendRequest, StoredFriendSummary, StoredMessageThread,
-    StoredPetShare,
-    StoredUserSearchHit,
-};
 
 pub const FRIEND_STATUS_PENDING: &str = "pending";
 pub const FRIEND_STATUS_ACCEPTED: &str = "accepted";
@@ -239,7 +238,10 @@ pub struct MessageRequestRespondResponse {
 const FRIEND_MESSAGE_LIMIT: usize = 80;
 const MESSAGE_PREVIEW_CHARS: usize = 72;
 
-fn stored_friend_message_item(message: &StoredFriendMessage, viewer_email: &str) -> FriendMessageItem {
+fn stored_friend_message_item(
+    message: &StoredFriendMessage,
+    viewer_email: &str,
+) -> FriendMessageItem {
     FriendMessageItem {
         id: message.id.clone(),
         from_email: message.from_email.clone(),
@@ -295,7 +297,10 @@ pub fn friend_messages_for_conversation(
     let (thread_status, can_compose) =
         message_thread_status_for_viewer(thread.as_ref(), &viewer_email, are_friends);
 
-    if thread.as_ref().is_some_and(|value| value.status == "declined") {
+    if thread
+        .as_ref()
+        .is_some_and(|value| value.status == "declined")
+    {
         let messages = state
             .storage
             .list_friend_conversation(&viewer_email, &friend_email, FRIEND_MESSAGE_LIMIT)?
@@ -315,11 +320,11 @@ pub fn friend_messages_for_conversation(
         });
     }
 
-    let can_view = are_friends
-        || thread.is_some()
-        || thread_status.is_none();
+    let can_view = are_friends || thread.is_some() || thread_status.is_none();
     if !can_view {
-        return Err(StorageError::InvalidInput("cannot view conversation".into()));
+        return Err(StorageError::InvalidInput(
+            "cannot view conversation".into(),
+        ));
     }
 
     let messages = if are_friends || thread.is_some() {
@@ -389,9 +394,11 @@ pub fn respond_message_request(
             .storage
             .accept_message_thread_between(&viewer_email, &partner_email, responded_at)?;
     } else {
-        state
-            .storage
-            .decline_message_thread_between(&viewer_email, &partner_email, responded_at)?;
+        state.storage.decline_message_thread_between(
+            &viewer_email,
+            &partner_email,
+            responded_at,
+        )?;
     }
     Ok(MessageRequestRespondResponse {
         ok: true,
@@ -501,7 +508,8 @@ pub fn delete_friend_message(
 
     match scope {
         "message_me" => {
-            let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
+            let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty())
+            else {
                 return Err(StorageError::InvalidInput("message_id required".into()));
             };
             let Some(message) = state.storage.get_friend_message(message_id)? else {
@@ -509,23 +517,29 @@ pub fn delete_friend_message(
             };
             let partner = friend_message_partner_email(&message, &viewer_email);
             if !partner.eq_ignore_ascii_case(&friend_email) {
-                return Err(StorageError::InvalidInput("message not in conversation".into()));
+                return Err(StorageError::InvalidInput(
+                    "message not in conversation".into(),
+                ));
             }
             state
                 .storage
                 .hide_friend_message_for_user(message_id, &viewer_email, deleted_at)?;
         }
         "message_both" => {
-            let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
+            let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty())
+            else {
                 return Err(StorageError::InvalidInput("message_id required".into()));
             };
-            let message =
-                state
-                    .storage
-                    .delete_friend_message_for_all(message_id, &viewer_email, deleted_at)?;
+            let message = state.storage.delete_friend_message_for_all(
+                message_id,
+                &viewer_email,
+                deleted_at,
+            )?;
             let partner = friend_message_partner_email(&message, &viewer_email);
             if !partner.eq_ignore_ascii_case(&friend_email) {
-                return Err(StorageError::InvalidInput("message not in conversation".into()));
+                return Err(StorageError::InvalidInput(
+                    "message not in conversation".into(),
+                ));
             }
             notify_partner_message_deleted_for_all(
                 state,
@@ -543,9 +557,11 @@ pub fn delete_friend_message(
             )?;
         }
         "conversation_both" => {
-            state
-                .storage
-                .delete_friend_conversation_for_all(&viewer_email, &friend_email, deleted_at)?;
+            state.storage.delete_friend_conversation_for_all(
+                &viewer_email,
+                &friend_email,
+                deleted_at,
+            )?;
             notify_partner_conversation_deleted_for_all(
                 state,
                 &viewer_email,
@@ -626,9 +642,11 @@ pub fn render_friend_messages_card(state: &AppState, viewer_email: &str) -> Stri
             if users_block_each_other(state, viewer_email, &partner) {
                 return None;
             }
-            let thread = state.storage.get_message_thread(viewer_email, &partner).ok()??;
-            if thread.status == "pending"
-                && !thread.initiated_by.eq_ignore_ascii_case(viewer_email)
+            let thread = state
+                .storage
+                .get_message_thread(viewer_email, &partner)
+                .ok()??;
+            if thread.status == "pending" && !thread.initiated_by.eq_ignore_ascii_case(viewer_email)
             {
                 Some(partner)
             } else {
@@ -909,18 +927,19 @@ pub fn block_user_profile(
     if viewer_email == target_email {
         return Err(StorageError::InvalidInput("cannot block yourself".into()));
     }
-    state.storage.block_user(&viewer_email, &target_email, blocked_at)?;
+    state
+        .storage
+        .block_user(&viewer_email, &target_email, blocked_at)?;
     state
         .storage
         .remove_friendship_between(&viewer_email, &target_email)?;
     state
         .storage
         .cancel_pending_friend_requests_between(&viewer_email, &target_email)?;
-    let _ = state.storage.hide_friend_conversation_for_user(
-        &viewer_email,
-        &target_email,
-        blocked_at,
-    );
+    let _ =
+        state
+            .storage
+            .hide_friend_conversation_for_user(&viewer_email, &target_email, blocked_at);
     Ok(())
 }
 
@@ -931,9 +950,7 @@ pub fn unblock_user_profile(
 ) -> Result<(), StorageError> {
     let viewer_email = normalize_email(viewer_email);
     let target_email = normalize_email(target_email);
-    state
-        .storage
-        .unblock_user(&viewer_email, &target_email)
+    state.storage.unblock_user(&viewer_email, &target_email)
 }
 
 pub fn apply_user_block_action(
@@ -965,11 +982,7 @@ pub fn apply_user_block_action(
     }
 }
 
-pub fn render_block_control(
-    state: &AppState,
-    viewer_email: &str,
-    target_email: &str,
-) -> String {
+pub fn render_block_control(state: &AppState, viewer_email: &str, target_email: &str) -> String {
     let viewer_email = normalize_email(viewer_email);
     let target_email = normalize_email(target_email);
     if viewer_email.is_empty() || target_email.is_empty() || viewer_email == target_email {
@@ -1123,7 +1136,10 @@ pub fn render_profile_interact_menu(
 
     let label = user_label(state, &target_email);
     let profile_url = parent_profile_path(profile_username);
-    let chat_url = format!("/home?tab=friends&chat={}", urlencoding::encode(&target_email));
+    let chat_url = format!(
+        "/home?tab=friends&chat={}",
+        urlencoding::encode(&target_email)
+    );
     let email_attr = escape_html_attr(&target_email);
     let label_attr = escape_html_attr(&label);
     let relation = friend_relation(state, &viewer_email, &target_email);
@@ -1260,9 +1276,7 @@ pub fn quick_friend_request(
                     ok: true,
                     status: "sent".to_string(),
                 },
-                Err(StorageError::InvalidInput(message))
-                    if message.contains("already friends") =>
-                {
+                Err(StorageError::InvalidInput(message)) if message.contains("already friends") => {
                     FriendQuickRequestResponse {
                         ok: true,
                         status: "friends".to_string(),
@@ -1647,7 +1661,10 @@ pub fn accessible_pet_exists(
     resolve_pet_care_target(state, viewer, pet_id, owner_email).is_some()
 }
 
-pub fn apply_snapshot_to_profile_view(mut view: UserProfile, snapshot: &crate::PetSnapshot) -> UserProfile {
+pub fn apply_snapshot_to_profile_view(
+    mut view: UserProfile,
+    snapshot: &crate::PetSnapshot,
+) -> UserProfile {
     view.pet_name = snapshot.pet_name.clone();
     view.pet_breed = snapshot.pet_breed.clone();
     view.pet_color = snapshot.pet_color.clone();
@@ -1774,8 +1791,10 @@ pub fn visible_calendar_events_for_viewer(
                 continue;
             };
             events.extend(owner.user_calendar_events.iter().cloned());
-            let premium =
-                crate::entitlements::can_access_health_records(owner.premium_unlocked, &owner.email);
+            let premium = crate::entitlements::can_access_health_records(
+                owner.premium_unlocked,
+                &owner.email,
+            );
             let Some(snapshot) = pet_snapshot(&owner, &share.pet_id) else {
                 continue;
             };
@@ -1920,10 +1939,7 @@ pub fn render_account_pet_switcher(state: &AppState, profile: &UserProfile) -> S
 
     let account_view = account_tab_pet_view(state, profile);
     let active_id = account_view.active_pet_id.as_str();
-    let active_index = pets
-        .iter()
-        .position(|(id, _)| id == active_id)
-        .unwrap_or(0);
+    let active_index = pets.iter().position(|(id, _)| id == active_id).unwrap_or(0);
     let prev_idx = if active_index == 0 {
         pets.len() - 1
     } else {
@@ -2332,7 +2348,8 @@ fn render_pet_sharing_card(
     };
 
     let share_form = if owned_pets.is_empty() {
-        r#"<p class="field-hint">Set up a cat on the My Pet tab before sharing care schedules.</p>"#.to_string()
+        r#"<p class="field-hint">Set up a cat on the My Pet tab before sharing care schedules.</p>"#
+            .to_string()
     } else if friends.is_empty() {
         r#"<p class="field-hint">Connect with another cat parent first, then you can share a specific cat's tasks, feeding schedule, and calendar.</p>
 <a href="/home?tab=friends" class="community-friends-cta friends-open-add-card" data-open-friends-add>Find cat parents 🐾</a>"#.to_string()

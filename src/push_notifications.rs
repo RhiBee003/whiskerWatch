@@ -252,8 +252,7 @@ pub fn pending_notifications_for_profile(profile: &UserProfile) -> Vec<PendingNo
         }
     }
 
-    if profile.notification_prefs.daily_checkin && !any_daily_task_completed_today(profile, today)
-    {
+    if profile.notification_prefs.daily_checkin && !any_daily_task_completed_today(profile, today) {
         for minutes in effective_checkin_times(&profile.notification_prefs) {
             if !minutes_match_target(now_minutes, minutes) {
                 continue;

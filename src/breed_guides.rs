@@ -38,7 +38,10 @@ pub fn guide_for_breed_name(name: &str) -> Option<BreedGuide> {
 }
 
 pub fn pet_breed_matches_guide(pet_breed: &str, guide: &BreedGuide) -> bool {
-    if pet_breed.trim().eq_ignore_ascii_case(guide.breed_name.trim()) {
+    if pet_breed
+        .trim()
+        .eq_ignore_ascii_case(guide.breed_name.trim())
+    {
         return true;
     }
 
@@ -63,8 +66,7 @@ pub fn can_access_breed_guide(
     owned_guides: &[String],
     slug: &str,
 ) -> bool {
-    crate::entitlements::has_premium(premium_unlocked, email)
-        || user_owns_guide(owned_guides, slug)
+    crate::entitlements::has_premium(premium_unlocked, email) || user_owns_guide(owned_guides, slug)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +232,12 @@ pub fn wellness_exam_interval_months(guide: &BreedGuide) -> u32 {
     }
 }
 
-fn task_template(key: &'static str, title: String, time_minutes: u16, reward: u32) -> BreedGuideTaskTemplate {
+fn task_template(
+    key: &'static str,
+    title: String,
+    time_minutes: u16,
+    reward: u32,
+) -> BreedGuideTaskTemplate {
     BreedGuideTaskTemplate {
         key,
         title,
@@ -430,7 +437,12 @@ fn section_extras(
     category: &str,
     slug: &str,
     breed: &BreedEntry,
-) -> (Vec<String>, Vec<String>, Option<String>, Option<&'static str>) {
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Option<String>,
+    Option<&'static str>,
+) {
     let name = breed.name;
     match section_id {
         "daily-care" => {
@@ -908,7 +920,11 @@ fn render_list_items(items: &[String], class_name: &str) -> String {
             )
         })
         .collect::<String>();
-    format!(r#"<ul class="breed-guide-{class_name}s">{rows}</ul>"#, class_name = class_name, rows = rows)
+    format!(
+        r#"<ul class="breed-guide-{class_name}s">{rows}</ul>"#,
+        class_name = class_name,
+        rows = rows
+    )
 }
 
 fn render_checklist_html(section: &GuideSection, interactive: bool) -> String {
@@ -1187,9 +1203,7 @@ pub fn render_sections_html(sections: &[GuideSection], slug: &str) -> String {
     sections
         .iter()
         .enumerate()
-        .map(|(index, section)| {
-            render_section_card(slug, section, index, true, false, index == 0)
-        })
+        .map(|(index, section)| render_section_card(slug, section, index, true, false, index == 0))
         .collect()
 }
 
@@ -1498,8 +1512,12 @@ mod tests {
     fn british_shorthair_tasks_include_health_watch_outs() {
         let guide = guide_for_breed_name("British Shorthair").expect("british shorthair");
         let tasks = task_templates_for_guide(&guide);
-        assert!(tasks.iter().any(|task| task.key == HEALTH_WATCH_OUTS_TASK_KEY));
-        assert!(tasks.iter().any(|task| task.title.contains("health watch-outs")));
+        assert!(tasks
+            .iter()
+            .any(|task| task.key == HEALTH_WATCH_OUTS_TASK_KEY));
+        assert!(tasks
+            .iter()
+            .any(|task| task.title.contains("health watch-outs")));
     }
 
     #[test]
@@ -1540,7 +1558,12 @@ mod tests {
 
     #[test]
     fn plus_unlocks_breed_guides_without_purchase() {
-        assert!(!can_access_breed_guide(false, "user@example.com", &[], "persian"));
+        assert!(!can_access_breed_guide(
+            false,
+            "user@example.com",
+            &[],
+            "persian"
+        ));
         assert!(can_access_breed_guide(
             true,
             "user@example.com",

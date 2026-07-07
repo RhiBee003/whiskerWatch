@@ -97,20 +97,9 @@ pub struct PlaydateInteractResponse {
     pub backfired: bool,
 }
 
-pub fn friendship_key(
-    owner_a: &str,
-    pet_a: &str,
-    owner_b: &str,
-    pet_b: &str,
-) -> String {
-    let left = (
-        sharing::normalize_email(owner_a),
-        pet_a.trim().to_string(),
-    );
-    let right = (
-        sharing::normalize_email(owner_b),
-        pet_b.trim().to_string(),
-    );
+pub fn friendship_key(owner_a: &str, pet_a: &str, owner_b: &str, pet_b: &str) -> String {
+    let left = (sharing::normalize_email(owner_a), pet_a.trim().to_string());
+    let right = (sharing::normalize_email(owner_b), pet_b.trim().to_string());
     if left <= right {
         format!("{}|{}::{}|{}", left.0, left.1, right.0, right.1)
     } else {
@@ -118,7 +107,13 @@ pub fn friendship_key(
     }
 }
 
-pub fn friendship_score(profile: &UserProfile, owner_a: &str, pet_a: &str, owner_b: &str, pet_b: &str) -> i32 {
+pub fn friendship_score(
+    profile: &UserProfile,
+    owner_a: &str,
+    pet_a: &str,
+    owner_b: &str,
+    pet_b: &str,
+) -> i32 {
     profile
         .cat_friendships
         .get(&friendship_key(owner_a, pet_a, owner_b, pet_b))
@@ -255,7 +250,12 @@ pub fn list_scene_cats(state: &AppState, viewer: &UserProfile) -> Vec<SceneCat> 
     cats
 }
 
-fn cat_allowed_in_scene(state: &AppState, viewer: &UserProfile, owner_email: &str, pet_id: &str) -> bool {
+fn cat_allowed_in_scene(
+    state: &AppState,
+    viewer: &UserProfile,
+    owner_email: &str,
+    pet_id: &str,
+) -> bool {
     let today = chrono::Local::now().date_naive();
     if let Some(cats) = crate::birthday_party::list_party_scene_cats(state, viewer, today) {
         return cats
@@ -271,7 +271,9 @@ pub fn action_by_id(action_id: &str) -> Option<&'static PlaydateActionDef> {
     if action_id == PROP_PLAYDATE_ACTION.id {
         return Some(&PROP_PLAYDATE_ACTION);
     }
-    CAT_PLAYDATE_ACTIONS.iter().find(|action| action.id == action_id)
+    CAT_PLAYDATE_ACTIONS
+        .iter()
+        .find(|action| action.id == action_id)
 }
 
 /// Cats need Buddies-level trust before bold friendly moves go well.
@@ -375,7 +377,8 @@ pub async fn apply_playdate_interaction(
     }
 
     let action = action_by_id(request.action.trim()).ok_or("invalid_action")?;
-    if action.id == PROP_PLAYDATE_ACTION.id && request.prop_slot.as_deref().unwrap_or("").is_empty() {
+    if action.id == PROP_PLAYDATE_ACTION.id && request.prop_slot.as_deref().unwrap_or("").is_empty()
+    {
         return Err("invalid_prop");
     }
 
@@ -402,8 +405,13 @@ pub async fn apply_playdate_interaction(
     };
     let prop_label = request.prop_slot.as_deref().map(decor_slot_label);
 
-    let score_before =
-        friendship_score(&viewer, actor_owner, actor_pet_id, target_owner, target_pet_id);
+    let score_before = friendship_score(
+        &viewer,
+        actor_owner,
+        actor_pet_id,
+        target_owner,
+        target_pet_id,
+    );
     let delta = effective_friendship_delta(score_before, action);
     let backfired = playdate_action_backfired(score_before, action);
     let message = if backfired {
@@ -538,16 +546,28 @@ fn render_scene_cat(
     is_play_as: bool,
     party_mode: bool,
 ) -> String {
-    let guest_class = if cat.is_owned { "" } else { " cat-home-playdate-guest" };
+    let guest_class = if cat.is_owned {
+        ""
+    } else {
+        " cat-home-playdate-guest"
+    };
     let play_as_class = if is_play_as { " cat-home-play-as" } else { "" };
     let is_housemate = cat.is_owned && !is_play_as;
-    let housemate_class = if is_housemate { " cat-home-housemate" } else { "" };
+    let housemate_class = if is_housemate {
+        " cat-home-housemate"
+    } else {
+        ""
+    };
     let birthday_class = if party_mode && cat.is_birthday_cat {
         " cat-home-birthday-cat"
     } else {
         ""
     };
-    let npc_class = if cat.is_npc { " cat-home-npc-guest" } else { "" };
+    let npc_class = if cat.is_npc {
+        " cat-home-npc-guest"
+    } else {
+        ""
+    };
     let display_name = scene_cat_display_name(&cat.pet_name);
     let role_label = scene_cat_role_label(cat, is_play_as, party_mode);
     let color_hint = if cat.pet_color.trim().is_empty() {
@@ -595,11 +615,8 @@ fn render_scene_cat(
         display_name = escape_html(display_name),
         role_label = escape_html(&role_label),
         birthday_heart = birthday_heart,
-        avatar = render_playdate_cat_avatar(
-            &cat.pet_name,
-            &cat.pet_id,
-            cat.pet_photo_url.as_deref(),
-        ),
+        avatar =
+            render_playdate_cat_avatar(&cat.pet_name, &cat.pet_id, cat.pet_photo_url.as_deref(),),
         color_hint = color_hint,
     )
 }
@@ -668,11 +685,7 @@ fn display_friendship_for_cat(
     )
 }
 
-fn render_friendship_row(
-    viewer: &UserProfile,
-    play_as: &SceneCat,
-    other: &SceneCat,
-) -> String {
+fn render_friendship_row(viewer: &UserProfile, play_as: &SceneCat, other: &SceneCat) -> String {
     let score = friendship_score(
         viewer,
         &play_as.owner_email,
@@ -875,8 +888,7 @@ pub fn render_playdate_scene(
                 .collect::<String>(),
         )
     };
-    let friendships_panel =
-        render_friendships_panel(viewer, play_as_pet_id, &cats);
+    let friendships_panel = render_friendships_panel(viewer, play_as_pet_id, &cats);
     let bonds_panel = crate::cat_bonds::render_parent_bonds_panel(viewer);
 
     let friendship_json = serde_json::to_string(

@@ -109,9 +109,7 @@ pub fn checkup_overdue(snapshot: &PetSnapshot, today: NaiveDate) -> bool {
     let plan = vet_care::analyze(snapshot, today);
     plan.overdue_items.iter().any(|item| {
         let label = item.label.to_lowercase();
-        label.contains("wellness")
-            || label.contains("medication")
-            || label.contains("follow")
+        label.contains("wellness") || label.contains("medication") || label.contains("follow")
     })
 }
 
@@ -150,7 +148,11 @@ pub fn evaluate(
     pet_name: &str,
 ) -> Result<HomeHealthCheckResult, &'static str> {
     let weight = parse_weight(form.weight_lbs.as_deref());
-    if form.weight_lbs.as_deref().is_some_and(|value| !value.trim().is_empty()) && weight.is_none()
+    if form
+        .weight_lbs
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+        && weight.is_none()
     {
         return Err("invalid_weight");
     }
@@ -383,7 +385,7 @@ fn render_last_check_summary(entry: &HomeHealthCheckEntry, pet_label: &str) -> S
         "monitor" => CheckOutcome::Monitor,
         _ => CheckOutcome::Reassuring,
     };
-  format!(
+    format!(
         r#"<div class="home-health-recent {outcome_class}">
   <p class="home-health-recent-kicker">Last home check · {date}</p>
   <p class="home-health-recent-title">{title}</p>
@@ -409,7 +411,10 @@ pub fn render_section(snapshot: &PetSnapshot, profile: &UserProfile, today: Naiv
 
     if let Some(days) = days_since_last_check(profile, &snapshot.id, today) {
         if days < RECHECK_COOLDOWN_DAYS {
-            if let Some(entry) = profile.home_health_checks.get(&snapshot.id).and_then(|h| h.last())
+            if let Some(entry) = profile
+                .home_health_checks
+                .get(&snapshot.id)
+                .and_then(|h| h.last())
             {
                 return format!(
                     r#"<div class="home-health-check-block">

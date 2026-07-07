@@ -181,7 +181,7 @@ pub fn render_public_breed_page(guide: &BreedGuide, base_url: &str) -> String {
     <meta name="twitter:title" content="{title}" />
     <meta name="twitter:description" content="{description}" />
     <script type="application/ld+json">{json_ld}</script>
-    <link rel="stylesheet" href="/styles.css?v=20260707f" />
+    <link rel="stylesheet" href="/styles.css?v=20260708f" />
   </head>
   <body class="public-breed-page-body">
     {nav}
@@ -251,7 +251,7 @@ pub fn render_public_breeds_index(base_url: &str) -> String {
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="{title}" />
     <meta name="twitter:description" content="{description}" />
-    <link rel="stylesheet" href="/styles.css?v=20260707f" />
+    <link rel="stylesheet" href="/styles.css?v=20260708f" />
   </head>
   <body class="public-breed-page-body">
     {nav}

@@ -409,9 +409,7 @@ pub fn format_cute_streak_markup(days: u32, style: CuteStreakStyle) -> String {
             CuteStreakStyle::Hero => "Start your streak today ✨",
             _ => "Start today",
         };
-        return format!(
-            r#"<span class="care-streak-cute care-streak-cute--start">{text}</span>"#
-        );
+        return format!(r#"<span class="care-streak-cute care-streak-cute--start">{text}</span>"#);
     }
 
     let unit = if days == 1 { "day" } else { "days" };

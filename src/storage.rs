@@ -1,4 +1,7 @@
-use crate::{ContactSubmission, FeedbackComment, FeedbackSubmission, ForumPost, ForumReply, User, UserProfile};
+use crate::{
+    ContactSubmission, FeedbackComment, FeedbackSubmission, ForumPost, ForumReply, User,
+    UserProfile,
+};
 use rusqlite::{params, Connection};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -562,13 +565,22 @@ impl Storage {
             )?;
         }
         if !Self::table_has_column(&conn, "social_posts", "wrapped_payload")? {
-            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_payload TEXT", [])?;
+            conn.execute(
+                "ALTER TABLE social_posts ADD COLUMN wrapped_payload TEXT",
+                [],
+            )?;
         }
         if !Self::table_has_column(&conn, "social_posts", "wrapped_year")? {
-            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_year INTEGER", [])?;
+            conn.execute(
+                "ALTER TABLE social_posts ADD COLUMN wrapped_year INTEGER",
+                [],
+            )?;
         }
         if !Self::table_has_column(&conn, "social_posts", "wrapped_month")? {
-            conn.execute("ALTER TABLE social_posts ADD COLUMN wrapped_month INTEGER", [])?;
+            conn.execute(
+                "ALTER TABLE social_posts ADD COLUMN wrapped_month INTEGER",
+                [],
+            )?;
         }
         conn.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_social_posts_wrapped_month
@@ -621,7 +633,10 @@ impl Storage {
             conn.execute("ALTER TABLE friend_messages ADD COLUMN media_url TEXT", [])?;
         }
         if !Self::table_has_column(&conn, "friend_messages", "video_duration")? {
-            conn.execute("ALTER TABLE friend_messages ADD COLUMN video_duration REAL", [])?;
+            conn.execute(
+                "ALTER TABLE friend_messages ADD COLUMN video_duration REAL",
+                [],
+            )?;
         }
         if !Self::table_has_column(&conn, "friend_messages", "deleted_for_all_at")? {
             conn.execute(
@@ -1870,9 +1885,7 @@ impl Storage {
         comment_id: i64,
     ) -> Result<(), StorageError> {
         let mut child_ids = Vec::new();
-        let mut stmt = conn.prepare(
-            "SELECT id FROM feedback_comments WHERE parent_id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT id FROM feedback_comments WHERE parent_id = ?1")?;
         let rows = stmt.query_map(params![comment_id], |row| row.get(0))?;
         for child_id in rows {
             child_ids.push(child_id?);
@@ -2051,6 +2064,46 @@ impl Storage {
         )?;
         let replies = stmt
             .query_map(params![post_id], |row| {
+                Ok(ForumReply {
+                    id: row.get(0)?,
+                    post_id: row.get(1)?,
+                    user_id: row.get(2)?,
+                    author_username: row.get(3)?,
+                    body: row.get(4)?,
+                    created_at: row.get::<_, i64>(5)? as u64,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(replies)
+    }
+
+    pub fn list_forum_posts_by_user(&self, user_id: &str) -> Result<Vec<ForumPost>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, user_id, author_username, title, body, created_at, breed_slug
+             FROM forum_posts
+             WHERE user_id = ?1 COLLATE NOCASE
+             ORDER BY created_at ASC",
+        )?;
+        let posts = stmt
+            .query_map(params![user_id.trim()], map_forum_post_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(posts)
+    }
+
+    pub fn list_forum_replies_by_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<ForumReply>, StorageError> {
+        let conn = self.conn.lock().expect("storage lock");
+        let mut stmt = conn.prepare(
+            "SELECT id, post_id, user_id, author_username, body, created_at
+             FROM forum_replies
+             WHERE user_id = ?1 COLLATE NOCASE
+             ORDER BY created_at ASC",
+        )?;
+        let replies = stmt
+            .query_map(params![user_id.trim()], |row| {
                 Ok(ForumReply {
                     id: row.get(0)?,
                     post_id: row.get(1)?,
@@ -2295,7 +2348,11 @@ impl Storage {
         Ok(count > 0)
     }
 
-    pub fn has_pending_friend_request(&self, left: &str, right: &str) -> Result<bool, StorageError> {
+    pub fn has_pending_friend_request(
+        &self,
+        left: &str,
+        right: &str,
+    ) -> Result<bool, StorageError> {
         let left = Self::normalize_social_email(left);
         let right = Self::normalize_social_email(right);
         let conn = self.conn.lock().expect("storage lock");
@@ -2412,7 +2469,8 @@ impl Storage {
                 created_at: row.get::<_, i64>(4)? as u64,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn list_outgoing_friend_requests(
@@ -2436,10 +2494,15 @@ impl Storage {
                 created_at: row.get::<_, i64>(4)? as u64,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
-    pub fn is_user_blocked(&self, blocker_email: &str, blocked_email: &str) -> Result<bool, StorageError> {
+    pub fn is_user_blocked(
+        &self,
+        blocker_email: &str,
+        blocked_email: &str,
+    ) -> Result<bool, StorageError> {
         let blocker_email = Self::normalize_social_email(blocker_email);
         let blocked_email = Self::normalize_social_email(blocked_email);
         if blocker_email == blocked_email {
@@ -2455,7 +2518,11 @@ impl Storage {
         Ok(count > 0)
     }
 
-    pub fn users_block_each_other(&self, left_email: &str, right_email: &str) -> Result<bool, StorageError> {
+    pub fn users_block_each_other(
+        &self,
+        left_email: &str,
+        right_email: &str,
+    ) -> Result<bool, StorageError> {
         let left_email = Self::normalize_social_email(left_email);
         let right_email = Self::normalize_social_email(right_email);
         if left_email == right_email {
@@ -2489,7 +2556,11 @@ impl Storage {
         Ok(())
     }
 
-    pub fn unblock_user(&self, blocker_email: &str, blocked_email: &str) -> Result<(), StorageError> {
+    pub fn unblock_user(
+        &self,
+        blocker_email: &str,
+        blocked_email: &str,
+    ) -> Result<(), StorageError> {
         let blocker_email = Self::normalize_social_email(blocker_email);
         let blocked_email = Self::normalize_social_email(blocked_email);
         let conn = self.conn.lock().expect("storage lock");
@@ -2510,7 +2581,8 @@ impl Storage {
              ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![blocker_email], |row| row.get(0))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn list_users_who_blocked(&self, blocked_email: &str) -> Result<Vec<String>, StorageError> {
@@ -2522,10 +2594,15 @@ impl Storage {
              ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![blocked_email], |row| row.get(0))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
-    pub fn remove_friendship_between(&self, left_email: &str, right_email: &str) -> Result<(), StorageError> {
+    pub fn remove_friendship_between(
+        &self,
+        left_email: &str,
+        right_email: &str,
+    ) -> Result<(), StorageError> {
         let left_email = Self::normalize_social_email(left_email);
         let right_email = Self::normalize_social_email(right_email);
         let conn = self.conn.lock().expect("storage lock");
@@ -2573,7 +2650,8 @@ impl Storage {
             };
             Ok(StoredFriendSummary { friend_email })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     fn sorted_message_participants(left: &str, right: &str) -> (String, String) {
@@ -2586,7 +2664,11 @@ impl Storage {
         }
     }
 
-    fn other_message_participant(viewer_email: &str, participant_a: &str, participant_b: &str) -> String {
+    fn other_message_participant(
+        viewer_email: &str,
+        participant_a: &str,
+        participant_b: &str,
+    ) -> String {
         if participant_a.eq_ignore_ascii_case(viewer_email) {
             participant_b.to_string()
         } else {
@@ -2599,7 +2681,8 @@ impl Storage {
         left_email: &str,
         right_email: &str,
     ) -> Result<Option<StoredMessageThread>, StorageError> {
-        let (participant_a, participant_b) = Self::sorted_message_participants(left_email, right_email);
+        let (participant_a, participant_b) =
+            Self::sorted_message_participants(left_email, right_email);
         let conn = self.conn.lock().expect("storage lock");
         let result = conn.query_row(
             "SELECT id, participant_a, participant_b, status, initiated_by, created_at, responded_at
@@ -2641,10 +2724,17 @@ impl Storage {
              SET status = 'accepted', responded_at = ?1
              WHERE participant_a = ?2 AND participant_b = ?3 AND status = 'pending'
                AND initiated_by != ?4 COLLATE NOCASE",
-            params![responded_at as i64, participant_a, participant_b, viewer_email],
+            params![
+                responded_at as i64,
+                participant_a,
+                participant_b,
+                viewer_email
+            ],
         )?;
         if updated == 0 {
-            return Err(StorageError::InvalidInput("message request not found".into()));
+            return Err(StorageError::InvalidInput(
+                "message request not found".into(),
+            ));
         }
         Ok(())
     }
@@ -2665,10 +2755,17 @@ impl Storage {
              SET status = 'declined', responded_at = ?1
              WHERE participant_a = ?2 AND participant_b = ?3 AND status = 'pending'
                AND initiated_by != ?4 COLLATE NOCASE",
-            params![responded_at as i64, participant_a, participant_b, viewer_email],
+            params![
+                responded_at as i64,
+                participant_a,
+                participant_b,
+                viewer_email
+            ],
         )?;
         if updated == 0 {
-            return Err(StorageError::InvalidInput("message request not found".into()));
+            return Err(StorageError::InvalidInput(
+                "message request not found".into(),
+            ));
         }
         Ok(())
     }
@@ -2691,7 +2788,10 @@ impl Storage {
         Ok(())
     }
 
-    pub fn list_message_thread_partners(&self, viewer_email: &str) -> Result<Vec<String>, StorageError> {
+    pub fn list_message_thread_partners(
+        &self,
+        viewer_email: &str,
+    ) -> Result<Vec<String>, StorageError> {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let conn = self.conn.lock().expect("storage lock");
         let mut stmt = conn.prepare(
@@ -2708,10 +2808,14 @@ impl Storage {
                 &participant_b,
             ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
-    pub fn count_pending_message_requests(&self, viewer_email: &str) -> Result<usize, StorageError> {
+    pub fn count_pending_message_requests(
+        &self,
+        viewer_email: &str,
+    ) -> Result<usize, StorageError> {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let conn = self.conn.lock().expect("storage lock");
         let count: i64 = conn.query_row(
@@ -2741,7 +2845,9 @@ impl Storage {
         if self.are_friends(&viewer_email, &other_email)? {
             return Ok(true);
         }
-        Ok(self.get_message_thread(&viewer_email, &other_email)?.is_some())
+        Ok(self
+            .get_message_thread(&viewer_email, &other_email)?
+            .is_some())
     }
 
     fn ensure_message_send_allowed(
@@ -2781,14 +2887,15 @@ impl Storage {
                 Ok(())
             }
             Some(thread) if thread.status == "accepted" => Ok(()),
-            Some(thread) if thread.status == "pending" && thread.initiated_by.eq_ignore_ascii_case(&from_email) => {
+            Some(thread)
+                if thread.status == "pending"
+                    && thread.initiated_by.eq_ignore_ascii_case(&from_email) =>
+            {
                 Ok(())
             }
-            Some(thread) if thread.status == "pending" => {
-                Err(StorageError::InvalidInput(
-                    "accept the message request before replying".into(),
-                ))
-            }
+            Some(thread) if thread.status == "pending" => Err(StorageError::InvalidInput(
+                "accept the message request before replying".into(),
+            )),
             Some(_) => Err(StorageError::InvalidInput(
                 "message request declined".into(),
             )),
@@ -2810,7 +2917,10 @@ impl Storage {
         let body = body.trim();
         let media_type = media_type.trim();
         if body.is_empty()
-            && media_url.map(str::trim).filter(|value| !value.is_empty()).is_none()
+            && media_url
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
         {
             return Err(StorageError::InvalidInput("message required".into()));
         }
@@ -2868,7 +2978,9 @@ impl Storage {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let friend_email = Self::normalize_social_email(friend_email);
         if !self.can_view_message_conversation(&viewer_email, &friend_email)? {
-            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+            return Err(StorageError::InvalidInput(
+                "cannot view conversation".into(),
+            ));
         }
 
         let limit = limit.min(100) as i64;
@@ -2904,7 +3016,8 @@ impl Storage {
                 read_at: row.get::<_, Option<i64>>(8)?.map(|value| value as u64),
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn mark_friend_conversation_read(
@@ -2916,7 +3029,9 @@ impl Storage {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let friend_email = Self::normalize_social_email(friend_email);
         if !self.can_view_message_conversation(&viewer_email, &friend_email)? {
-            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+            return Err(StorageError::InvalidInput(
+                "cannot view conversation".into(),
+            ));
         }
 
         let conn = self.conn.lock().expect("storage lock");
@@ -3044,15 +3159,15 @@ impl Storage {
         Ok(count > 0)
     }
 
-    fn friend_message_participant(
-        message: &StoredFriendMessage,
-        user_email: &str,
-    ) -> bool {
+    fn friend_message_participant(message: &StoredFriendMessage, user_email: &str) -> bool {
         message.from_email.eq_ignore_ascii_case(user_email)
             || message.to_email.eq_ignore_ascii_case(user_email)
     }
 
-    pub fn get_friend_message(&self, message_id: &str) -> Result<Option<StoredFriendMessage>, StorageError> {
+    pub fn get_friend_message(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<StoredFriendMessage>, StorageError> {
         let message_id = message_id.trim();
         if message_id.is_empty() {
             return Ok(None);
@@ -3137,7 +3252,9 @@ impl Storage {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let partner_email = Self::normalize_social_email(partner_email);
         if !self.can_view_message_conversation(&viewer_email, &partner_email)? {
-            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+            return Err(StorageError::InvalidInput(
+                "cannot view conversation".into(),
+            ));
         }
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
@@ -3158,7 +3275,9 @@ impl Storage {
         let viewer_email = Self::normalize_social_email(viewer_email);
         let partner_email = Self::normalize_social_email(partner_email);
         if !self.can_view_message_conversation(&viewer_email, &partner_email)? {
-            return Err(StorageError::InvalidInput("cannot view conversation".into()));
+            return Err(StorageError::InvalidInput(
+                "cannot view conversation".into(),
+            ));
         }
         let conn = self.conn.lock().expect("storage lock");
         conn.execute(
@@ -3172,7 +3291,10 @@ impl Storage {
     }
 
     fn legacy_media_item(post: &StoredSocialPost) -> Option<StoredSocialPostMedia> {
-        let url = post.media_url.as_deref().filter(|value| !value.is_empty())?;
+        let url = post
+            .media_url
+            .as_deref()
+            .filter(|value| !value.is_empty())?;
         if post.media_type == "none" {
             return None;
         }
@@ -3247,7 +3369,9 @@ impl Storage {
         let user_id = Self::normalize_social_email(user_id);
         let body = body.trim();
         if body.is_empty() && media_items.is_empty() {
-            return Err(StorageError::InvalidInput("post requires text or media".into()));
+            return Err(StorageError::InvalidInput(
+                "post requires text or media".into(),
+            ));
         }
         if body.chars().count() > 2000 {
             return Err(StorageError::InvalidInput("caption too long".into()));
@@ -3387,7 +3511,10 @@ impl Storage {
         Ok(count > 0)
     }
 
-    fn social_comment_upvote_count(conn: &Connection, comment_id: &str) -> Result<u32, rusqlite::Error> {
+    fn social_comment_upvote_count(
+        conn: &Connection,
+        comment_id: &str,
+    ) -> Result<u32, rusqlite::Error> {
         conn.query_row(
             "SELECT COUNT(*) FROM social_comment_votes WHERE comment_id = ?1",
             params![comment_id],
@@ -3518,8 +3645,7 @@ impl Storage {
             return Err(StorageError::InvalidInput("comment not found".into()));
         }
 
-        let already_voted =
-            Self::social_comment_viewer_upvoted(&conn, comment_id, &user_id)?;
+        let already_voted = Self::social_comment_viewer_upvoted(&conn, comment_id, &user_id)?;
         if already_voted {
             conn.execute(
                 "DELETE FROM social_comment_votes WHERE comment_id = ?1 AND user_id = ?2",
@@ -3647,9 +3773,7 @@ impl Storage {
         viewer_email: Option<&str>,
     ) -> Result<Option<StoredSocialPost>, StorageError> {
         let conn = self.conn.lock().expect("storage lock");
-        let sql = format!(
-            "SELECT {SOCIAL_POST_SELECT} FROM social_posts WHERE id = ?1"
-        );
+        let sql = format!("SELECT {SOCIAL_POST_SELECT} FROM social_posts WHERE id = ?1");
         let result = conn.query_row(&sql, params![post_id], map_social_post_row);
         let mut post = match result {
             Ok(post) => post,
@@ -3718,6 +3842,14 @@ impl Storage {
         };
         self.hydrate_social_posts_media(&mut posts)?;
         Ok(posts)
+    }
+
+    pub fn list_social_posts_for_user(
+        &self,
+        user_id: &str,
+        limit: usize,
+    ) -> Result<Vec<StoredSocialPost>, StorageError> {
+        self.list_social_posts_from_users(&[user_id.to_string()], limit)
     }
 
     pub fn list_social_posts_from_users_with_engagement(
@@ -3864,10 +3996,14 @@ impl Storage {
         let user_id = Self::normalize_social_email(user_id);
         let body = body.trim();
         if body.is_empty() {
-            return Err(StorageError::InvalidInput("wrapped post requires text".into()));
+            return Err(StorageError::InvalidInput(
+                "wrapped post requires text".into(),
+            ));
         }
         if wrapped_payload.trim().is_empty() {
-            return Err(StorageError::InvalidInput("wrapped payload required".into()));
+            return Err(StorageError::InvalidInput(
+                "wrapped payload required".into(),
+            ));
         }
 
         let id = uuid::Uuid::new_v4().to_string();
@@ -3945,7 +4081,9 @@ impl Storage {
         let user_id = Self::normalize_social_email(user_id);
         let body = body.trim();
         if body.is_empty() {
-            return Err(StorageError::InvalidInput("pet id post requires text".into()));
+            return Err(StorageError::InvalidInput(
+                "pet id post requires text".into(),
+            ));
         }
         if wrapped_payload.trim().is_empty() {
             return Err(StorageError::InvalidInput("pet id payload required".into()));
@@ -3999,7 +4137,9 @@ impl Storage {
         let shared_with_email = Self::normalize_social_email(shared_with_email);
         let pet_id = pet_id.trim();
         if owner_email == shared_with_email {
-            return Err(StorageError::InvalidInput("cannot share with yourself".into()));
+            return Err(StorageError::InvalidInput(
+                "cannot share with yourself".into(),
+            ));
         }
         if pet_id.is_empty() {
             return Err(StorageError::InvalidInput("pet required".into()));
@@ -4071,7 +4211,8 @@ impl Storage {
                 created_at: row.get::<_, i64>(5)? as u64,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn list_accepted_pet_shares_for_recipient(
@@ -4096,7 +4237,8 @@ impl Storage {
                 created_at: row.get::<_, i64>(5)? as u64,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn has_accepted_pet_share(
@@ -4139,7 +4281,8 @@ impl Storage {
                 created_at: row.get::<_, i64>(5)? as u64,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
 
     pub fn revoke_pet_share(&self, share_id: &str, owner_email: &str) -> Result<(), StorageError> {
@@ -4831,10 +4974,9 @@ mod tests {
 
     #[test]
     fn feedback_delete_respects_ownership() {
-        let storage = Storage::open_at(std::env::temp_dir().join(format!(
-            "ww-feedback-delete-{}",
-            uuid::Uuid::new_v4()
-        )))
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-feedback-delete-{}", uuid::Uuid::new_v4())),
+        )
         .expect("storage");
 
         let submission = FeedbackSubmission {
@@ -4933,23 +5075,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open_at(temp.path().to_path_buf()).expect("open storage");
         let post = storage
-            .create_social_post(
-                "owner@test.local",
-                "owner",
-                "Hello",
-                &[],
-                false,
-                100,
-            )
+            .create_social_post("owner@test.local", "owner", "Hello", &[], false, 100)
             .expect("create post");
         let comment = storage
-            .create_social_post_comment(
-                &post.id,
-                "owner@test.local",
-                "owner",
-                "Nice post",
-                200,
-            )
+            .create_social_post_comment(&post.id, "owner@test.local", "owner", "Nice post", 200)
             .expect("create comment");
         storage
             .toggle_social_comment_upvote(&comment.id, "friend@test.local", 201)

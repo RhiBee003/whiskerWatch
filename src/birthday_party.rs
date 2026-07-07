@@ -259,10 +259,7 @@ pub fn render_cat_home_banner(ctx: &BirthdayPartyContext) -> String {
 
 pub fn party_mood_message(ctx: &BirthdayPartyContext, cats: &[SceneCat]) -> String {
     let names = birthday_names_line(&ctx.birthday_pets);
-    let guest_count = cats
-        .iter()
-        .filter(|cat| !cat.is_owned)
-        .count();
+    let guest_count = cats.iter().filter(|cat| !cat.is_owned).count();
     if guest_count == 0 {
         return format!(
             "Happy birthday, {names}! The party is ready — more guests may arrive as friends join WhiskerWatch."
@@ -300,7 +297,7 @@ pub fn render_party_overlay() -> String {
   <span class="cat-home-birthday-confetti cat-home-birthday-confetti--2"></span>
   <span class="cat-home-birthday-confetti cat-home-birthday-confetti--3"></span>
 </div>"#
-    .to_string()
+        .to_string()
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use crate::{
     escape_html, escape_html_attr, push_activity,
-    share_cards::{format_cute_streak_markup, CuteStreakStyle, STREAK_MILESTONES}, UserProfile,
+    share_cards::{format_cute_streak_markup, CuteStreakStyle, STREAK_MILESTONES},
+    UserProfile,
 };
 
 pub struct StreakRewardTier {
@@ -75,7 +76,11 @@ pub fn tier_for_days(days: u32) -> Option<&'static StreakRewardTier> {
 }
 
 pub fn reward_state(profile: &UserProfile, days: u32) -> RewardState {
-    if profile.claimed_streak_rewards.iter().any(|claimed| *claimed == days) {
+    if profile
+        .claimed_streak_rewards
+        .iter()
+        .any(|claimed| *claimed == days)
+    {
         return RewardState::Claimed;
     }
     if profile.care_streak_days >= days {
@@ -97,7 +102,11 @@ pub fn claim_streak_reward(profile: &mut UserProfile, days: u32) -> Result<u32, 
     let Some(tier) = tier_for_days(days) else {
         return Err(ClaimError::InvalidMilestone);
     };
-    if profile.claimed_streak_rewards.iter().any(|claimed| *claimed == days) {
+    if profile
+        .claimed_streak_rewards
+        .iter()
+        .any(|claimed| *claimed == days)
+    {
         return Err(ClaimError::AlreadyClaimed);
     }
     if profile.care_streak_days < days {

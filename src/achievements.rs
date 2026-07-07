@@ -64,7 +64,10 @@ pub fn collect_achievements(profile: &UserProfile) -> Vec<Achievement> {
     achievements
 }
 
-pub fn collect_parent_profile_achievements(profile: &UserProfile, is_self: bool) -> Vec<Achievement> {
+pub fn collect_parent_profile_achievements(
+    profile: &UserProfile,
+    is_self: bool,
+) -> Vec<Achievement> {
     collect_achievements(profile)
         .into_iter()
         .filter(|achievement| is_self || !is_private_parent_profile_achievement(achievement))
@@ -140,7 +143,9 @@ mod tests {
         let achievements = collect_achievements(&profile);
         assert!(achievements.iter().any(|item| item.title == "First flame"));
         assert!(achievements.iter().any(|item| item.title == "Week warrior"));
-        assert!(achievements.iter().any(|item| item.title == "WhiskerWatch Plus"));
+        assert!(achievements
+            .iter()
+            .any(|item| item.title == "WhiskerWatch Plus"));
 
         let html = render_parent_profile_achievements(&profile, false);
         assert!(html.contains("parent-profile-achievements"));

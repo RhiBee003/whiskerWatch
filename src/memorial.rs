@@ -134,7 +134,9 @@ pub fn set_memorial_video_slot(
         return false;
     }
     if pet_id == PRIMARY_PET_ID {
-        profile.memorial_videos.resize(MAX_MEMORIAL_VIDEOS, String::new());
+        profile
+            .memorial_videos
+            .resize(MAX_MEMORIAL_VIDEOS, String::new());
         profile.memorial_videos[slot] = url;
         return true;
     }
@@ -145,7 +147,8 @@ pub fn set_memorial_video_slot(
     else {
         return false;
     };
-    pet.memorial_videos.resize(MAX_MEMORIAL_VIDEOS, String::new());
+    pet.memorial_videos
+        .resize(MAX_MEMORIAL_VIDEOS, String::new());
     pet.memorial_videos[slot] = url;
     true
 }
@@ -225,18 +228,18 @@ pub fn ensure_memorial_tasks_for_pet(profile: &mut UserProfile, pet_id: &str) ->
 
     let before_len = profile.tasks.len();
     profile.tasks.retain(|task| {
-        task.pet_id != pet_id
-            || !is_memorial_task_id(&task.id)
-            || desired_ids.contains(&task.id)
+        task.pet_id != pet_id || !is_memorial_task_id(&task.id) || desired_ids.contains(&task.id)
     });
     if profile.tasks.len() != before_len {
         changed = true;
     }
 
     for task in desired {
-        if profile.tasks.iter().any(|existing| {
-            existing.id == task.id && existing.pet_id == pet_id
-        }) {
+        if profile
+            .tasks
+            .iter()
+            .any(|existing| existing.id == task.id && existing.pet_id == pet_id)
+        {
             continue;
         }
         profile.tasks.push(task);
@@ -316,9 +319,7 @@ fn render_memorial_video_slot(
     videos: &[String],
     input_id_prefix: &str,
 ) -> String {
-    let filled = videos
-        .get(slot)
-        .is_some_and(|url| !url.trim().is_empty());
+    let filled = videos.get(slot).is_some_and(|url| !url.trim().is_empty());
     let slot_class = if filled {
         " memorial-video-slot-saved"
     } else {
@@ -591,9 +592,9 @@ pub fn memorial_status_message(status: Option<&str>, pet_name: &str) -> Option<S
             "Memory clip saved for {}. Tap their photo to cycle through clips.",
             pet_name
         )),
-        Some("memorial_video_invalid") => {
-            Some("That memory clip could not be saved. Try MP4, WebM, or MOV under 50MB.".to_string())
-        }
+        Some("memorial_video_invalid") => Some(
+            "That memory clip could not be saved. Try MP4, WebM, or MOV under 50MB.".to_string(),
+        ),
         Some("memorial_invalid") => Some("That memorial update could not be saved.".to_string()),
         _ => None,
     }

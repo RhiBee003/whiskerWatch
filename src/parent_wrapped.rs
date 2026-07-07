@@ -45,7 +45,9 @@ pub fn month_range_unix(year: u32, month: u32) -> Option<(u64, u64)> {
     } else {
         NaiveDate::from_ymd_opt(year as i32, month + 1, 1)?
     };
-    let start = Utc.from_utc_datetime(&start_date.and_hms_opt(0, 0, 0)?).timestamp() as u64;
+    let start = Utc
+        .from_utc_datetime(&start_date.and_hms_opt(0, 0, 0)?)
+        .timestamp() as u64;
     let end = (Utc
         .from_utc_datetime(&end_date.and_hms_opt(0, 0, 0)?)
         .timestamp() as u64)
@@ -113,9 +115,10 @@ pub fn build_monthly_wrapped_payload(
 ) -> Result<WrappedPayload, StorageError> {
     let (start_ts, end_ts) = month_range_unix(year, month)
         .ok_or_else(|| StorageError::InvalidInput("invalid wrapped month".into()))?;
-    let mut posts = state
-        .storage
-        .list_user_standard_posts_in_range(&profile.email, start_ts, end_ts)?;
+    let mut posts =
+        state
+            .storage
+            .list_user_standard_posts_in_range(&profile.email, start_ts, end_ts)?;
     state
         .storage
         .hydrate_social_posts_engagement(&mut posts, None)?;
@@ -160,8 +163,7 @@ pub fn maybe_publish_monthly_wrapped(
         return Ok(None);
     }
 
-    let now = chrono::DateTime::<Utc>::from_timestamp(now_ts as i64, 0)
-        .unwrap_or_else(Utc::now);
+    let now = chrono::DateTime::<Utc>::from_timestamp(now_ts as i64, 0).unwrap_or_else(Utc::now);
     let (year, month) = previous_calendar_month(now);
     if state
         .storage
@@ -248,16 +250,26 @@ mod tests {
             )
             .expect("create post");
 
-        let published = maybe_publish_monthly_wrapped(&state, &profile, "wrappedparent", march.timestamp() as u64)
-            .expect("publish");
+        let published = maybe_publish_monthly_wrapped(
+            &state,
+            &profile,
+            "wrappedparent",
+            march.timestamp() as u64,
+        )
+        .expect("publish");
         assert!(published.is_some());
         assert!(state
             .storage
             .has_monthly_wrapped(&profile.email, year, month)
             .expect("check wrapped"));
 
-        let again = maybe_publish_monthly_wrapped(&state, &profile, "wrappedparent", march.timestamp() as u64)
-            .expect("publish again");
+        let again = maybe_publish_monthly_wrapped(
+            &state,
+            &profile,
+            "wrappedparent",
+            march.timestamp() as u64,
+        )
+        .expect("publish again");
         assert!(again.is_none());
     }
 }

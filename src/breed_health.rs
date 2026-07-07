@@ -61,12 +61,12 @@ fn build_resolved(category: &str, name: &str) -> ResolvedBreed {
         name: name.to_string(),
         slug: slug.clone(),
         category: category.to_string(),
-        brachycephalic: matches!(
-            slug.as_str(),
-            "persian" | "himalayan" | "exotic-shorthair"
-        ),
+        brachycephalic: matches!(slug.as_str(), "persian" | "himalayan" | "exotic-shorthair"),
         long_haired: category.contains("Long-Haired"),
-        large_breed: matches!(slug.as_str(), "maine-coon" | "ragdoll" | "norwegian-forest-cat"),
+        large_breed: matches!(
+            slug.as_str(),
+            "maine-coon" | "ragdoll" | "norwegian-forest-cat"
+        ),
         hairless: slug == "sphynx",
         folded_ear: slug == "scottish-fold",
         short_limbs: slug == "munchkin",
@@ -127,9 +127,7 @@ pub fn enrich_summary(
 
     let breed_label = format!("{} ({})", pet_name, breed.name);
     let joined = notes.join(" ");
-    format!(
-        "{base_summary} For {breed_label}: {joined}"
-    )
+    format!("{base_summary} For {breed_label}: {joined}")
 }
 
 pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<String> {
@@ -179,13 +177,19 @@ pub fn breed_context_notes(breed: &ResolvedBreed, age: &str, text: &str) -> Vec<
     }
 
     if breed.large_breed {
-        if text_contains(text, "limp") || text_contains(text, "stiff") || text_contains(text, "jump") {
+        if text_contains(text, "limp")
+            || text_contains(text, "stiff")
+            || text_contains(text, "jump")
+        {
             notes.push(format!(
                 "Large breeds like {} may develop joint stiffness — mention changes in jumping or stairs to your vet.",
                 breed.name
             ));
         }
-        if text_contains(text, "breath") || text_contains(text, "cough") || text_contains(text, "letharg") {
+        if text_contains(text, "breath")
+            || text_contains(text, "cough")
+            || text_contains(text, "letharg")
+        {
             notes.push(format!(
                 "Some large breeds, including {}, can develop heart conditions — tell your vet about breathing or activity changes so they can decide if screening is needed.",
                 breed.name

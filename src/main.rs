@@ -27,15 +27,17 @@ use uuid::Uuid;
 mod achievements;
 mod appearance;
 mod birthday_party;
-mod cat_bonds;
 mod breed_guides;
-mod breed_seo;
 mod breed_health;
+mod breed_seo;
 mod breeds;
+mod cat_bonds;
 mod community;
+mod data_export;
 mod email_delivery;
-mod memorial;
 mod entitlements;
+mod home_health_check;
+mod memorial;
 mod onboarding_emails;
 mod parent_wrapped;
 mod pet_id_posts;
@@ -43,12 +45,11 @@ mod playdates;
 mod push_notifications;
 mod share_cards;
 mod sharing;
-mod social_posts;
 mod shelter_locator;
+mod social_posts;
 mod storage;
 mod streak_rewards;
 mod stripe_payments;
-mod home_health_check;
 mod symptom_checker;
 mod vet_care;
 mod vet_financial_resources;
@@ -738,8 +739,7 @@ pub(crate) fn pet_snapshot(profile: &UserProfile, pet_id: &str) -> Option<PetSna
 }
 
 pub(crate) fn active_pet_snapshot(profile: &UserProfile) -> Option<PetSnapshot> {
-    pet_snapshot(profile, &profile.active_pet_id)
-        .or_else(|| pet_snapshot(profile, PRIMARY_PET_ID))
+    pet_snapshot(profile, &profile.active_pet_id).or_else(|| pet_snapshot(profile, PRIMARY_PET_ID))
 }
 
 fn household_pet_card_tuples(profile: &UserProfile) -> Vec<(String, String, String, String)> {
@@ -987,12 +987,16 @@ fn owned_pet_is_deletable(profile: &UserProfile, pet_id: &str) -> bool {
 }
 
 fn viewing_shared_pet(profile: &UserProfile) -> bool {
-    profile.active_pet_owner_email.as_ref().is_some_and(|owner| {
-        !owner.eq_ignore_ascii_case(&profile.email)
-    })
+    profile
+        .active_pet_owner_email
+        .as_ref()
+        .is_some_and(|owner| !owner.eq_ignore_ascii_case(&profile.email))
 }
 
-fn delete_pet_from_profile(profile: &mut UserProfile, pet_id: &str) -> Option<(String, Vec<String>)> {
+fn delete_pet_from_profile(
+    profile: &mut UserProfile,
+    pet_id: &str,
+) -> Option<(String, Vec<String>)> {
     if !owned_pet_is_deletable(profile, pet_id) {
         return None;
     }
@@ -1054,12 +1058,11 @@ fn reset_active_pet_on_sign_in(state: &AppState, email: &str) {
     }
 }
 
-pub(crate) fn pet_birth_date_for_snapshot(snapshot: &PetSnapshot, reference: NaiveDate) -> Option<NaiveDate> {
-    if let Some(stored) = snapshot
-        .pet_birth_date
-        .as_deref()
-        .and_then(parse_vet_date)
-    {
+pub(crate) fn pet_birth_date_for_snapshot(
+    snapshot: &PetSnapshot,
+    reference: NaiveDate,
+) -> Option<NaiveDate> {
+    if let Some(stored) = snapshot.pet_birth_date.as_deref().and_then(parse_vet_date) {
         return Some(stored);
     }
     if let Some(weeks) = snapshot.pet_age_weeks {
@@ -1140,9 +1143,10 @@ fn resolve_task_pet_id(profile: &UserProfile, form_pet_id: &str) -> String {
 }
 
 fn find_task_index(profile: &UserProfile, task_id: &str, pet_id: &str) -> Option<usize> {
-    profile.tasks.iter().position(|task| {
-        task.id == task_id && task.pet_id == pet_id
-    })
+    profile
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id && task.pet_id == pet_id)
 }
 
 fn render_pet_switcher(profile: &UserProfile) -> String {
@@ -1152,10 +1156,7 @@ fn render_pet_switcher(profile: &UserProfile) -> String {
     }
 
     let active = active_pet_id(profile);
-    let active_index = pets
-        .iter()
-        .position(|(id, _)| id == active)
-        .unwrap_or(0);
+    let active_index = pets.iter().position(|(id, _)| id == active).unwrap_or(0);
     let prev_idx = if active_index == 0 {
         pets.len() - 1
     } else {
@@ -1611,7 +1612,10 @@ impl OnboardingForm {
                 fields,
                 "pet_video_clip_duration",
             )),
-            pet_video_zoom: parse_optional_video_float(&form_optional_scalar(fields, "pet_video_zoom")),
+            pet_video_zoom: parse_optional_video_float(&form_optional_scalar(
+                fields,
+                "pet_video_zoom",
+            )),
             pet_video_offset_x: parse_optional_video_float(&form_optional_scalar(
                 fields,
                 "pet_video_offset_x",
@@ -1788,7 +1792,7 @@ struct FeedbackVoteResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct FeedbackSubmission {
+pub(crate) struct FeedbackSubmission {
     #[serde(default)]
     id: i64,
     name: String,
@@ -2079,7 +2083,7 @@ fn format_timestamp(timestamp: u64) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
-fn format_member_since(timestamp: u64) -> String {
+pub(crate) fn format_member_since(timestamp: u64) -> String {
     if timestamp == 0 {
         return "Recently joined".to_string();
     }
@@ -2476,7 +2480,11 @@ pub(crate) fn task_is_deletable(task_id: &str) -> bool {
     }
     matches!(
         task_id,
-        "water_bowl_morning" | "water_bowl_night" | "litter_check" | "play_session" | "replace_litter"
+        "water_bowl_morning"
+            | "water_bowl_night"
+            | "litter_check"
+            | "play_session"
+            | "replace_litter"
     )
 }
 
@@ -2557,10 +2565,7 @@ fn task_schedule_prefix(task_id: &str) -> &'static str {
 
 fn task_due_label_for(task_id: &str, time_minutes: u16) -> String {
     if breed_guides::is_breed_guide_task_id(task_id) {
-        return format!(
-            "Daily · {}",
-            format_time_from_minutes(time_minutes)
-        );
+        return format!("Daily · {}", format_time_from_minutes(time_minutes));
     }
     format!(
         "{} · {}",
@@ -2575,9 +2580,11 @@ fn apply_task_time_to_profile(profile: &mut UserProfile, task_id: &str, time_min
     }
 
     let active_id = active_pet_id(profile).to_string();
-    let Some(task) = profile.tasks.iter_mut().find(|task| {
-        task.id == task_id && task.pet_id == active_id
-    }) else {
+    let Some(task) = profile
+        .tasks
+        .iter_mut()
+        .find(|task| task.id == task_id && task.pet_id == active_id)
+    else {
         return false;
     };
 
@@ -2877,9 +2884,7 @@ fn generate_daily_care_calendar_events(
             continue;
         };
         events.extend(generate_daily_care_calendar_events_for_snapshot(
-            &snapshot,
-            today,
-            horizon,
+            &snapshot, today, horizon,
         ));
     }
     events
@@ -3570,12 +3575,7 @@ fn refresh_daily_task_schedule(task: &mut UserTask, today: NaiveDate) -> bool {
     changed
 }
 
-fn vet_appointment_task(
-    today: NaiveDate,
-    pet_id: &str,
-    title: &str,
-    due_label: &str,
-) -> UserTask {
+fn vet_appointment_task(today: NaiveDate, pet_id: &str, title: &str, due_label: &str) -> UserTask {
     UserTask {
         id: VET_APPOINTMENT_TASK_ID.to_string(),
         title: title.to_string(),
@@ -3947,9 +3947,9 @@ pub(crate) fn ensure_breed_guide_tasks(profile: &mut UserProfile) -> bool {
         let Some(guide) = breed_guides::guide_for_slug(&slug) else {
             return false;
         };
-        pet_breeds.get(&task.pet_id).is_some_and(|breed| {
-            breed_guides::pet_breed_matches_guide(breed, &guide)
-        })
+        pet_breeds
+            .get(&task.pet_id)
+            .is_some_and(|breed| breed_guides::pet_breed_matches_guide(breed, &guide))
     });
     if profile.tasks.len() != before_len {
         changed = true;
@@ -4098,9 +4098,10 @@ pub(crate) fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
             continue;
         }
         let needs_vet = needs_vet_appointment_asap_for_snapshot(profile, &snapshot, today);
-        let has_vet_task = profile.tasks.iter().any(|task| {
-            task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id
-        });
+        let has_vet_task = profile
+            .tasks
+            .iter()
+            .any(|task| task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id);
 
         if needs_vet && !has_vet_task {
             profile.tasks.push(vet_appointment_task(
@@ -4113,9 +4114,11 @@ pub(crate) fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
         } else if needs_vet && has_vet_task {
             let title = vet_care::task_title(&snapshot, today);
             let due_label = vet_care::task_due_label(&snapshot, today);
-            if let Some(task) = profile.tasks.iter_mut().find(|task| {
-                task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id
-            }) {
+            if let Some(task) = profile
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id)
+            {
                 if task.title != title {
                     task.title = title;
                     changed = true;
@@ -4126,9 +4129,9 @@ pub(crate) fn refresh_profile_tasks(profile: &mut UserProfile) -> bool {
                 }
             }
         } else if !needs_vet && has_vet_task {
-            profile.tasks.retain(|task| {
-                !(task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id)
-            });
+            profile
+                .tasks
+                .retain(|task| !(task.id == VET_APPOINTMENT_TASK_ID && task.pet_id == pet_id));
             changed = true;
         }
     }
@@ -4419,10 +4422,7 @@ fn render_pet_meta(profile: &UserProfile) -> String {
         .as_ref()
         .map(|pet| pet.pet_mood.as_str())
         .unwrap_or(profile.pet_mood.as_str());
-    format!(
-        "{breed}{color_part} · Mood: {}",
-        escape_html(mood)
-    )
+    format!("{breed}{color_part} · Mood: {}", escape_html(mood))
 }
 
 fn vet_reminder_interval(profile: &UserProfile) -> Duration {
@@ -4488,7 +4488,9 @@ pub(crate) fn visible_calendar_events(
     let horizon = today + Duration::days(CALENDAR_PREVIEW_HORIZON_DAYS);
     let mut events = merge_calendar_events(profile, reference_date);
     events.extend(generate_daily_care_calendar_events(profile, today, horizon));
-    events.extend(generate_breed_guide_calendar_events(profile, today, horizon));
+    events.extend(generate_breed_guide_calendar_events(
+        profile, today, horizon,
+    ));
     events.extend(profile.user_calendar_events.iter().cloned());
     events.sort_by(|left, right| {
         (
@@ -4664,6 +4666,20 @@ fn week_from_birth(birth: NaiveDate, weeks: u32) -> NaiveDate {
     birth + Duration::weeks(i64::from(weeks))
 }
 
+fn snap_overdue_vaccine_date(next: NaiveDate, today: NaiveDate, interval: Duration) -> NaiveDate {
+    let mut scheduled = next;
+    while scheduled < today {
+        scheduled += interval;
+    }
+    if scheduled > today {
+        let previous = scheduled - interval;
+        if previous < today {
+            return today;
+        }
+    }
+    scheduled
+}
+
 fn push_vaccine_reminder(
     events: &mut Vec<CalendarEvent>,
     date: NaiveDate,
@@ -4689,7 +4705,6 @@ fn schedule_kitten_vaccines(
     horizon: NaiveDate,
     pet_name: &str,
 ) {
-
     for week in [6u32, 10, 14, 18] {
         let target = week_from_birth(birth, week);
         if !is_dose_satisfied(VaccineKind::Fvrcp, target, history) {
@@ -4757,9 +4772,7 @@ fn schedule_adult_vaccines(
     let mut fvrcp_next = latest_history_date(history, VaccineKind::Fvrcp)
         .map(|last| last + Duration::days(365 * 3))
         .unwrap_or(one_year);
-    while fvrcp_next < today {
-        fvrcp_next += Duration::days(365 * 3);
-    }
+    fvrcp_next = snap_overdue_vaccine_date(fvrcp_next, today, Duration::days(365 * 3));
     while fvrcp_next <= horizon {
         if !is_dose_satisfied(VaccineKind::Fvrcp, fvrcp_next, history) {
             let label = if fvrcp_next == one_year {
@@ -4775,9 +4788,7 @@ fn schedule_adult_vaccines(
     let mut rabies_next = latest_history_date(history, VaccineKind::Rabies)
         .map(|last| last + Duration::days(365 * 3))
         .unwrap_or(one_year);
-    while rabies_next < today {
-        rabies_next += Duration::days(365 * 3);
-    }
+    rabies_next = snap_overdue_vaccine_date(rabies_next, today, Duration::days(365 * 3));
     while rabies_next <= horizon {
         if !is_dose_satisfied(VaccineKind::Rabies, rabies_next, history) {
             let label = if rabies_next == one_year {
@@ -4799,9 +4810,7 @@ fn schedule_adult_vaccines(
     let mut felv_next = latest_history_date(history, VaccineKind::Felv)
         .map(|last| last + felv_interval)
         .unwrap_or(one_year);
-    while felv_next < today {
-        felv_next += felv_interval;
-    }
+    felv_next = snap_overdue_vaccine_date(felv_next, today, felv_interval);
     while felv_next <= horizon {
         if !is_dose_satisfied(VaccineKind::Felv, felv_next, history) {
             let label = if felv_next == one_year {
@@ -4955,13 +4964,29 @@ pub(crate) fn generate_vaccine_calendar_events_for_snapshot(
             schedule_kitten_vaccines(&mut events, history, birth, today, horizon, &pet_name);
         }
         if weeks > 20 {
-            schedule_adult_vaccines(&mut events, history, outdoor, birth, today, horizon, &pet_name);
+            schedule_adult_vaccines(
+                &mut events,
+                history,
+                outdoor,
+                birth,
+                today,
+                horizon,
+                &pet_name,
+            );
         }
     } else if snapshot
         .pet_age_years
         .is_some_and(|years| (1..=10).contains(&years))
     {
-        schedule_adult_vaccines(&mut events, history, outdoor, birth, today, horizon, &pet_name);
+        schedule_adult_vaccines(
+            &mut events,
+            history,
+            outdoor,
+            birth,
+            today,
+            horizon,
+            &pet_name,
+        );
     }
 
     events.sort_by_key(|event| (event.year, event.month, event.day));
@@ -4992,8 +5017,7 @@ pub(crate) fn merge_calendar_events(
             ));
         }
         events.extend(generate_birthday_calendar_events_for_snapshot(
-            &snapshot,
-            today,
+            &snapshot, today,
         ));
     }
 
@@ -5200,8 +5224,7 @@ fn render_health_tab(active: &UserProfile, household: &UserProfile, header_prefi
     }
 
     let stripe_enabled = stripe_payments::stripe_checkout_enabled();
-    let premium =
-        entitlements::can_access_health_records(active.premium_unlocked, &active.email);
+    let premium = entitlements::can_access_health_records(active.premium_unlocked, &active.email);
     let breed_guide_card = breed_guides::render_health_tab_card(
         &active.pet_name,
         &active.pet_breed,
@@ -5211,8 +5234,7 @@ fn render_health_tab(active: &UserProfile, household: &UserProfile, header_prefi
         stripe_enabled,
     );
     let breed_guides_shop_link = r#"<p class="health-breed-guides-link"><a href="/home/breed-guides" class="health-breed-guides-btn">Browse premium breed guides 📚</a></p>"#;
-    let symptom_checker_card =
-        symptom_checker::render_health_tab_card(&display_pet_name(active));
+    let symptom_checker_card = symptom_checker::render_health_tab_card(&display_pet_name(active));
     let financial_resources_card = vet_financial_resources::render_health_tab_card();
 
     if !premium {
@@ -5982,18 +6004,19 @@ fn render_pet_color_picker(hidden_id: &str, select_id: &str, custom_id: &str) ->
     )
 }
 
-fn render_cute_date_picker(kind: &str, hidden_id: &str, hidden_name: &str, required: bool) -> String {
+fn render_cute_date_picker(
+    kind: &str,
+    hidden_id: &str,
+    hidden_name: &str,
+    required: bool,
+) -> String {
     let today = Local::now().date_naive();
     let max_date = today.format("%Y-%m-%d").to_string();
     let min_date = format!("{}-01-01", today.year() - 30);
     let trigger_id = format!("{hidden_id}_trigger");
 
     let (icon, placeholder, aria_label) = match kind {
-        "birthday" => (
-            "🎂",
-            "Tap to pick their birthday",
-            "Choose birthday",
-        ),
+        "birthday" => ("🎂", "Tap to pick their birthday", "Choose birthday"),
         "vet" => (
             "🩺",
             "Tap to pick last visit",
@@ -6083,7 +6106,8 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
 
     let birth_date_picker =
         render_cute_date_picker("birthday", "pet_birth_date", "pet_birth_date", true);
-    let pet_color_picker = render_pet_color_picker("pet_color", "pet_color_select", "pet_color_custom");
+    let pet_color_picker =
+        render_pet_color_picker("pet_color", "pet_color_select", "pet_color_custom");
 
     format!(
         r#"<div class="onboarding-backdrop" id="onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" hidden>
@@ -6160,8 +6184,11 @@ fn render_onboarding_modal(profile: &UserProfile) -> String {
 fn render_add_cat_onboarding_modal() -> String {
     let birth_date_picker =
         render_cute_date_picker("birthday", "add_cat_birth_date", "pet_birth_date", true);
-    let pet_color_picker =
-        render_pet_color_picker("add_cat_color", "add_cat_color_select", "add_cat_color_custom");
+    let pet_color_picker = render_pet_color_picker(
+        "add_cat_color",
+        "add_cat_color_select",
+        "add_cat_color_custom",
+    );
 
     format!(
         r#"<div class="onboarding-backdrop" id="add-cat-modal" role="dialog" aria-modal="true" aria-labelledby="add-cat-title" hidden>
@@ -6245,34 +6272,40 @@ fn household_pet_from_onboarding(
     indoor_outdoor: String,
     premium: bool,
 ) -> HouseholdPet {
-    let (never_been_to_vet, last_vet_date, pet_conditions, pet_medications, vaccine_history, pet_vaccines_unknown) =
-        if premium {
-            let vaccine_history = if form.pet_vaccines_unknown {
-                vec![]
-            } else {
-                parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates)
-            };
-            let last_vet_date = if form.never_been_to_vet {
+    let (
+        never_been_to_vet,
+        last_vet_date,
+        pet_conditions,
+        pet_medications,
+        vaccine_history,
+        pet_vaccines_unknown,
+    ) = if premium {
+        let vaccine_history = if form.pet_vaccines_unknown {
+            vec![]
+        } else {
+            parse_vaccine_history(&form.vaccine_names, &form.vaccine_dates)
+        };
+        let last_vet_date = if form.never_been_to_vet {
+            None
+        } else {
+            let trimmed = form.last_vet_date.trim();
+            if trimmed.is_empty() {
                 None
             } else {
-                let trimmed = form.last_vet_date.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    parse_vet_date(trimmed).map(|_| trimmed.to_string())
-                }
-            };
-            (
-                form.never_been_to_vet,
-                last_vet_date,
-                form.conditions.trim().to_string(),
-                form.medications.trim().to_string(),
-                vaccine_history,
-                form.pet_vaccines_unknown,
-            )
-        } else {
-            (false, None, String::new(), String::new(), vec![], false)
+                parse_vet_date(trimmed).map(|_| trimmed.to_string())
+            }
         };
+        (
+            form.never_been_to_vet,
+            last_vet_date,
+            form.conditions.trim().to_string(),
+            form.medications.trim().to_string(),
+            vaccine_history,
+            form.pet_vaccines_unknown,
+        )
+    } else {
+        (false, None, String::new(), String::new(), vec![], false)
+    };
 
     HouseholdPet {
         id: new_household_pet_id(),
@@ -7153,15 +7186,10 @@ fn render_feedback_comments_section(
 ) -> String {
     let feedback_id = entry.submission.id;
     let comments_block = if entry.comments.is_empty() {
-        r#"<p class="feedback-comments-empty">No comments yet — start the conversation below.</p>"#.to_string()
+        r#"<p class="feedback-comments-empty">No comments yet — start the conversation below.</p>"#
+            .to_string()
     } else {
-        render_feedback_comment_branch(
-            &entry.comments,
-            None,
-            viewer_email,
-            return_to,
-            0,
-        )
+        render_feedback_comment_branch(&entry.comments, None, viewer_email, return_to, 0)
     };
 
     let compose = if viewer_email.is_some() {
@@ -7339,8 +7367,7 @@ fn feedback_user_owns(submission: &FeedbackSubmission, current_user_email: &str)
 }
 
 fn render_forum_reply(state: &AppState, reply: &ForumReply, current_user_id: &str) -> String {
-    let friend_action =
-        sharing::render_friend_add_control(state, current_user_id, &reply.user_id);
+    let friend_action = sharing::render_friend_add_control(state, current_user_id, &reply.user_id);
     let block_action = sharing::render_block_control(state, current_user_id, &reply.user_id);
     let is_mine = forum_user_owns(&reply.user_id, current_user_id);
     let mine_class = if is_mine { " is-mine" } else { "" };
@@ -7574,7 +7601,11 @@ fn render_dashboard_forum_tab(
         .list_forum_posts(breed_filter)
         .unwrap_or_default();
     let breed_label = community::breed_label_for_slug(breed_filter.unwrap_or(""));
-    let empty_message = if breed_filter.map(str::trim).filter(|v| !v.is_empty()).is_some() {
+    let empty_message = if breed_filter
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some()
+    {
         format!(
             "No {breed_label} questions yet. Start the conversation for your breed!",
             breed_label = breed_label.to_lowercase(),
@@ -7584,8 +7615,7 @@ fn render_dashboard_forum_tab(
     };
     let threads =
         render_forum_threads_html(state, &posts, open_thread, current_user_id, &empty_message);
-    let breed_options =
-        community::render_breed_filter_options(breed_filter.unwrap_or(""), profile);
+    let breed_options = community::render_breed_filter_options(breed_filter.unwrap_or(""), profile);
     let forum_panel = format!(
         r#"<section class="community-section community-section-forum" id="community-forum-panel">
   <div class="community-section-header">
@@ -7621,12 +7651,8 @@ fn render_dashboard_forum_tab(
         threads = threads,
     );
 
-    let friends_panel = social_posts::render_friends_posts_section(
-        state,
-        current_user_id,
-        profile,
-        posts_view,
-    );
+    let friends_panel =
+        social_posts::render_friends_posts_section(state, current_user_id, profile, posts_view);
 
     let posts_view_query = match posts_view {
         social_posts::SocialPostsView::All => "&amp;posts_view=all",
@@ -8030,27 +8056,19 @@ fn render_cat_home_scene(state: &AppState, viewer: &UserProfile, play_as_pet_id:
     let plant = equipped_decor_for_slot(viewer, "plant");
 
     let rug_layer = rug
-        .map(|decor| {
-            playdates::render_interactive_prop("rug", "rug", decor.name, decor.emoji)
-        })
+        .map(|decor| playdates::render_interactive_prop("rug", "rug", decor.name, decor.emoji))
         .unwrap_or_default();
 
     let bed_layer = bed
-        .map(|decor| {
-            playdates::render_interactive_prop("bed", "bed", decor.name, decor.emoji)
-        })
+        .map(|decor| playdates::render_interactive_prop("bed", "bed", decor.name, decor.emoji))
         .unwrap_or_default();
 
     let toy_layer = toy
-        .map(|decor| {
-            playdates::render_interactive_prop("toy", "toy", decor.name, decor.emoji)
-        })
+        .map(|decor| playdates::render_interactive_prop("toy", "toy", decor.name, decor.emoji))
         .unwrap_or_default();
 
     let plant_layer = plant
-        .map(|decor| {
-            playdates::render_interactive_prop("plant", "plant", decor.name, decor.emoji)
-        })
+        .map(|decor| playdates::render_interactive_prop("plant", "plant", decor.name, decor.emoji))
         .unwrap_or_default();
 
     let equipped_strip = render_cat_home_equipped_strip(viewer);
@@ -8077,11 +8095,7 @@ fn render_cat_home_shops(profile: &UserProfile) -> String {
     )
 }
 
-fn render_cat_home_panel_scene(
-    state: &AppState,
-    profile: &UserProfile,
-    pet_id: &str,
-) -> String {
+fn render_cat_home_panel_scene(state: &AppState, profile: &UserProfile, pet_id: &str) -> String {
     if memorial::pet_is_deceased(profile, pet_id) {
         memorial::render_angel_cat_home_scene_for_pet(profile, pet_id)
     } else {
@@ -8093,7 +8107,7 @@ fn render_cat_home_stage_card(
     state: &AppState,
     profile: &UserProfile,
     pet_id: &str,
-    pet_name: &str,
+    _pet_name: &str,
 ) -> String {
     let scene = render_cat_home_panel_scene(state, profile, pet_id);
     let shops = if memorial::pet_is_deceased(profile, pet_id) {
@@ -8196,7 +8210,10 @@ fn render_cat_home_play_switcher(
     )
 }
 
-fn render_cat_home_layout(state: &AppState, profile: &UserProfile) -> (String, String, String, String) {
+fn render_cat_home_layout(
+    state: &AppState,
+    profile: &UserProfile,
+) -> (String, String, String, String) {
     let pets = list_pet_summaries(profile);
     if pets.is_empty() {
         return (
@@ -8254,12 +8271,7 @@ fn render_cat_home_layout(state: &AppState, profile: &UserProfile) -> (String, S
         "Family Cat Home".to_string()
     };
 
-    (
-        title,
-        intro,
-        play_switcher,
-        layout,
-    )
+    (title, intro, play_switcher, layout)
 }
 
 fn cat_home_status_block(status: Option<&str>) -> String {
@@ -8430,18 +8442,14 @@ fn task_source_profile_for_pet(
     sharing::load_profile_by_email(state, &pet.owner_email).unwrap_or_else(|| viewer.clone())
 }
 
-fn tasks_panel_active_index(
-    pets: &[sharing::AccessiblePetSummary],
-    viewer: &UserProfile,
-) -> usize {
+fn tasks_panel_active_index(pets: &[sharing::AccessiblePetSummary], viewer: &UserProfile) -> usize {
     let active_owner = viewer
         .active_pet_owner_email
         .as_deref()
         .unwrap_or(&viewer.email);
     pets.iter()
         .position(|pet| {
-            pet.pet_id == viewer.active_pet_id
-                && pet.owner_email.eq_ignore_ascii_case(active_owner)
+            pet.pet_id == viewer.active_pet_id && pet.owner_email.eq_ignore_ascii_case(active_owner)
         })
         .unwrap_or(0)
 }
@@ -8576,11 +8584,7 @@ fn render_task_category_section(
     )
 }
 
-fn render_task_list_for_pet(
-    profile: &UserProfile,
-    pet_id: &str,
-    pet_owner_field: &str,
-) -> String {
+fn render_task_list_for_pet(profile: &UserProfile, pet_id: &str, pet_owner_field: &str) -> String {
     let mut tasks: Vec<UserTask> = profile
         .tasks
         .iter()
@@ -8621,10 +8625,7 @@ fn render_task_add_section_for_pet(pet: &sharing::AccessiblePetSummary) -> Strin
     let shared_hint = if pet.is_owned {
         String::new()
     } else {
-        format!(
-            " · shared by {}",
-            escape_html(&pet.owner_label)
-        )
+        format!(" · shared by {}", escape_html(&pet.owner_label))
     };
 
     format!(
@@ -8650,11 +8651,7 @@ fn render_task_list(profile: &UserProfile) -> String {
     }
 
     let active_id = active_pet_id(profile).to_string();
-    render_task_list_for_pet(
-        profile,
-        &active_id,
-        &task_pet_owner_hidden_field(profile),
-    )
+    render_task_list_for_pet(profile, &active_id, &task_pet_owner_hidden_field(profile))
 }
 
 fn pet_view_for_accessible_pet(
@@ -8773,8 +8770,7 @@ fn render_pet_showcase_carousel(state: &AppState, viewer: &UserProfile) -> Strin
     }
 
     let active_index = tasks_panel_active_index(&pets, viewer);
-    pets
-        .iter()
+    pets.iter()
         .enumerate()
         .map(|(index, pet)| render_pet_showcase_panel(state, viewer, pet, index == active_index))
         .collect::<String>()
@@ -9490,12 +9486,8 @@ async fn dashboard_page(
         .as_ref()
         .map(|u| u.username.clone())
         .unwrap_or_else(|| "Parent".to_string());
-    let _ = parent_wrapped::maybe_publish_monthly_wrapped(
-        &state,
-        &profile,
-        &username,
-        timestamp_now(),
-    );
+    let _ =
+        parent_wrapped::maybe_publish_monthly_wrapped(&state, &profile, &username, timestamp_now());
     let first_name = user
         .as_ref()
         .map(|u| u.first_name.clone())
@@ -9595,6 +9587,10 @@ async fn dashboard_page(
             &appearance::render_account_appearance_section(&profile),
         )
         .replace(
+            "{{ACCOUNT_DATA_EXPORT_SECTION}}",
+            &data_export::render_account_data_export_section(),
+        )
+        .replace(
             "{{ACCOUNT_PET_NAME_FIELD}}",
             &render_account_pet_name_field(&account_view),
         )
@@ -9617,12 +9613,18 @@ async fn dashboard_page(
             &streak_rewards::render_care_streak_chip(&profile),
         )
         .replace("{{STREAK_CARD_SECTION}}", &streak_card_section)
-        .replace("{{PET_SWITCHER}}", &sharing::render_pet_switcher(&state, &profile, "pet"))
+        .replace(
+            "{{PET_SWITCHER}}",
+            &sharing::render_pet_switcher(&state, &profile, "pet"),
+        )
         .replace(
             "{{PET_SHOWCASE_PANELS}}",
             &render_pet_showcase_carousel(&state, &profile),
         )
-        .replace("{{SHARED_PET_BANNER}}", &sharing::render_shared_pet_banner(&state, &profile))
+        .replace(
+            "{{SHARED_PET_BANNER}}",
+            &sharing::render_shared_pet_banner(&state, &profile),
+        )
         .replace("{{PET_NAME}}", &escape_html(&display_pet_name(&pet_view)))
         .replace("{{PET_BLURB}}", &render_pet_blurb(&pet_view))
         .replace("{{PET_CHECK_CTA}}", &render_pet_check_cta(&pet_view))
@@ -9635,7 +9637,10 @@ async fn dashboard_page(
             "{{ACCOUNT_PET_PHOTO_MODAL}}",
             &render_account_pet_photo_modal(&profile),
         )
-        .replace("{{CAT_HOME_NAV_LINK}}", &render_cat_home_nav_link(&pet_view))
+        .replace(
+            "{{CAT_HOME_NAV_LINK}}",
+            &render_cat_home_nav_link(&pet_view),
+        )
         .replace("{{PET_SETUP_CTA}}", &render_pet_setup_cta(&profile))
         .replace(
             "{{NEEDS_PET_SETUP_DATA}}",
@@ -9892,6 +9897,33 @@ async fn pet_name_submit(
         .into_response()
     } else {
         Redirect::to("/home?tab=account&status=pet_name_done").into_response()
+    }
+}
+
+async fn user_data_export(State(state): State<AppState>, jar: CookieJar) -> impl IntoResponse {
+    let email = match user_redirect_if_missing(&state, &jar) {
+        Ok(email) => email,
+        Err(redirect) => return redirect.into_response(),
+    };
+
+    match data_export::build_export(&state, &email).await {
+        Ok((filename, json_bytes)) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            )
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(axum::body::Body::from(json_bytes))
+            .unwrap_or_else(|_| {
+                Redirect::to("/home?tab=account&status=export_failed").into_response()
+            })
+            .into_response(),
+        Err(error) => {
+            eprintln!("data export failed for {email}: {error}");
+            Redirect::to("/home?tab=account&status=export_failed").into_response()
+        }
     }
 }
 
@@ -10216,9 +10248,7 @@ async fn delete_pet_submit(
         return Redirect::to("/home?tab=account&status=pet_delete_invalid");
     };
 
-    let _ = state
-        .storage
-        .revoke_pet_shares_for_pet(&email, pet_id);
+    let _ = state.storage.revoke_pet_shares_for_pet(&email, pet_id);
     remove_upload_files(&state, &media_urls).await;
     push_activity(
         &mut profile,
@@ -10329,7 +10359,11 @@ async fn memorial_video_submit(
         }
     }
 
-    let clips_query = if return_clips { "&memorial_clips=1" } else { "" };
+    let clips_query = if return_clips {
+        "&memorial_clips=1"
+    } else {
+        ""
+    };
     let redirect_invalid = format!("/home?tab=account{clips_query}&status=memorial_video_invalid");
     let redirect_saved = format!("/home?tab=account{clips_query}&status=memorial_video_saved");
 
@@ -10386,19 +10420,18 @@ pub(crate) fn build_pet_id_post_payload(
     })
 }
 
-async fn try_publish_pet_id_post(state: &AppState, profile: &UserProfile, email: &str, pet_id: &str) {
+async fn try_publish_pet_id_post(
+    state: &AppState,
+    profile: &UserProfile,
+    email: &str,
+    pet_id: &str,
+) {
     let Some(payload) = build_pet_id_post_payload(profile, pet_id) else {
         return;
     };
     let username = user_for_email(state, email)
         .map(|user| user.username)
-        .unwrap_or_else(|| {
-            email
-                .split('@')
-                .next()
-                .unwrap_or("CatParent")
-                .to_string()
-        });
+        .unwrap_or_else(|| email.split('@').next().unwrap_or("CatParent").to_string());
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
@@ -10547,7 +10580,9 @@ async fn onboarding_submit(
             if let Some(bytes) = video_bytes {
                 let ext = match validate_pet_video(video_content_type.as_deref(), &bytes) {
                     Ok(ext) => ext,
-                    Err(()) => return Redirect::to("/home?tab=pet&status=onboarding_video_invalid"),
+                    Err(()) => {
+                        return Redirect::to("/home?tab=pet&status=onboarding_video_invalid")
+                    }
                 };
                 match save_pet_video(&state, &email, &bytes, ext, Some(&new_pet_id)).await {
                     Ok(url) => {
@@ -10558,9 +10593,7 @@ async fn onboarding_submit(
                         new_pet.pet_video_offset_x = form.pet_video_offset_x;
                         new_pet.pet_video_offset_y = form.pet_video_offset_y;
                     }
-                    Err(_) => {
-                        return Redirect::to("/home?tab=pet&status=onboarding_video_invalid")
-                    }
+                    Err(_) => return Redirect::to("/home?tab=pet&status=onboarding_video_invalid"),
                 }
             }
         }
@@ -10722,10 +10755,7 @@ async fn outfit_buy(
     profile.equipped_outfit = outfit.name.to_string();
     push_activity(
         &mut profile,
-        &format!(
-            "Purchased {} for {} paw points.",
-            outfit.name, outfit.price
-        ),
+        &format!("Purchased {} for {} paw points.", outfit.name, outfit.price),
     );
 
     match save_profile(&state, &profile).await {
@@ -10738,9 +10768,14 @@ async fn outfit_buy(
             true,
         ),
         Ok(()) => outfit_redirect("", "outfit_bought").into_response(),
-        Err(_) if wants_json => {
-            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
-        }
+        Err(_) if wants_json => shop_buy_json_response(
+            false,
+            "outfit_invalid",
+            Some(&profile),
+            "outfit",
+            outfit.id,
+            false,
+        ),
         Err(_) => outfit_redirect("", "outfit_invalid").into_response(),
     }
 }
@@ -10769,7 +10804,14 @@ async fn outfit_equip(
 
     if !profile.owned_outfits.iter().any(|id| id == outfit.id) {
         return if wants_json {
-            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
+            shop_buy_json_response(
+                false,
+                "outfit_invalid",
+                Some(&profile),
+                "outfit",
+                outfit.id,
+                false,
+            )
         } else {
             outfit_redirect("", "outfit_invalid").into_response()
         };
@@ -10792,9 +10834,14 @@ async fn outfit_equip(
             true,
         ),
         Ok(()) => outfit_redirect("", "outfit_equipped").into_response(),
-        Err(_) if wants_json => {
-            shop_buy_json_response(false, "outfit_invalid", Some(&profile), "outfit", outfit.id, false)
-        }
+        Err(_) if wants_json => shop_buy_json_response(
+            false,
+            "outfit_invalid",
+            Some(&profile),
+            "outfit",
+            outfit.id,
+            false,
+        ),
         Err(_) => outfit_redirect("", "outfit_invalid").into_response(),
     }
 }
@@ -10887,9 +10934,14 @@ async fn decor_buy(
             true,
         ),
         Ok(()) => Redirect::to("/home/cat-home?status=decor_bought").into_response(),
-        Err(_) if wants_json => {
-            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
-        }
+        Err(_) if wants_json => shop_buy_json_response(
+            false,
+            "decor_invalid",
+            Some(&profile),
+            "decor",
+            decor.id,
+            false,
+        ),
         Err(_) => Redirect::to("/home/cat-home?status=decor_invalid").into_response(),
     }
 }
@@ -10922,7 +10974,14 @@ async fn decor_equip(
 
     if !profile.owned_decor.iter().any(|id| id == decor.id) {
         return if wants_json {
-            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
+            shop_buy_json_response(
+                false,
+                "decor_invalid",
+                Some(&profile),
+                "decor",
+                decor.id,
+                false,
+            )
         } else {
             Redirect::to("/home/cat-home?status=decor_invalid").into_response()
         };
@@ -10947,9 +11006,14 @@ async fn decor_equip(
             true,
         ),
         Ok(()) => Redirect::to("/home/cat-home?status=decor_equipped").into_response(),
-        Err(_) if wants_json => {
-            shop_buy_json_response(false, "decor_invalid", Some(&profile), "decor", decor.id, false)
-        }
+        Err(_) if wants_json => shop_buy_json_response(
+            false,
+            "decor_invalid",
+            Some(&profile),
+            "decor",
+            decor.id,
+            false,
+        ),
         Err(_) => Redirect::to("/home/cat-home?status=decor_invalid").into_response(),
     }
 }
@@ -11518,10 +11582,7 @@ async fn task_delete(
         (save_profile(&state, &viewer).await, task.title)
     };
 
-    push_activity(
-        &mut viewer,
-        &format!("Removed care task: {removed_title}."),
-    );
+    push_activity(&mut viewer, &format!("Removed care task: {removed_title}."));
     let _ = save_profile(&state, &viewer).await;
 
     match save_result {
@@ -11615,7 +11676,9 @@ async fn task_toggle(
                 (Ok(()), Ok(())) if wants_json => {
                     task_dashboard_json_response(&state, &viewer, "reopened", false, None)
                 }
-                (Ok(()), Ok(())) => Redirect::to("/home?tab=tasks&status=task_reopened").into_response(),
+                (Ok(()), Ok(())) => {
+                    Redirect::to("/home?tab=tasks&status=task_reopened").into_response()
+                }
                 _ if wants_json => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({ "ok": false, "status": "error" })),
@@ -11830,10 +11893,7 @@ async fn friend_search(
     let results = sharing::search_friend_candidates(&state, &email, &query.q);
     (
         StatusCode::OK,
-        Json(sharing::FriendSearchResponse {
-            ok: true,
-            results,
-        }),
+        Json(sharing::FriendSearchResponse { ok: true, results }),
     )
         .into_response()
 }
@@ -11857,10 +11917,7 @@ async fn friend_message_search(
     let results = sharing::search_message_candidates(&state, &email, &query.q);
     (
         StatusCode::OK,
-        Json(sharing::FriendSearchResponse {
-            ok: true,
-            results,
-        }),
+        Json(sharing::FriendSearchResponse { ok: true, results }),
     )
         .into_response()
 }
@@ -12111,11 +12168,7 @@ async fn friend_messages_read(
 
     let friend_email = sharing::normalize_email(&form.friend_email);
     match sharing::mark_friend_messages_read(&state, &email, &friend_email, timestamp_now()) {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "ok": true })),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Err(_) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "ok": false, "status": "invalid" })),
@@ -12183,8 +12236,13 @@ async fn user_block_action(
     };
 
     let target_email = sharing::normalize_email(&form.target_email);
-    match sharing::apply_user_block_action(&state, &email, &target_email, &form.action, timestamp_now())
-    {
+    match sharing::apply_user_block_action(
+        &state,
+        &email,
+        &target_email,
+        &form.action,
+        timestamp_now(),
+    ) {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(_) => (
             StatusCode::BAD_REQUEST,
@@ -12350,10 +12408,7 @@ async fn pet_share_revoke_submit(
         Err(redirect) => return redirect,
     };
 
-    match state
-        .storage
-        .revoke_pet_share(form.share_id.trim(), &email)
-    {
+    match state.storage.revoke_pet_share(form.share_id.trim(), &email) {
         Ok(()) => Redirect::to("/home?tab=friends&status=share_revoked"),
         Err(_) => Redirect::to("/home?tab=friends&status=share_invalid"),
     }
@@ -12697,11 +12752,8 @@ async fn symptom_check_submit(
     }
 
     let context = symptom_context_from_profile(&profile);
-    let analysis = symptom_checker::analyze_symptoms(
-        &form.symptoms,
-        &form.quick_symptoms,
-        &context,
-    );
+    let analysis =
+        symptom_checker::analyze_symptoms(&form.symptoms, &form.quick_symptoms, &context);
 
     if wants_json {
         return Json(SymptomCheckResponse {
@@ -13798,7 +13850,8 @@ async fn feedback_delete(
     let feedback_id = match form.feedback_id.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            return Redirect::to("/home?tab=feedback&status=feedback_delete_denied").into_response();
+            return Redirect::to("/home?tab=feedback&status=feedback_delete_denied")
+                .into_response();
         }
     };
 
@@ -13973,7 +14026,13 @@ async fn feedback_comment_delete(
     {
         Ok(storage::ForumDeleteOutcome::Deleted) => {
             if wants_json {
-                return (StatusCode::OK, Json(PawCommentDeleteResponse { ok: true, error: None }))
+                return (
+                    StatusCode::OK,
+                    Json(PawCommentDeleteResponse {
+                        ok: true,
+                        error: None,
+                    }),
+                )
                     .into_response();
             }
             Redirect::to(&feedback_comment_redirect(
@@ -14073,10 +14132,7 @@ async fn social_post_submit(
             }
             "private" => {
                 if let Ok(value) = field.text().await {
-                    is_private = matches!(
-                        value.trim(),
-                        "1" | "true" | "on" | "yes"
-                    );
+                    is_private = matches!(value.trim(), "1" | "true" | "on" | "yes");
                 }
             }
             "video_duration" => {
@@ -14126,11 +14182,7 @@ async fn social_post_submit(
             continue;
         }
 
-        if media_items
-            .iter()
-            .any(|item| item.media_type == "photo")
-            || index > 0
-        {
+        if media_items.iter().any(|item| item.media_type == "photo") || index > 0 {
             return Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
                 .into_response();
         }
@@ -14187,10 +14239,10 @@ async fn social_post_submit(
             );
             Redirect::to(&profile_url).into_response()
         }
-        Err(storage::StorageError::InvalidInput(_)) => Redirect::to(
-            "/home?tab=forum&community=friends&status=social_post_invalid",
-        )
-        .into_response(),
+        Err(storage::StorageError::InvalidInput(_)) => {
+            Redirect::to("/home?tab=forum&community=friends&status=social_post_invalid")
+                .into_response()
+        }
         Err(error) => {
             eprintln!("social post failed for {email}: {error}");
             Redirect::to("/home?tab=forum&community=friends&status=social_post_failed")
@@ -14214,9 +14266,8 @@ async fn social_post_delete(
     } else {
         "friends"
     };
-    let redirect_base = format!(
-        "/home?tab=forum&community=friends&posts_view={posts_view}&status="
-    );
+    let redirect_base =
+        format!("/home?tab=forum&community=friends&posts_view={posts_view}&status=");
 
     match state
         .storage
@@ -14226,7 +14277,9 @@ async fn social_post_delete(
             remove_upload_files(&state, &urls).await;
             Redirect::to(&format!("{redirect_base}social_post_deleted")).into_response()
         }
-        Ok(None) => Redirect::to(&format!("{redirect_base}social_post_delete_denied")).into_response(),
+        Ok(None) => {
+            Redirect::to(&format!("{redirect_base}social_post_delete_denied")).into_response()
+        }
         Err(error) => {
             eprintln!("social post delete failed for {email}: {error}");
             Redirect::to(&format!("{redirect_base}social_post_failed")).into_response()
@@ -14886,7 +14939,13 @@ async fn forum_reply_delete(
     match state.storage.delete_forum_reply_owned(reply_id, &email) {
         Ok(ForumDeleteOutcome::Deleted) => {
             if wants_json {
-                return (StatusCode::OK, Json(PawCommentDeleteResponse { ok: true, error: None }))
+                return (
+                    StatusCode::OK,
+                    Json(PawCommentDeleteResponse {
+                        ok: true,
+                        error: None,
+                    }),
+                )
                     .into_response();
             }
             forum_delete_redirect(Some(post_id), "forum_reply_deleted")
@@ -15133,9 +15192,9 @@ mod tests {
             memorial_videos: Vec::new(),
             memorial_comfort_seen: false,
             pending_purrfect_idea_ids: vec![],
-        owned_decor: default_owned_decor(),
-        equipped_decor: default_equipped_decor(),
-        owned_breed_guides: Vec::new(),
+            owned_decor: default_owned_decor(),
+            equipped_decor: default_equipped_decor(),
+            owned_breed_guides: Vec::new(),
             premium_unlocked: false,
             additional_pets: Vec::new(),
             active_pet_id: PRIMARY_PET_ID.to_string(),
@@ -15201,9 +15260,10 @@ mod tests {
         assert!(memorial::memorialize_pet(&mut profile, "pet_luna"));
         assert!(refresh_profile_tasks(&mut profile));
 
-        assert!(!profile.tasks.iter().any(|task| {
-            task.pet_id == "pet_luna" && task.id == "feed_breakfast"
-        }));
+        assert!(!profile
+            .tasks
+            .iter()
+            .any(|task| { task.pet_id == "pet_luna" && task.id == "feed_breakfast" }));
         assert!(profile.tasks.iter().any(|task| {
             task.pet_id == "pet_luna" && task.id == memorial::MEMORIAL_SELF_HUG_TASK_ID
         }));
@@ -15330,12 +15390,9 @@ mod tests {
         profile.owned_breed_guides.push("persian".to_string());
 
         assert!(ensure_breed_guide_tasks(&mut profile));
-        assert!(
-            profile
-                .tasks
-                .iter()
-                .any(|task| task.id.starts_with("breed_guide_persian_") && task.pet_id == PRIMARY_PET_ID)
-        );
+        assert!(profile.tasks.iter().any(
+            |task| task.id.starts_with("breed_guide_persian_") && task.pet_id == PRIMARY_PET_ID
+        ));
 
         let today = Local::now().date_naive();
         let horizon = today + Duration::days(400);
@@ -15349,7 +15406,9 @@ mod tests {
     fn health_watch_outs_tasks_link_to_breed_guide_section() {
         let mut profile = test_profile_weeks(52, "indoor");
         profile.pet_breed = "British Shorthair".to_string();
-        profile.owned_breed_guides.push("british-shorthair".to_string());
+        profile
+            .owned_breed_guides
+            .push("british-shorthair".to_string());
 
         assert!(ensure_breed_guide_tasks(&mut profile));
         let breed_task_ids: Vec<String> = profile
@@ -15359,9 +15418,9 @@ mod tests {
             .map(|task| task.id.clone())
             .collect();
         assert!(
-            breed_task_ids.iter().any(|task_id| {
-                breed_guides::is_health_watch_outs_task(task_id)
-            }),
+            breed_task_ids
+                .iter()
+                .any(|task_id| { breed_guides::is_health_watch_outs_task(task_id) }),
             "expected health watch-outs task, got {breed_task_ids:?}"
         );
 
@@ -15389,8 +15448,7 @@ mod tests {
         let mut kitten = test_profile_weeks(10, "indoor");
         kitten.pet_birth_date = Some("2026-04-01".to_string());
         let kitten_snapshot = PetSnapshot::from_primary(&kitten);
-        let kitten_tasks =
-            default_starter_tasks(&kitten_snapshot, &default_care_schedule());
+        let kitten_tasks = default_starter_tasks(&kitten_snapshot, &default_care_schedule());
         assert_eq!(
             kitten_tasks
                 .iter()
@@ -15538,12 +15596,10 @@ mod tests {
         assert_eq!(removed.id, "litter_check");
         assert!(is_task_dismissed(&profile, PRIMARY_PET_ID, "litter_check"));
         let _ = refresh_profile_tasks(&mut profile);
-        assert!(
-            !profile
-                .tasks
-                .iter()
-                .any(|task| task.id == "litter_check" && task.pet_id == PRIMARY_PET_ID)
-        );
+        assert!(!profile
+            .tasks
+            .iter()
+            .any(|task| task.id == "litter_check" && task.pet_id == PRIMARY_PET_ID));
         let html = render_task_list(&profile);
         assert!(html.contains("task-delete-btn"));
     }
@@ -15899,8 +15955,12 @@ mod tests {
 
         let today = NaiveDate::from_ymd_opt(2026, 6, 5).expect("date");
         let events = merge_calendar_events(&profile, today);
-        assert!(events.iter().any(|event| event.title.contains("Cinder's birthday")));
-        assert!(events.iter().any(|event| event.title.contains("Luna's birthday")));
+        assert!(events
+            .iter()
+            .any(|event| event.title.contains("Cinder's birthday")));
+        assert!(events
+            .iter()
+            .any(|event| event.title.contains("Luna's birthday")));
     }
 
     #[test]
@@ -16223,10 +16283,9 @@ mod tests {
         });
         profile.active_pet_id = "pet_luna".to_string();
         let state = AppState {
-            storage: Storage::open_at(std::env::temp_dir().join(format!(
-                "ww-vet-care-multi-{}",
-                Uuid::new_v4()
-            )))
+            storage: Storage::open_at(
+                std::env::temp_dir().join(format!("ww-vet-care-multi-{}", Uuid::new_v4())),
+            )
             .expect("storage"),
         };
         let pet_view = sharing::active_pet_view_profile(&state, &profile);
@@ -17248,17 +17307,17 @@ mod tests {
             memorial_comfort_seen: false,
         });
         assert!(refresh_profile_tasks(&mut profile));
-        assert!(profile
-            .tasks
-            .iter()
-            .any(|task| task.pet_id == "pet_luna"));
+        assert!(profile.tasks.iter().any(|task| task.pet_id == "pet_luna"));
 
         let deleted = delete_pet_from_profile(&mut profile, "pet_luna");
         assert!(deleted.is_some());
         assert_eq!(deleted.unwrap().0, "Luna");
         assert!(profile.additional_pets.is_empty());
         assert!(!profile.tasks.iter().any(|task| task.pet_id == "pet_luna"));
-        assert!(profile.tasks.iter().any(|task| task.pet_id == PRIMARY_PET_ID));
+        assert!(profile
+            .tasks
+            .iter()
+            .any(|task| task.pet_id == PRIMARY_PET_ID));
         assert_eq!(profile.active_pet_id, PRIMARY_PET_ID);
     }
 
@@ -17751,8 +17810,12 @@ mod tests {
         let mut profile = test_profile_weeks(52, "indoor");
         profile.email = "streak-chip@example.com".to_string();
         profile.care_streak_days = 5;
-        profile.care_streak_last_date =
-            Some(chrono::Local::now().date_naive().format("%Y-%m-%d").to_string());
+        profile.care_streak_last_date = Some(
+            chrono::Local::now()
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string(),
+        );
         state.storage.save_profile(&profile).expect("save profile");
 
         let jar = create_user_session(&state, CookieJar::new(), &profile.email);
@@ -18234,9 +18297,10 @@ mod tests {
 
     #[test]
     fn forum_thread_url_loads_breed_qa_panel_without_community_param() {
-        let storage =
-            Storage::open_at(std::env::temp_dir().join(format!("ww-forum-thread-{}", Uuid::new_v4())))
-                .expect("storage");
+        let storage = Storage::open_at(
+            std::env::temp_dir().join(format!("ww-forum-thread-{}", Uuid::new_v4())),
+        )
+        .expect("storage");
         let state = AppState { storage };
 
         let post_id = state
@@ -18290,7 +18354,10 @@ mod tests {
             password: "secret".to_string(),
             created_at: 1,
         };
-        state.storage.save_user(&mochi_user).expect("save mochi user");
+        state
+            .storage
+            .save_user(&mochi_user)
+            .expect("save mochi user");
 
         let mut mochi = test_profile_weeks(52, "indoor");
         mochi.email = "mochi@test.local".to_string();
@@ -18307,8 +18374,7 @@ mod tests {
         hidden.community_visible = false;
         state.storage.save_profile(&hidden).expect("save hidden");
 
-        let html =
-            render_dashboard_forum_tab(
+        let html = render_dashboard_forum_tab(
             &state,
             &viewer,
             None,
@@ -18436,10 +18502,7 @@ mod tests {
         let state = AppState { storage };
 
         let viewer = test_profile_weeks(52, "indoor");
-        state
-            .storage
-            .save_profile(&viewer)
-            .expect("save viewer");
+        state.storage.save_profile(&viewer).expect("save viewer");
 
         let mut angel = test_profile_weeks(52, "indoor");
         angel.email = "angel@test.local".to_string();
@@ -18449,8 +18512,7 @@ mod tests {
         angel.deceased_at = Some("2025-01-01".to_string());
         state.storage.save_profile(&angel).expect("save angel");
 
-        let html =
-            render_dashboard_forum_tab(
+        let html = render_dashboard_forum_tab(
             &state,
             &viewer,
             None,
@@ -18721,9 +18783,12 @@ mod tests {
             0
         );
 
-        let response =
-            sharing::friend_messages_for_conversation(&state, "owner@test.local", "friend@test.local")
-                .expect("messages response");
+        let response = sharing::friend_messages_for_conversation(
+            &state,
+            "owner@test.local",
+            "friend@test.local",
+        )
+        .expect("messages response");
         assert!(response.ok);
         assert_eq!(response.messages.len(), 1);
         assert!(response.messages[0].is_mine);
@@ -18857,13 +18922,11 @@ mod tests {
         )
         .expect("hide conversation for friend");
 
-        assert!(
-            state
-                .storage
-                .list_friend_conversation("friend@test.local", "owner@test.local", 20)
-                .expect("friend hidden conversation")
-                .is_empty()
-        );
+        assert!(state
+            .storage
+            .list_friend_conversation("friend@test.local", "owner@test.local", 20)
+            .expect("friend hidden conversation")
+            .is_empty());
     }
 
     #[test]
@@ -18916,7 +18979,11 @@ mod tests {
         sharing::block_user_profile(&state, "owner@test.local", "target@test.local", 5)
             .expect("block target");
 
-        assert!(sharing::users_block_each_other(&state, "owner@test.local", "target@test.local"));
+        assert!(sharing::users_block_each_other(
+            &state,
+            "owner@test.local",
+            "target@test.local"
+        ));
         assert!(!state
             .storage
             .are_friends("owner@test.local", "target@test.local")
@@ -19328,12 +19395,10 @@ mod tests {
             vaccine_name: "Rabies".to_string(),
             date: "2025-01-15".to_string(),
         });
-        owner_profile
-            .veterinary_notes
-            .push(VeterinaryNote {
-                date: "2025-03-01".to_string(),
-                note: "Kidney values stable".to_string(),
-            });
+        owner_profile.veterinary_notes.push(VeterinaryNote {
+            date: "2025-03-01".to_string(),
+            note: "Kidney values stable".to_string(),
+        });
         state
             .storage
             .save_profile(&owner_profile)
@@ -19489,8 +19554,12 @@ mod tests {
             "friend@test.local",
             "friend@test.local",
         );
-        assert!(friend_profile_posts.iter().any(|post| post.body == "Secret nap"));
-        assert!(friend_profile_posts.iter().any(|post| post.body == "Public zoomies"));
+        assert!(friend_profile_posts
+            .iter()
+            .any(|post| post.body == "Secret nap"));
+        assert!(friend_profile_posts
+            .iter()
+            .any(|post| post.body == "Public zoomies"));
 
         let owner_view_friend_profile = social_posts::collect_parent_profile_posts(
             &state,
@@ -19563,25 +19632,11 @@ mod tests {
 
         let _newer = state
             .storage
-            .create_social_post(
-                "friend@test.local",
-                "friend",
-                "Newer post",
-                &[],
-                false,
-                200,
-            )
+            .create_social_post("friend@test.local", "friend", "Newer post", &[], false, 200)
             .expect("newer post");
         let older = state
             .storage
-            .create_social_post(
-                "friend@test.local",
-                "friend",
-                "Older post",
-                &[],
-                false,
-                100,
-            )
+            .create_social_post("friend@test.local", "friend", "Older post", &[], false, 100)
             .expect("older post");
 
         state
@@ -19613,13 +19668,7 @@ mod tests {
 
         let comment = state
             .storage
-            .create_social_post_comment(
-                &older.id,
-                "owner@test.local",
-                "owner",
-                "So cute!",
-                400,
-            )
+            .create_social_post_comment(&older.id, "owner@test.local", "owner", "So cute!", 400)
             .expect("comment");
         social_posts::toggle_comment_upvote(&state, "friend@test.local", &comment.id, 401)
             .expect("comment upvote");
@@ -19836,7 +19885,8 @@ mod tests {
         )
         .expect("storage");
         let state = AppState { storage };
-        let template = "<nav>{{ADMIN_NAV_LINK}}\n{{admin_nav_link}}\n{{DASHBOARD_NAV_ACTIONS}}</nav>";
+        let template =
+            "<nav>{{ADMIN_NAV_LINK}}\n{{admin_nav_link}}\n{{DASHBOARD_NAV_ACTIONS}}</nav>";
 
         let jar = CookieJar::new();
         let html = replace_admin_nav_link(template, &state, &jar);
@@ -20124,7 +20174,7 @@ mod tests {
             .await
             .expect("body");
         let html = String::from_utf8(body.to_vec()).expect("utf8");
-        assert!(html.contains("Watch over your cat's health"));
+        assert!(html.contains("Premium cat care, made easy."));
         assert!(html.contains("id=\"features\""));
         assert!(!html.contains("Log In to WhiskerWatch"));
         assert_marketing_top_nav(&html, "/");
@@ -20547,6 +20597,17 @@ mod tests {
         assert_eq!(response_location(response), "/");
     }
 
+    fn assert_auth_brand_links_home(html: &str, page: &str) {
+        assert!(
+            html.contains(r#"<a class="brand" href="/""#),
+            "{page} brand should link to the public homepage"
+        );
+        assert!(
+            !html.contains(r#"<a href="/home">HOME</a>"#),
+            "{page} must not link HOME to the auth-only dashboard"
+        );
+    }
+
     fn assert_public_home_nav(html: &str, page: &str) {
         assert!(
             html.contains(r#"<a href="/">HOME</a>"#),
@@ -20593,7 +20654,7 @@ mod tests {
             let html = std::fs::read_to_string(&path).unwrap_or_else(|error| {
                 panic!("could not read {}: {error}", path.display());
             });
-            assert_public_home_nav(&html, name);
+            assert_auth_brand_links_home(&html, name);
         }
     }
 
@@ -20610,8 +20671,7 @@ mod tests {
         .into_response();
         assert_eq!(login.status(), StatusCode::OK);
         let login_html = response_html(login).await;
-        assert_public_home_nav(&login_html, "login");
-        assert_marketing_top_nav(&login_html, "login");
+        assert_auth_brand_links_home(&login_html, "login");
 
         let signup = signup_page(
             State(state.clone()),
@@ -20621,7 +20681,7 @@ mod tests {
         .await
         .into_response();
         assert_eq!(signup.status(), StatusCode::OK);
-        assert_public_home_nav(&response_html(signup).await, "signup");
+        assert_auth_brand_links_home(&response_html(signup).await, "signup");
 
         let forgot = forgot_password_page(
             State(state.clone()),
@@ -20631,7 +20691,7 @@ mod tests {
         .await
         .into_response();
         assert_eq!(forgot.status(), StatusCode::OK);
-        assert_public_home_nav(&response_html(forgot).await, "forgot-password");
+        assert_auth_brand_links_home(&response_html(forgot).await, "forgot-password");
 
         let contact = contact_page(
             State(state.clone()),
@@ -20643,7 +20703,7 @@ mod tests {
         assert_eq!(contact.status(), StatusCode::OK);
         let contact_html = response_html(contact).await;
         assert!(!contact_html.contains("{{"));
-        assert!(contact_html.contains(r#"<a href="/contact">CONTACT</a>"#));
+        assert_auth_brand_links_home(&contact_html, "contact");
 
         let feedback = feedback_page(
             State(state),
@@ -20694,6 +20754,7 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/onboarding", post(onboarding_submit))
         .route("/home/pet-name", post(pet_name_submit))
         .route("/home/password", post(password_change_submit))
+        .route("/home/data-export", get(user_data_export))
         .route("/home/pet-photo", post(pet_photo_submit))
         .route("/home/pet-video", post(pet_video_submit))
         .route("/home/pet-video-reframe", post(pet_video_reframe_submit))
@@ -20716,11 +20777,17 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/streak/claim", post(streak_reward_claim_submit))
         .route("/home/friends/search", get(friend_search))
         .route("/home/friends/messages/search", get(friend_message_search))
-        .route("/home/friends/messages", get(friend_messages_list).post(friend_message_send))
+        .route(
+            "/home/friends/messages",
+            get(friend_messages_list).post(friend_message_send),
+        )
         .route("/home/friends/messages/read", post(friend_messages_read))
         .route("/home/friends/messages/delete", post(friend_message_delete))
         .route("/home/users/block", post(user_block_action))
-        .route("/home/friends/messages/respond", post(message_request_respond))
+        .route(
+            "/home/friends/messages/respond",
+            post(message_request_respond),
+        )
         .route("/home/friends/request", post(friend_request_submit))
         .route("/home/friends/request/quick", post(friend_request_quick))
         .route("/home/friends/respond", post(friend_respond_submit))
@@ -20761,12 +20828,18 @@ fn build_app(state: AppState, uploads_dir: std::path::PathBuf) -> Router {
         .route("/home/social/post", post(social_post_submit))
         .route("/home/social/post/delete", post(social_post_delete))
         .route("/home/social/post/upvote", post(social_post_upvote_submit))
-        .route("/home/social/post/comment", post(social_post_comment_submit))
+        .route(
+            "/home/social/post/comment",
+            post(social_post_comment_submit),
+        )
         .route(
             "/home/social/post/comment/delete",
             post(social_post_comment_delete),
         )
-        .route("/home/social/comment/upvote", post(social_comment_upvote_submit))
+        .route(
+            "/home/social/comment/upvote",
+            post(social_comment_upvote_submit),
+        )
         .route("/home/forum/reply", post(forum_reply_submit))
         .route("/home/forum/reply/delete", post(forum_reply_delete))
         .route("/home/forum/{id}", get(forum_thread_redirect))

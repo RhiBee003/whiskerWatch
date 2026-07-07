@@ -1,9 +1,7 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    playdates, push_activity, save_profile, pet_id_exists, AppState, UserProfile,
-};
+use crate::{pet_id_exists, playdates, push_activity, save_profile, AppState, UserProfile};
 
 pub const BOND_SCORE_MIN: i32 = 0;
 pub const BOND_SCORE_MAX: i32 = 100;
@@ -95,7 +93,10 @@ pub fn bond_score(profile: &UserProfile, pet_id: &str) -> i32 {
 }
 
 pub fn adjust_bond(profile: &mut UserProfile, pet_id: &str, delta: i32) -> i32 {
-    let entry = profile.parent_cat_bonds.entry(pet_id.to_string()).or_insert(0);
+    let entry = profile
+        .parent_cat_bonds
+        .entry(pet_id.to_string())
+        .or_insert(0);
     *entry = (*entry + delta).clamp(BOND_SCORE_MIN, BOND_SCORE_MAX);
     *entry
 }
@@ -162,7 +163,11 @@ pub fn list_owned_pet_bonds(profile: &UserProfile) -> Vec<(String, String, i32)>
         if pet.deceased {
             continue;
         }
-        bonds.push((pet.id.clone(), pet.pet_name.clone(), bond_score(profile, &pet.id)));
+        bonds.push((
+            pet.id.clone(),
+            pet.pet_name.clone(),
+            bond_score(profile, &pet.id),
+        ));
     }
     bonds
 }
@@ -266,15 +271,11 @@ pub async fn apply_bond_interaction(
             "{message} +{paw_points_earned} paw points, +{parent_xp_earned} parent XP. Parent level {level}!"
         )
     } else {
-        format!(
-            "{message} +{paw_points_earned} paw points, +{parent_xp_earned} parent XP."
-        )
+        format!("{message} +{paw_points_earned} paw points, +{parent_xp_earned} parent XP.")
     };
     push_activity(&mut profile, &activity);
 
-    save_profile(state, &profile)
-        .await
-        .map_err(|_| "error")?;
+    save_profile(state, &profile).await.map_err(|_| "error")?;
 
     Ok(BondInteractResponse {
         ok: true,
@@ -328,7 +329,10 @@ mod tests {
     #[test]
     fn adjust_bond_clamps_score() {
         let mut profile = default_profile("test@example.com");
-        assert_eq!(adjust_bond(&mut profile, PRIMARY_PET_ID, 120), BOND_SCORE_MAX);
+        assert_eq!(
+            adjust_bond(&mut profile, PRIMARY_PET_ID, 120),
+            BOND_SCORE_MAX
+        );
         assert_eq!(bond_score(&profile, PRIMARY_PET_ID), BOND_SCORE_MAX);
     }
 }

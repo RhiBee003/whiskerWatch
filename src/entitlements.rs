@@ -240,4 +240,3 @@ pub fn render_household_pet_cards(pets: &[(String, String, String, String)]) -> 
         })
         .collect()
 }
-

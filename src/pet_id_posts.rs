@@ -21,10 +21,7 @@ pub fn publish_pet_id_post(
     payload: PetIdPostPayload,
     created_at: u64,
 ) -> Result<Option<StoredSocialPost>, StorageError> {
-    if state
-        .storage
-        .has_pet_id_post(user_email, &payload.pet_id)?
-    {
+    if state.storage.has_pet_id_post(user_email, &payload.pet_id)? {
         return Ok(None);
     }
 
@@ -70,14 +67,20 @@ mod tests {
         profile.onboarding_completed = true;
 
         let payload = build_pet_id_post_payload(&profile, PRIMARY_PET_ID).expect("payload");
-        let first = publish_pet_id_post(&state, &profile.email, "catmom", payload.clone(), 1_700_000_000)
-            .expect("publish")
-            .expect("created");
+        let first = publish_pet_id_post(
+            &state,
+            &profile.email,
+            "catmom",
+            payload.clone(),
+            1_700_000_000,
+        )
+        .expect("publish")
+        .expect("created");
         assert_eq!(first.post_kind, "pet_id");
         assert!(first.body.contains("Luna"));
 
-        let again =
-            publish_pet_id_post(&state, &profile.email, "catmom", payload, 1_700_000_100).expect("publish");
+        let again = publish_pet_id_post(&state, &profile.email, "catmom", payload, 1_700_000_100)
+            .expect("publish");
         assert!(again.is_none());
     }
 

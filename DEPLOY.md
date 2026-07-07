@@ -64,19 +64,15 @@ Test cards: [Stripe test cards](https://stripe.com/docs/testing#cards) (e.g. `42
 
 ## User accounts and SQLite persistence
 
-All app data lives in **`$DATA_DIR/whiskerwatch.db`** (SQLite), including:
+All app data lives under **`$DATA_DIR`**:
 
-- **User accounts** (bcrypt-hashed passwords, profiles, paw points, pets)
-- **Login sessions** (so restarts do not log you out during local testing)
-- **Forum Q&amp;A** (posts and replies)
-- **Feedback** (bug reports, ideas, and fix requests from `/feedback` and the dashboard Feedback tab)
-- **Contact messages** (from `/contact`)
-- **Stripe fulfilled checkout sessions** (paw point purchases)
+- **`whiskerwatch.db`** (SQLite) — accounts, sessions, forum, feedback, social posts, messages
+- **`uploads/`** — pet photos, playing clips, social post media, memorial videos
 
 | Environment | `DATA_DIR` | Notes |
 |-------------|------------|-------|
 | Local (`cargo run`) | Auto-detected project `data/` folder | Walks up from cwd and the binary path to find `Cargo.toml`, so the same database is used even if you run from another directory. Relative `DATA_DIR=data` is also anchored to the project root when found. Override with an absolute path (e.g. `DATA_DIR=/path/to/data`) if needed. |
-| Render (see `render.yaml`) | `/data` | Requires the **persistent disk** mounted at `/data`. Without it, accounts, forum posts, and feedback are wiped on every deploy or restart. |
+| Render Starter (see `render.yaml`) | `/data` | Requires the **Starter** plan and a **persistent disk** mounted at `/data`. Keeps the database and `uploads/` across redeploys. |
 
 Legacy `users.jsonl`, `user_profiles.jsonl`, `contact_messages.jsonl`, and `feedback.jsonl` files in `DATA_DIR` are imported into SQLite automatically on first startup when the matching table is empty.
 

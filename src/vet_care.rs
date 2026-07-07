@@ -1,9 +1,8 @@
 use chrono::{Datelike, Duration, NaiveDate};
 
 use crate::{
-    breed_guides, breed_health, generate_vaccine_calendar_events_for_snapshot,
-    pet_snapshot, vet_reminder_interval_for_snapshot, CalendarEvent,
-    PetSnapshot, UserProfile,
+    breed_guides, breed_health, generate_vaccine_calendar_events_for_snapshot, pet_snapshot,
+    vet_reminder_interval_for_snapshot, CalendarEvent, PetSnapshot, UserProfile,
 };
 
 const UPCOMING_WINDOW_DAYS: i64 = 45;
@@ -213,12 +212,7 @@ fn event_date(event: &CalendarEvent) -> Option<NaiveDate> {
 }
 
 fn vaccine_label_from_event_title(title: &str) -> String {
-    title
-        .split('—')
-        .next()
-        .unwrap_or(title)
-        .trim()
-        .to_string()
+    title.split('—').next().unwrap_or(title).trim().to_string()
 }
 
 fn next_wellness_due(snapshot: &PetSnapshot, today: NaiveDate) -> Option<NaiveDate> {
@@ -250,7 +244,9 @@ fn push_care_item(
             });
         }
     } else if due <= today + Duration::days(UPCOMING_WINDOW_DAYS)
-        && !upcoming.iter().any(|item: &VetCareItem| item.label == label)
+        && !upcoming
+            .iter()
+            .any(|item: &VetCareItem| item.label == label)
     {
         upcoming.push(VetCareItem {
             label,
@@ -260,7 +256,10 @@ fn push_care_item(
     }
 }
 
-fn collect_vaccine_items(snapshot: &PetSnapshot, today: NaiveDate) -> (Vec<VetCareItem>, Vec<VetCareItem>) {
+fn collect_vaccine_items(
+    snapshot: &PetSnapshot,
+    today: NaiveDate,
+) -> (Vec<VetCareItem>, Vec<VetCareItem>) {
     let mut overdue = Vec::new();
     let mut upcoming = Vec::new();
     let horizon = today + Duration::days(UPCOMING_WINDOW_DAYS);
@@ -285,7 +284,9 @@ fn collect_vaccine_items(snapshot: &PetSnapshot, today: NaiveDate) -> (Vec<VetCa
                 overdue: true,
             });
         } else if date <= horizon
-            && !upcoming.iter().any(|item: &VetCareItem| item.label == label)
+            && !upcoming
+                .iter()
+                .any(|item: &VetCareItem| item.label == label)
         {
             upcoming.push(VetCareItem {
                 label,
@@ -314,13 +315,7 @@ fn push_wellness_item(
         return;
     };
 
-    push_care_item(
-        overdue,
-        upcoming,
-        wellness_exam_label(snapshot),
-        due,
-        today,
-    );
+    push_care_item(overdue, upcoming, wellness_exam_label(snapshot), due, today);
 }
 
 fn push_chronic_care_item(
@@ -337,11 +332,7 @@ fn push_chronic_care_item(
         return;
     }
 
-    let Some(anchor) = snapshot
-        .last_vet_date
-        .as_deref()
-        .and_then(parse_vet_date)
-    else {
+    let Some(anchor) = snapshot.last_vet_date.as_deref().and_then(parse_vet_date) else {
         return;
     };
 
@@ -369,18 +360,8 @@ pub fn analyze_with_followup(
     let visit_summary = visit_summary(snapshot, today);
     let context_tips = collect_context_tips(snapshot);
     let (mut overdue_items, mut upcoming_items) = collect_vaccine_items(snapshot, today);
-    push_wellness_item(
-        &mut overdue_items,
-        &mut upcoming_items,
-        snapshot,
-        today,
-    );
-    push_chronic_care_item(
-        &mut overdue_items,
-        &mut upcoming_items,
-        snapshot,
-        today,
-    );
+    push_wellness_item(&mut overdue_items, &mut upcoming_items, snapshot, today);
+    push_chronic_care_item(&mut overdue_items, &mut upcoming_items, snapshot, today);
 
     if vet_followup_pending {
         push_care_item(
@@ -401,9 +382,9 @@ pub fn analyze_with_followup(
         || !overdue_items.is_empty();
 
     let due_soon = !needs_appointment
-        && upcoming_items.iter().any(|item| {
-            item.due_date <= today + Duration::days(DUE_SOON_WINDOW_DAYS)
-        });
+        && upcoming_items
+            .iter()
+            .any(|item| item.due_date <= today + Duration::days(DUE_SOON_WINDOW_DAYS));
 
     let urgency = if needs_appointment {
         VetCareUrgency::ActionNeeded
@@ -463,10 +444,7 @@ pub fn analyze_with_followup(
         let relative = format_relative_due(today, item.due_date, false);
         (
             format!("Coming up for {pet_name}"),
-            format!(
-                "{} is {relative} — good time to book ahead.",
-                item.label,
-            ),
+            format!("{} is {relative} — good time to book ahead.", item.label,),
         )
     } else if let Some(item) = upcoming_items.first() {
         let relative = format_relative_due(today, item.due_date, false);
@@ -540,7 +518,9 @@ pub fn task_due_label(snapshot: &PetSnapshot, today: NaiveDate) -> String {
         return "Due now · book appointment".to_string();
     }
 
-    if snapshot.never_been_to_vet || snapshot.pet_vaccines_unknown || snapshot.last_vet_date.is_none()
+    if snapshot.never_been_to_vet
+        || snapshot.pet_vaccines_unknown
+        || snapshot.last_vet_date.is_none()
     {
         return "Due now · book appointment".to_string();
     }
@@ -660,12 +640,16 @@ pub fn render_health_plan_card(
             overdue = if overdue_html.is_empty() {
                 String::new()
             } else {
-                format!(r#"<div class="vet-care-plan-group"><h3 class="vet-care-plan-group-title">Due now</h3>{overdue_html}</div>"#)
+                format!(
+                    r#"<div class="vet-care-plan-group"><h3 class="vet-care-plan-group-title">Due now</h3>{overdue_html}</div>"#
+                )
             },
             upcoming = if upcoming_html.is_empty() {
                 String::new()
             } else {
-                format!(r#"<div class="vet-care-plan-group"><h3 class="vet-care-plan-group-title">Coming up</h3>{upcoming_html}</div>"#)
+                format!(
+                    r#"<div class="vet-care-plan-group"><h3 class="vet-care-plan-group-title">Coming up</h3>{upcoming_html}</div>"#
+                )
             },
         )
     };
@@ -758,10 +742,7 @@ mod tests {
         snapshot.pet_indoor_outdoor = Some("outdoor".to_string());
         let today = NaiveDate::from_ymd_opt(2026, 6, 1).expect("date");
         let plan = analyze(&snapshot, today);
-        assert!(plan
-            .context_tips
-            .iter()
-            .any(|tip| tip.contains("FeLV")));
+        assert!(plan.context_tips.iter().any(|tip| tip.contains("FeLV")));
     }
 
     #[test]

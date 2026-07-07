@@ -133,15 +133,13 @@ pub fn collect_public_cat_cards(
         }
     }
 
-    cards.sort_by(|left, right| {
-        match (left.is_viewer, right.is_viewer) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => right
-                .care_streak_days
-                .cmp(&left.care_streak_days)
-                .then(left.pet_name.cmp(&right.pet_name)),
-        }
+    cards.sort_by(|left, right| match (left.is_viewer, right.is_viewer) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => right
+            .care_streak_days
+            .cmp(&left.care_streak_days)
+            .then(left.pet_name.cmp(&right.pet_name)),
     });
     cards.truncate(MAX_CAT_FEED);
     cards

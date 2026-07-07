@@ -93,11 +93,7 @@ pub fn build_location_query(zip: &str, city: &str, state: &str) -> Option<String
     None
 }
 
-pub async fn search_nearby_shelters(
-    zip: &str,
-    city: &str,
-    state: &str,
-) -> ShelterSearchResult {
+pub async fn search_nearby_shelters(zip: &str, city: &str, state: &str) -> ShelterSearchResult {
     let location_label = match build_location_query(zip, city, state) {
         Some(label) => label,
         None => {
@@ -194,13 +190,11 @@ async fn geocode_location(
     let city = city.trim();
     let state = state.trim();
 
-    let mut request = client
-        .get(NOMINATIM_URL)
-        .query(&[
-            ("format", "json"),
-            ("limit", "1"),
-            ("countrycodes", "us"),
-        ]);
+    let mut request = client.get(NOMINATIM_URL).query(&[
+        ("format", "json"),
+        ("limit", "1"),
+        ("countrycodes", "us"),
+    ]);
 
     let owned_query;
     request = if zip.len() == 5 && zip.chars().all(|ch| ch.is_ascii_digit()) {
@@ -353,13 +347,18 @@ async fn fetch_overpass(
 
 fn resolve_shelter_name(tags: &std::collections::HashMap<String, String>) -> Option<String> {
     for key in ["name", "operator", "brand", "official_name"] {
-        if let Some(value) = tags.get(key).map(|value| value.trim()).filter(|value| !value.is_empty())
+        if let Some(value) = tags
+            .get(key)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
         {
             return Some(value.to_string());
         }
     }
 
-    if tags.get("amenity").is_some_and(|value| value == "animal_shelter")
+    if tags
+        .get("amenity")
+        .is_some_and(|value| value == "animal_shelter")
         || tags
             .get("social_facility")
             .is_some_and(|value| value == "animal_shelter")
@@ -393,7 +392,10 @@ fn element_to_raw_shelter(element: OverpassElement) -> Option<RawShelter> {
 }
 
 fn looks_like_shelter(name: &str, tags: &std::collections::HashMap<String, String>) -> bool {
-    if tags.get("amenity").is_some_and(|value| value == "animal_shelter") {
+    if tags
+        .get("amenity")
+        .is_some_and(|value| value == "animal_shelter")
+    {
         return true;
     }
     if tags
@@ -417,7 +419,11 @@ fn looks_like_shelter(name: &str, tags: &std::collections::HashMap<String, Strin
     .any(|needle| lower.contains(needle))
 }
 
-fn normalize_shelters(raw: Vec<RawShelter>, origin_lat: f64, origin_lon: f64) -> Vec<ShelterListing> {
+fn normalize_shelters(
+    raw: Vec<RawShelter>,
+    origin_lat: f64,
+    origin_lon: f64,
+) -> Vec<ShelterListing> {
     let mut seen = std::collections::HashSet::new();
     let mut listings = Vec::new();
 
@@ -466,7 +472,9 @@ fn categorize_shelter(name: &str, tags: &std::collections::HashMap<String, Strin
     if lower.contains("rescue") {
         return "Animal Rescue".to_string();
     }
-    if tags.get("amenity").is_some_and(|value| value == "animal_shelter")
+    if tags
+        .get("amenity")
+        .is_some_and(|value| value == "animal_shelter")
         || tags
             .get("social_facility")
             .is_some_and(|value| value == "animal_shelter")
@@ -555,7 +563,9 @@ mod tests {
         assert!(ways.contains("out center tags"));
 
         let named = overpass_query_named_nodes(37.7749, -122.4194);
-        assert!(named.contains(r#"node["name"~"Humane Society|SPCA|Animal Shelter|Animal Rescue",i]"#));
+        assert!(
+            named.contains(r#"node["name"~"Humane Society|SPCA|Animal Shelter|Animal Rescue",i]"#)
+        );
     }
 
     #[test]
@@ -570,7 +580,10 @@ mod tests {
 
     #[test]
     fn build_location_query_accepts_zip_or_city_state() {
-        assert_eq!(build_location_query("94103", "", ""), Some("94103".to_string()));
+        assert_eq!(
+            build_location_query("94103", "", ""),
+            Some("94103".to_string())
+        );
         assert_eq!(
             build_location_query("", "Austin", "tx"),
             Some("Austin, TX".to_string())

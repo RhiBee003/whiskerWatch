@@ -1,12 +1,12 @@
 use crate::parent_wrapped::WrappedPayload;
 use crate::pet_id_posts::PetIdPostPayload;
 use crate::sharing;
-use crate::user_for_email;
-use crate::{escape_html, escape_html_attr, profile_has_pet, AppState, UserProfile};
+use crate::storage::StorageError;
 use crate::storage::StoredSocialPost;
 use crate::storage::StoredSocialPostComment;
 use crate::storage::StoredSocialPostMedia;
-use crate::storage::{StorageError};
+use crate::user_for_email;
+use crate::{escape_html, escape_html_attr, profile_has_pet, AppState, UserProfile};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_SOCIAL_POSTS: usize = 60;
@@ -308,10 +308,7 @@ pub fn toggle_comment_upvote(
     comment_id: &str,
     created_at: u64,
 ) -> Result<SocialCommentUpvoteResponse, StorageError> {
-    let Some(post_id) = state
-        .storage
-        .get_social_post_id_for_comment(comment_id)?
-    else {
+    let Some(post_id) = state.storage.get_social_post_id_for_comment(comment_id)? else {
         return Err(StorageError::InvalidInput("comment not found".into()));
     };
     let Some(post) = state
@@ -324,9 +321,10 @@ pub fn toggle_comment_upvote(
         return Err(StorageError::InvalidInput("comment not found".into()));
     }
 
-    let summary = state
-        .storage
-        .toggle_social_comment_upvote(comment_id, viewer_email, created_at)?;
+    let summary =
+        state
+            .storage
+            .toggle_social_comment_upvote(comment_id, viewer_email, created_at)?;
     Ok(SocialCommentUpvoteResponse {
         ok: true,
         comment_id: comment_id.to_string(),
@@ -400,10 +398,7 @@ pub fn delete_post_comment(
     comment_id: &str,
     post_id: &str,
 ) -> Result<SocialPostCommentDeleteResponse, StorageError> {
-    let Some(stored_post_id) = state
-        .storage
-        .get_social_post_id_for_comment(comment_id)?
-    else {
+    let Some(stored_post_id) = state.storage.get_social_post_id_for_comment(comment_id)? else {
         return Ok(SocialPostCommentDeleteResponse {
             ok: false,
             comment_id: comment_id.to_string(),
@@ -483,8 +478,7 @@ fn render_social_post_comment_item(
     } else {
         ""
     };
-    let is_mine = viewer_email
-        .is_some_and(|email| comment.user_id.eq_ignore_ascii_case(email));
+    let is_mine = viewer_email.is_some_and(|email| comment.user_id.eq_ignore_ascii_case(email));
     let mine_class = if is_mine { " is-mine" } else { "" };
     let paw = if is_mine {
         render_comment_paw_button()
@@ -1075,7 +1069,10 @@ pub fn render_social_post_card(
     let media_block = if media.is_empty() {
         String::new()
     } else {
-        format!(r#"<div class="social-post-media">{media}</div>"#, media = media)
+        format!(
+            r#"<div class="social-post-media">{media}</div>"#,
+            media = media
+        )
     };
     let friend_action = sharing::render_friend_add_control(state, viewer_email, &post.user_id);
     let block_action = sharing::render_block_control(state, viewer_email, &post.user_id);
@@ -1322,11 +1319,7 @@ pub fn render_parent_profile_page(
         );
     }
 
-    let subject_profile = state
-        .storage
-        .load_profile(&subject_email)
-        .ok()
-        .flatten();
+    let subject_profile = state.storage.load_profile(&subject_email).ok().flatten();
     let display_username = user_for_email(state, &subject_email)
         .map(|user| user.username)
         .unwrap_or_else(|| username.trim().to_string());
@@ -1348,8 +1341,7 @@ pub fn render_parent_profile_page(
         .filter(|value| !value.is_empty())
         .map(str::to_string);
     let is_self = subject_email.eq_ignore_ascii_case(viewer_email);
-    let show_personal =
-        sharing::can_see_personal_pet_details(state, viewer_email, &subject_email);
+    let show_personal = sharing::can_see_personal_pet_details(state, viewer_email, &subject_email);
     let interact_menu = if is_self {
         String::new()
     } else {
