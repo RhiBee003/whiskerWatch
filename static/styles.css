@@ -1151,10 +1151,11 @@ html:has(.homepage) {
 .login-page {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   min-height: calc(100vh - 90px);
   min-height: calc(100dvh - 90px);
   margin-inline: auto;
@@ -1163,8 +1164,10 @@ html:has(.homepage) {
   box-sizing: border-box;
 }
 
+html:has(.login-page),
 body:has(.login-page) {
   overflow-x: clip;
+  max-width: 100%;
 }
 
 .login-page.section {
@@ -1175,6 +1178,7 @@ body:has(.login-page) {
 .login-card {
   width: min(560px, 100%);
   max-width: 100%;
+  min-width: 0;
   margin-inline: auto;
   box-sizing: border-box;
   background: var(--pink-card);
@@ -1664,18 +1668,18 @@ body:has(.login-page) {
   font-family: inherit;
 }
 
-footer {
+footer:not(.homepage-footer) {
   padding: 2.5rem 3rem 3.2rem;
   background: var(--footer);
   color: #fff;
 }
 
-footer .logo-mark {
+footer:not(.homepage-footer) .logo-mark {
   border-color: #fff;
   background: var(--pink-bg);
 }
 
-footer p {
+footer:not(.homepage-footer) p {
   font-size: clamp(1.2rem, 2vw, 2rem);
   max-width: 26ch;
   margin: 0.65rem 0 0;
@@ -7282,6 +7286,26 @@ html:has(.cat-home-body) {
     background-attachment: scroll;
     background-image: none;
     background-color: transparent;
+  }
+
+  .login-page {
+    padding-inline: max(1rem, env(safe-area-inset-left, 0px))
+      max(1rem, env(safe-area-inset-right, 0px));
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: min(560px, 100%);
+    padding-inline: 1rem;
+  }
+
+  .login-card .download-btn,
+  .login-card .login-submit,
+  .login-card .auth-link-btn {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 }
 
