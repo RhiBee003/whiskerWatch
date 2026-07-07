@@ -16,7 +16,7 @@
   --topbar-bg: rgba(var(--bg-rgb), 0.94);
   --topbar-solid: #fac8dd;
   --topbar-border: rgba(80, 40, 60, 0.12);
-  --dashboard-bg-color: #fce4ec;
+  --dashboard-bg-color: var(--pink-card);
   --default-profile-photo-bg: #fce4ec;
   --dashboard-bg-image:
     radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.62) 0%, transparent 45%),
@@ -1041,20 +1041,23 @@ html:has(.homepage) {
 
 .homepage-footer {
   flex: 1 1 auto;
-  margin-top: auto;
+  margin-top: 2.5rem;
   padding: 2rem max(var(--page-gutter), env(safe-area-inset-right, 0px))
     max(2.5rem, env(safe-area-inset-bottom, 0px))
     max(var(--page-gutter), env(safe-area-inset-left, 0px));
-  background: #3a3538;
-  color: #fff;
+  background: transparent;
+  color: var(--ink);
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  border-top: 1px solid rgba(var(--accent-rgb), 0.2);
+  text-align: center;
 }
 
 .homepage-footer-brand {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.55rem;
   margin-bottom: 0.5rem;
 }
@@ -1062,39 +1065,42 @@ html:has(.homepage) {
 .homepage-footer .brand-logo {
   height: 1.8rem;
   width: auto;
-  filter: brightness(0) invert(1);
+  filter: none;
   box-shadow: none;
 }
 
 .homepage-footer p {
-  margin: 0.35rem 0 0;
-  max-width: none;
-  font-size: 1.05rem;
-  line-height: 1.45;
+  margin: 0.35rem auto 0;
+  max-width: 36rem;
+  font-size: 0.98rem;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 .homepage-footer strong {
-  color: var(--pink-bg);
+  color: var(--pink-dark);
 }
 
 .homepage-footer-links {
   margin-top: 1rem !important;
-  font-size: 0.95rem !important;
+  font-size: 0.92rem !important;
 }
 
 .homepage-footer-links a {
-  color: #fff;
+  color: var(--pink-dark);
   font-weight: 700;
   text-decoration: none;
 }
 
 .homepage-footer-links a:hover {
   text-decoration: underline;
+  color: var(--pink-accent);
 }
 
 .homepage-footer-links span {
   margin: 0 0.5rem;
-  opacity: 0.6;
+  color: var(--ink-faint);
+  opacity: 1;
 }
 
 .feature-strip {
@@ -1143,15 +1149,34 @@ html:has(.homepage) {
 }
 
 .login-page {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 100%;
   min-height: calc(100vh - 90px);
   min-height: calc(100dvh - 90px);
-  padding: 2.5rem 0 3.5rem;
+  margin-inline: auto;
+  padding: 2.5rem max(var(--page-gutter), env(safe-area-inset-right, 0px)) 3.5rem
+    max(var(--page-gutter), env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+}
+
+body:has(.login-page) {
+  overflow-x: clip;
+}
+
+.login-page.section {
+  width: 100%;
+  max-width: 100%;
 }
 
 .login-card {
-  width: min(560px, 95vw);
+  width: min(560px, 100%);
+  max-width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
   background: var(--pink-card);
   border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 20px;
@@ -1714,6 +1739,7 @@ footer p {
 }
 
 .dashboard-greeting-link {
+  display: inline;
   color: inherit;
   text-decoration: underline;
   text-decoration-color: rgba(42, 31, 40, 0.35);
@@ -7147,7 +7173,10 @@ html:has(.cat-home-body) {
   .topbar:not(.homepage-topbar) {
     flex-direction: column;
     gap: 0.8rem;
-    padding: 1rem 1.2rem;
+    padding-top: calc(1rem + env(safe-area-inset-top, 0px));
+    padding-right: max(1.2rem, env(safe-area-inset-right, 0px));
+    padding-bottom: 1rem;
+    padding-left: max(1.2rem, env(safe-area-inset-left, 0px));
   }
 
   .homepage-topbar {
@@ -7240,6 +7269,19 @@ html:has(.cat-home-body) {
   .home-download-arrow {
     width: 14px;
     height: 14px;
+  }
+
+  html:has(.dashboard-body) {
+    background-attachment: scroll;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-color: var(--pink-card);
+  }
+
+  .dashboard-body {
+    background-attachment: scroll;
+    background-image: none;
+    background-color: transparent;
   }
 }
 
@@ -8125,6 +8167,17 @@ body.modal-open:has(
   font-size: clamp(1.6rem, 3vw, 2.2rem);
 }
 
+.breed-select-shell.public-breed-index-main,
+.breed-guide-shell.public-breed-main {
+  padding-top: max(2rem, calc(1.25rem + env(safe-area-inset-top, 0px)));
+  padding-bottom: max(4rem, calc(2.5rem + env(safe-area-inset-bottom, 0px)));
+}
+
+.breed-select-shell.public-breed-index-main > h1 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+
 .breed-catalog {
   display: grid;
   gap: 1.5rem;
@@ -8666,14 +8719,21 @@ body.modal-open:has(
 
 .public-breed-page-body {
   background: linear-gradient(180deg, var(--surface-sheet) 0%, #ffffff 40%);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .public-breed-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgba(255, 247, 251, 0.95);
-  backdrop-filter: blur(8px);
+  background: var(--topbar-solid);
+  backdrop-filter: none;
+  border-bottom: 2px solid var(--topbar-border);
+  box-shadow: var(--shadow-bar);
+  padding-top: calc(1.1rem + env(safe-area-inset-top, 0px));
+  padding-right: max(var(--page-gutter), env(safe-area-inset-right, 0px));
+  padding-bottom: 1.1rem;
+  padding-left: max(var(--page-gutter), env(safe-area-inset-left, 0px));
 }
 
 .public-breed-breadcrumbs {
@@ -8698,10 +8758,15 @@ body.modal-open:has(
 
 .public-breed-cta {
   margin-top: 1.5rem;
-  padding: 1.25rem 1.35rem;
+  padding: 1.25rem 1.35rem 1.5rem;
   border-radius: 16px;
   background: linear-gradient(135deg, rgba(250, 200, 221, 0.45), rgba(255, 247, 251, 0.95));
   border: 1px solid #f2d9e4;
+}
+
+.public-breed-cta p:last-child,
+.public-breed-cta .public-breed-signup-btn:last-child {
+  margin-bottom: 0;
 }
 
 .public-breed-cta h2 {
@@ -8712,11 +8777,12 @@ body.modal-open:has(
 
 .public-breed-index-cta {
   margin-top: 2rem;
+  margin-bottom: 0.5rem;
 }
 
 .public-breed-signup-btn {
   display: inline-block;
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 .public-breed-related {
@@ -8847,7 +8913,13 @@ body.modal-open:has(
 
 .breed-guide-back-wrap {
   margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
   text-align: center;
+}
+
+.public-breed-main .breed-guide-paywall,
+.public-breed-main .public-breed-related {
+  margin-bottom: 0.25rem;
 }
 
 .breed-guide-back-btn {
