@@ -92,6 +92,7 @@ fn render_scheme_swatches(current: &str) -> String {
 }
 
 pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
+    const STYLES_VERSION: &str = "20260708d";
     let scheme = color_scheme
         .map(normalize_color_scheme)
         .unwrap_or(DEFAULT_COLOR_SCHEME);
@@ -99,27 +100,55 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
         "<html lang=\"en\">",
         &format!(r#"<html lang="en" data-color-scheme="{scheme}">"#),
     );
-    if out.contains("appearance-init.js") {
-        return out;
+    if !out.contains("viewport-fit=cover") {
+        out = out.replace(
+            "width=device-width, initial-scale=1\"",
+            "width=device-width, initial-scale=1, viewport-fit=cover\"",
+        );
     }
-
-    out = out.replace(
-        "<link rel=\"stylesheet\" href=\"/styles.css",
-        r#"<script src="/appearance-init.js?v=20260708a"></script>
-    <link rel="stylesheet" href="/styles.css"#,
-    );
-
-    if let Some(styles_idx) = out.find("/styles.css") {
-        if let Some(line_end) = out[styles_idx..].find("/>") {
-            let insert_at = styles_idx + line_end + 2;
+    if !out.contains("appearance-init.js") {
+        if let Some(idx) = out.find(r#"<link rel="stylesheet" href="/styles.css"#) {
             out.insert_str(
-                insert_at,
-                r#"
-    <link rel="stylesheet" href="/themes.css?v=20260625f" />"#,
+                idx,
+                r#"<script src="/appearance-init.js?v=20260708a"></script>
+    "#,
             );
+        }
+
+        if let Some(styles_idx) = out.find("/styles.css") {
+            if let Some(line_end) = out[styles_idx..].find("/>") {
+                let insert_at = styles_idx + line_end + 2;
+                if !out.contains("/themes.css") {
+                    out.insert_str(
+                        insert_at,
+                        r#"
+    <link rel="stylesheet" href="/themes.css?v=20260625f" />"#,
+                    );
+                }
+            }
         }
     }
 
+    version_public_stylesheet(&out, STYLES_VERSION)
+}
+
+fn version_public_stylesheet(html: &str, version: &str) -> String {
+    let mut out = String::with_capacity(html.len() + 32);
+    let needle = r#"href="/styles.css"#;
+    let mut cursor = 0;
+    while let Some(rel) = html[cursor..].find(needle) {
+        let idx = cursor + rel;
+        out.push_str(&html[cursor..idx]);
+        out.push_str(&format!(r#"href="/styles.css?v={version}""#));
+        let mut end = idx + needle.len();
+        if html.as_bytes().get(end) == Some(&b'?') {
+            while html.as_bytes().get(end) != Some(&b'"') {
+                end += 1;
+            }
+        }
+        cursor = end;
+    }
+    out.push_str(&html[cursor..]);
     out
 }
 
