@@ -7,8 +7,9 @@
 
   var select = form.querySelector(".appearance-scheme-select");
   var swatches = form.querySelectorAll(".appearance-scheme-swatch");
+  var savedScheme = select ? select.value : null;
 
-  function applyScheme(scheme) {
+  function previewScheme(scheme) {
     if (!scheme) {
       return;
     }
@@ -23,16 +24,22 @@
         swatch.getAttribute("data-scheme") === scheme
       );
     });
-    try {
-      localStorage.setItem(KEY, scheme);
-    } catch (error) {
-      /* ignore */
+  }
+
+  function revertPreview() {
+    if (!savedScheme || !select) {
+      return;
     }
+    if (select.value === savedScheme) {
+      return;
+    }
+    select.value = savedScheme;
+    previewScheme(savedScheme);
   }
 
   if (select) {
     select.addEventListener("change", function () {
-      applyScheme(select.value);
+      previewScheme(select.value);
     });
   }
 
@@ -43,7 +50,27 @@
         return;
       }
       select.value = scheme;
-      applyScheme(scheme);
+      previewScheme(scheme);
+    });
+  });
+
+  form.addEventListener("submit", function () {
+    if (!select) {
+      return;
+    }
+    savedScheme = select.value;
+    try {
+      localStorage.setItem(KEY, savedScheme);
+    } catch (error) {
+      /* ignore */
+    }
+  });
+
+  document.querySelectorAll(".dashboard-tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      if (tab.dataset.tab !== "account") {
+        revertPreview();
+      }
     });
   });
 })();

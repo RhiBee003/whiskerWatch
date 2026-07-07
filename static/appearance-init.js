@@ -54,10 +54,12 @@
   try {
     var stored = localStorage.getItem(KEY);
     var onHtml = document.documentElement.getAttribute("data-color-scheme");
-    var scheme = stored || onHtml || DEFAULT;
+    var scheme = onHtml || stored || DEFAULT;
     apply(scheme);
-    if (!stored && onHtml) {
-      localStorage.setItem(KEY, onHtml);
+    try {
+      localStorage.setItem(KEY, scheme);
+    } catch (error) {
+      /* ignore */
     }
   } catch (error) {
     apply(DEFAULT);

@@ -105,7 +105,7 @@ pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
 
     out = out.replace(
         "<link rel=\"stylesheet\" href=\"/styles.css",
-        r#"<script src="/appearance-init.js?v=20260625f"></script>
+        r#"<script src="/appearance-init.js?v=20260708a"></script>
     <link rel="stylesheet" href="/styles.css"#,
     );
 
