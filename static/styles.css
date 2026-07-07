@@ -271,11 +271,13 @@ body.auth-page {
 }
 
 body.auth-page > .homepage-topbar,
-body.auth-page > .topbar {
+body.auth-page > .topbar,
+.auth-topbar {
   flex: 0 0 auto;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  justify-content: center;
 }
 
 .hero {

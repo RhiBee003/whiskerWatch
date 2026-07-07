@@ -92,7 +92,7 @@ fn render_scheme_swatches(current: &str) -> String {
 }
 
 pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
-    const STYLES_VERSION: &str = "20260708d";
+    const STYLES_VERSION: &str = "20260708e";
     let scheme = color_scheme
         .map(normalize_color_scheme)
         .unwrap_or(DEFAULT_COLOR_SCHEME);
