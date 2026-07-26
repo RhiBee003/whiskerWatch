@@ -1130,6 +1130,67 @@ html:has(.homepage) {
   opacity: 1;
 }
 
+.homepage-footer-soon {
+  color: var(--pink-dark) !important;
+  font-weight: 700;
+  opacity: 1 !important;
+  margin: 0 !important;
+}
+
+.home-sister-project {
+  margin: 0;
+  padding-top: clamp(2.5rem, 6vw, 3.5rem);
+  padding-bottom: clamp(2.5rem, 6vw, 3.5rem);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.2);
+  text-align: left;
+}
+
+.home-sister-eyebrow {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pink-dark);
+}
+
+.home-sister-title {
+  margin: 0 0 0.55rem;
+  font-size: clamp(1.55rem, 3.5vw, 2.15rem);
+  color: var(--ink);
+}
+
+.home-sister-copy {
+  margin: 0;
+  max-width: 38rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.home-sister-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin: 1rem 0 0;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.home-sister-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.22);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  color: var(--pink-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .feature-strip {
   margin-top: 2.5rem;
 }
