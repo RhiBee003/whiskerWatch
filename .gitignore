@@ -3,3 +3,9 @@
 *.db
 *.db-*
 node_modules/
+
+# Investor / pitch materials — keep local only
+*Pitch*.docx
+*Pitch*.pdf
+*investor*
+*INVESTOR*
