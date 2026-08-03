@@ -17,8 +17,8 @@ self.addEventListener("push", (event) => {
   const options = {
     body: payload.body,
     tag: payload.tag || "whiskerwatch-reminder",
-    icon: "/images/notif-cat.png",
-    badge: "/images/notif-paw.png",
+    icon: "/images/notif-health.png",
+    badge: "/images/paw-points-icon.png",
     data: { url: payload.url || "/home?tab=tasks" },
     requireInteraction: false,
   };

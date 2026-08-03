@@ -62,6 +62,18 @@ const LOGIN_PREFILL_COOKIE: &str = "ww_login_prefill";
 const LOGIN_PREFILL_MAX_AGE_SECS: i64 = 120;
 const AUTH_SESSION_MAX_AGE_SECS: i64 = 30 * 24 * 3600;
 
+fn template_path(name: &str) -> PathBuf {
+    storage::path_in_project(format!("templates/{name}"))
+}
+
+async fn read_template(name: &str) -> std::io::Result<String> {
+    fs::read_to_string(template_path(name)).await
+}
+
+fn read_template_sync(name: &str) -> std::io::Result<String> {
+    std::fs::read_to_string(template_path(name))
+}
+
 #[derive(Clone)]
 struct AppState {
     storage: Storage,
@@ -84,7 +96,6 @@ struct LoginQuery {
 #[derive(Serialize, Deserialize)]
 struct LoginPrefillPayload {
     email: String,
-    password: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -1976,10 +1987,9 @@ fn encode_component(value: &str) -> String {
         .collect()
 }
 
-fn encode_login_prefill_cookie_value(email: &str, password: &str) -> String {
+fn encode_login_prefill_cookie_value(email: &str) -> String {
     let payload = LoginPrefillPayload {
         email: email.to_string(),
-        password: password.to_string(),
     };
     urlencoding::encode(
         &serde_json::to_string(&payload).expect("login prefill json should serialize"),
@@ -1992,10 +2002,10 @@ fn decode_login_prefill_cookie_value(value: &str) -> Option<LoginPrefillPayload>
     serde_json::from_str(&decoded).ok()
 }
 
-fn set_login_prefill_cookie(jar: CookieJar, email: &str, password: &str) -> CookieJar {
+fn set_login_prefill_cookie(jar: CookieJar, email: &str) -> CookieJar {
     let mut cookie = Cookie::new(
         LOGIN_PREFILL_COOKIE,
-        encode_login_prefill_cookie_value(email, password),
+        encode_login_prefill_cookie_value(email),
     );
     cookie.set_http_only(true);
     cookie.set_path("/");
@@ -2013,8 +2023,8 @@ fn take_login_prefill(jar: CookieJar) -> (CookieJar, Option<LoginPrefillPayload>
     (jar, payload)
 }
 
-fn redirect_to_login_existing_account(jar: CookieJar, email: &str, password: &str) -> Response {
-    let jar = set_login_prefill_cookie(jar, email, password);
+fn redirect_to_login_existing_account(jar: CookieJar, email: &str) -> Response {
+    let jar = set_login_prefill_cookie(jar, email);
     (jar, Redirect::to("/login?exists=1")).into_response()
 }
 
@@ -9276,7 +9286,7 @@ async fn breed_guide_page(
         stripe_payments::stripe_checkout_enabled(),
     );
 
-    match fs::read_to_string("templates/breed-guide.html").await {
+    match read_template("breed-guide.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -9329,7 +9339,7 @@ async fn breed_guides_shop_page(
         stripe_payments::stripe_checkout_enabled(),
     );
 
-    match fs::read_to_string("templates/breed-guide.html").await {
+    match read_template("breed-guide.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -9393,7 +9403,7 @@ async fn breed_select_page(
         )
     };
 
-    match fs::read_to_string("templates/breed-select.html").await {
+    match read_template("breed-select.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -11170,7 +11180,7 @@ async fn cat_home_page(
     let (cat_home_title, cat_home_intro, cat_home_play_switcher, cat_home_layout) =
         render_cat_home_layout(&state, &profile);
 
-    match fs::read_to_string("templates/cat-home.html").await {
+    match read_template("cat-home.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -12501,7 +12511,7 @@ async fn calendar_event_form_page(
     let date_label = calendar_date_heading(day, month, year);
     let back_url = format!("/home?tab=calendar&cal_day={day}&cal_month={month}&cal_year={year}");
 
-    match fs::read_to_string("templates/calendar-event-form.html").await {
+    match read_template("calendar-event-form.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -12878,7 +12888,7 @@ async fn paw_points_needed_page(
         .unwrap_or_else(|| "Parent".to_string());
     let points_needed = item.price.saturating_sub(profile.paw_points);
 
-    match fs::read_to_string("templates/need-paw-points.html").await {
+    match read_template("need-paw-points.html").await {
         Ok(template) => {
             let html = replace_admin_nav_link(
                 &template
@@ -12983,11 +12993,11 @@ async fn login_page(
         return Redirect::to("/home").into_response();
     }
 
-    match fs::read_to_string("templates/login.html").await {
+    match read_template("login.html").await {
         Ok(contents) => {
             let login_error_block = match query.error.as_deref() {
                 Some("admin_invalid") => {
-                    r#"<p class="auth-error status-flash" role="alert">Incorrect password for the admin account. Use the <code>ADMIN_PASSWORD</code> from your server environment (Render → Environment tab in production). Locally, the default is <code>WhiskerAdmin2026!</code> unless you set <code>ADMIN_PASSWORD</code>.</p>"#
+                    r#"<p class="auth-error status-flash" role="alert">Incorrect password for the admin account. Check the <code>ADMIN_PASSWORD</code> environment variable on the server (Render → Environment).</p>"#
                 }
                 Some("invalid") => {
                     r#"<p class="auth-error status-flash" role="alert">Incorrect password. Please try again.</p>"#
@@ -13013,9 +13023,7 @@ async fn login_page(
                 _ => "",
             };
             let (jar, prefill) = take_login_prefill(jar);
-            let (prefill_email, prefill_password) = prefill
-                .map(|payload| (payload.email, payload.password))
-                .unwrap_or_default();
+            let prefill_email = prefill.map(|payload| payload.email).unwrap_or_default();
             let account_exists_block = if query.exists.as_deref() == Some("1")
                 || !prefill_email.is_empty()
             {
@@ -13029,7 +13037,7 @@ async fn login_page(
                 .replace("{{RESET_SUCCESS_BLOCK}}", reset_success_block)
                 .replace("{{ACCOUNT_EXISTS_BLOCK}}", account_exists_block)
                 .replace("{{LOGIN_EMAIL}}", &escape_html_attr(&prefill_email))
-                .replace("{{LOGIN_PASSWORD}}", &escape_html_attr(&prefill_password));
+                .replace("{{LOGIN_PASSWORD}}", "");
             (jar, page_html(body, None)).into_response()
         }
         Err(_) => (
@@ -13049,7 +13057,7 @@ async fn forgot_password_page(
         return Redirect::to("/home").into_response();
     }
 
-    match fs::read_to_string("templates/forgot-password.html").await {
+    match read_template("forgot-password.html").await {
         Ok(contents) => {
             let forgot_error_block = match query.error.as_deref() {
                 Some("missing") => {
@@ -13081,7 +13089,7 @@ async fn forgot_password_page(
 }
 
 fn render_forgot_password_sent(dev_reset_link_block: &str) -> Response {
-    match std::fs::read_to_string("templates/forgot-password.html") {
+    match read_template_sync("forgot-password.html") {
         Ok(contents) => {
             let body = contents
                 .replace("{{FORGOT_ERROR_BLOCK}}", "")
@@ -13119,10 +13127,43 @@ async fn forgot_password_submit(
                 eprintln!("Password reset link for {email}: {reset_url}");
 
                 if smtp_configured() {
-                    // Email delivery would be wired here when SMTP is configured.
-                    eprintln!(
-                        "SMTP is configured but password reset email delivery is not implemented yet."
+                    let subject = "Reset your WhiskerWatch password";
+                    let html_body = format!(
+                        r#"<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background:#fff7fb;font-family:Georgia,'Times New Roman',serif;color:#3d2a36;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fff7fb;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:18px;padding:28px 24px;border:1px solid #f2d9e4;">
+            <tr><td style="font-size:28px;line-height:1.2;color:#c45c8a;padding-bottom:8px;">WhiskerWatch</td></tr>
+            <tr><td style="font-size:20px;line-height:1.35;color:#3d2a36;padding-bottom:12px;">Password reset</td></tr>
+            <tr><td style="font-size:16px;line-height:1.6;color:#5a4550;padding-bottom:20px;">We received a request to reset your password. This link expires in one hour.</td></tr>
+            <tr><td>
+              <a href="{reset_url}" style="display:inline-block;background:#e8899e;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:999px;font-size:16px;font-weight:bold;">Reset password</a>
+            </td></tr>
+            <tr><td style="font-size:13px;line-height:1.5;color:#8a7480;padding-top:24px;">If you did not ask for this, you can ignore this email.</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"#,
+                        reset_url = reset_url,
                     );
+                    let text_body = format!(
+                        "Reset your WhiskerWatch password (valid 1 hour):\n\n{reset_url}\n\nIf you did not ask for this, ignore this email.\n\n— WhiskerWatch"
+                    );
+                    let outbound = email_delivery::OutboundEmail {
+                        to: email.to_string(),
+                        subject: subject.to_string(),
+                        html_body,
+                        text_body,
+                    };
+                    if let Err(error) = email_delivery::send_email(&outbound).await {
+                        eprintln!("password reset email failed for {email}: {error}");
+                        return Redirect::to("/forgot-password?error=failed").into_response();
+                    }
                 }
 
                 if show_dev_reset_links() {
@@ -13170,7 +13211,7 @@ async fn reset_password_page(
         return Redirect::to("/forgot-password?error=failed").into_response();
     }
 
-    match fs::read_to_string("templates/reset-password.html").await {
+    match read_template("reset-password.html").await {
         Ok(contents) => {
             let reset_error_block = match query.error.as_deref() {
                 Some("missing") => {
@@ -13255,7 +13296,7 @@ async fn signup_page(
         return Redirect::to("/home").into_response();
     }
 
-    match fs::read_to_string("templates/signup.html").await {
+    match read_template("signup.html").await {
         Ok(contents) => {
             let signup_error_block = match query.error.as_deref() {
                 Some("missing") => {
@@ -13308,7 +13349,7 @@ async fn contact_page(
     jar: CookieJar,
     Query(query): Query<ContactQuery>,
 ) -> impl IntoResponse {
-    match fs::read_to_string("templates/contact.html").await {
+    match read_template("contact.html").await {
         Ok(contents) => {
             let (form_name, form_email) = form_prefill(&state, &jar).await;
             let contact_success_block = match query.status.as_deref() {
@@ -13349,7 +13390,7 @@ async fn feedback_page(
     jar: CookieJar,
     Query(query): Query<FeedbackQuery>,
 ) -> impl IntoResponse {
-    match fs::read_to_string("templates/feedback.html").await {
+    match read_template("feedback.html").await {
         Ok(contents) => {
             let (form_name, form_email) = form_prefill(&state, &jar).await;
             let feedback_success_block = match query.status.as_deref() {
@@ -13572,12 +13613,12 @@ async fn signup_submit(
     }
 
     if email_exists(&state, email) {
-        return redirect_to_login_existing_account(jar, email, password);
+        return redirect_to_login_existing_account(jar, email);
     }
 
     if state.storage.username_exists(username).unwrap_or(false) {
         if email_exists(&state, email) {
-            return redirect_to_login_existing_account(jar, email, password);
+            return redirect_to_login_existing_account(jar, email);
         }
         return Redirect::to("/signup?error=username").into_response();
     }
@@ -13602,11 +13643,11 @@ async fn signup_submit(
             signed_in_redirect(&state, jar, email)
         }
         Err(storage::StorageError::EmailTaken) => {
-            redirect_to_login_existing_account(jar, email, password)
+            redirect_to_login_existing_account(jar, email)
         }
         Err(storage::StorageError::UsernameTaken) => {
             if email_exists(&state, email) {
-                redirect_to_login_existing_account(jar, email, password)
+                redirect_to_login_existing_account(jar, email)
             } else {
                 Redirect::to("/signup?error=username").into_response()
             }
@@ -15839,10 +15880,9 @@ mod tests {
 
     #[test]
     fn login_prefill_cookie_round_trips_special_characters() {
-        let encoded = encode_login_prefill_cookie_value("user+tag@example.com", "p@ss \"word'&<>");
+        let encoded = encode_login_prefill_cookie_value("user+tag@example.com");
         let payload = decode_login_prefill_cookie_value(&encoded).expect("decode prefill");
         assert_eq!(payload.email, "user+tag@example.com");
-        assert_eq!(payload.password, "p@ss \"word'&<>");
     }
 
     #[test]

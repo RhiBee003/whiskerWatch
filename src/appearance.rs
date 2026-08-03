@@ -92,7 +92,7 @@ fn render_scheme_swatches(current: &str) -> String {
 }
 
 pub fn enhance_html_document(html: &str, color_scheme: Option<&str>) -> String {
-    const STYLES_VERSION: &str = "20260708f";
+    const STYLES_VERSION: &str = "20260803b";
     let scheme = color_scheme
         .map(normalize_color_scheme)
         .unwrap_or(DEFAULT_COLOR_SCHEME);
@@ -141,10 +141,14 @@ fn version_public_stylesheet(html: &str, version: &str) -> String {
         out.push_str(&html[cursor..idx]);
         out.push_str(&format!(r#"href="/styles.css?v={version}""#));
         let mut end = idx + needle.len();
+        // Skip an existing ?v=… query string, then the closing quote (replacement already includes one).
         if html.as_bytes().get(end) == Some(&b'?') {
-            while html.as_bytes().get(end) != Some(&b'"') {
+            while html.as_bytes().get(end).is_some_and(|b| *b != b'"') {
                 end += 1;
             }
+        }
+        if html.as_bytes().get(end) == Some(&b'"') {
+            end += 1;
         }
         cursor = end;
     }
@@ -190,5 +194,19 @@ mod tests {
         assert!(html.contains(r#"data-color-scheme="blue""#));
         assert!(html.contains("appearance-init.js"));
         assert!(html.contains("/themes.css"));
+        assert!(html.contains(r#"href="/styles.css?v=20260803b""#));
+        assert!(!html.contains(r#"href="/styles.css?v=20260803b"""#));
+    }
+
+    #[test]
+    fn version_public_stylesheet_replaces_existing_query_cleanly() {
+        let html = version_public_stylesheet(
+            r#"<link rel="stylesheet" href="/styles.css?v=old" />"#,
+            "20260803b",
+        );
+        assert_eq!(
+            html,
+            r#"<link rel="stylesheet" href="/styles.css?v=20260803b" />"#
+        );
     }
 }
